@@ -13,7 +13,7 @@ app = Flask(__name__)
 # 1. ดึง Gemini API Key จาก Environment Variable บน Render
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-3.5-flash-lite')
 
 # 2. ดึงข้อมูล Google Sheets Credentials (JSON) จาก Environment Variable บน Render
 google_creds_json = os.environ.get("GOOGLE_CREDS_JSON")
