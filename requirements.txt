@@ -1,0 +1,7 @@
+Flask
+gspread
+google-auth
+google-generativeai
+Pillow
+requests
+gunicorn
