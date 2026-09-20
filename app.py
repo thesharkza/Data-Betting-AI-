@@ -45,7 +45,7 @@ HTML_TEMPLATE = """
 <body>
     <div class="container">
         <h2>⚽ อัปโหลดตารางราคาบอล</h2>
-        <p>ให้ AI สกัดข้อมูล 12 คอลัมน์ และบันทึกลง Google Sheets อัตโนมัติ</p>
+        <p>ให้ AI สกัดข้อมูลและบันทึกลง Google Sheets แบบตัวเลขแท้ๆ (ไม่ติดเครื่องหมาย ')</p>
         
         <form action="/" method="POST" enctype="multipart/form-data">
             <input type="file" name="file" accept="image/*" required>
@@ -72,7 +72,6 @@ HTML_TEMPLATE = """
 @app.route('/', methods=['GET', 'POST'])
 def upload_page():
     if request.method == 'POST':
-        # ตรวจสอบว่ามีไฟล์แนบมาหรือไม่
         if 'file' not in request.files:
             return render_template_string(HTML_TEMPLATE, error="ไม่พบไฟล์รูปภาพที่อัปโหลด")
         
@@ -92,14 +91,31 @@ def upload_page():
             response = model.generate_content([img, prompt])
             raw_text = response.text.strip()
             
-            # ตัดแบ่งข้อมูลด้วยลูกน้ำ (,) เพื่อเตรียมลงตาราง
-            row_data = [item.strip() for item in raw_text.split(',')]
+            # ตัดแบ่งข้อมูลด้วยลูกน้ำ (,)
+            raw_data = [item.strip() for item in raw_text.split(',')]
+            
+            # แปลงข้อมูลตัวเลขให้อัตโนมัติ ป้องกันปัญหาเครื่องหมาย ' นำหน้า
+            row_data = []
+            for i, item in enumerate(raw_data):
+                if i < 2:
+                    # 2 คอลัมน์แรก (ชื่อทีมเหย้า, ชื่อทีมเยือน) เก็บเป็นข้อความปกติ
+                    row_data.append(item)
+                else:
+                    # คอลัมน์ที่เหลือ พยายามแปลงเป็นตัวเลข (int หรือ float) เพื่อให้ชีทมองเป็นตัวเลขแท้ๆ
+                    try:
+                        if '.' in item:
+                            row_data.append(float(item))
+                        else:
+                            row_data.append(int(item))
+                    except ValueError:
+                        # ถ้าแปลงไม่ได้ (มีตัวอักษรปน) ให้เก็บเป็นข้อความตามเดิม
+                        row_data.append(item)
             
             # บันทึกลง Google Sheets ทันที
             sheet.append_row(row_data)
             
             # ส่งผลลัพธ์กลับไปโชว์ที่หน้าเว็บ
-            return render_template_string(HTML_TEMPLATE, result=" | ".join(row_data))
+            return render_template_string(HTML_TEMPLATE, result=" | ".join([str(x) for x in row_data]))
         
         except Exception as e:
             return render_template_string(HTML_TEMPLATE, error=str(e))
@@ -107,7 +123,7 @@ def upload_page():
     # ถ้าเข้าเว็บมาครั้งแรก (GET) ให้โชว์หน้าอัปโหลดปกติ
     return render_template_string(HTML_TEMPLATE)
 
-# (เก็บเผื่อไว้) Route สำหรับรับ Webhook แบบเดิม เผื่ออนาคตใช้โปรแกรมอื่นยิงข้อมูลเข้ามา
+# Route สำหรับรับ Webhook แบบเดิม
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
@@ -122,7 +138,20 @@ def webhook():
         
         response = model.generate_content([img, prompt])
         raw_text = response.text.strip()
-        row_data = [item.strip() for item in raw_text.split(',')]
+        raw_data = [item.strip() for item in raw_text.split(',')]
+        
+        row_data = []
+        for i, item in enumerate(raw_data):
+            if i < 2:
+                row_data.append(item)
+            else:
+                try:
+                    if '.' in item:
+                        row_data.append(float(item))
+                    else:
+                        row_data.append(int(item))
+                except ValueError:
+                    row_data.append(item)
         
         sheet.append_row(row_data)
         return jsonify({"status": "success", "data": row_data}), 200
