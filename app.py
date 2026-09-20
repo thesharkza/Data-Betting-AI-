@@ -14,29 +14,19 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-3.5-flash-lite')
 
-# 2. ดึงค่าอีเมลและ Private Key แยกเดี่ยวๆ เพื่อความเสถียรสูงสุด
-GOOGLE_CLIENT_EMAIL = os.environ.get("GOOGLE_CLIENT_EMAIL")
-GOOGLE_PRIVATE_KEY = os.environ.get("GOOGLE_PRIVATE_KEY")
+# 2. อ่านไฟล์ Credentials จาก Secret File ของ Render
+# ตำแหน่งไฟล์ลับบน Render คือ /etc/secrets/credentials.json
+creds_path = '/etc/secrets/credentials.json'
 
-# แปลงอักขระ \n ให้กลับมาเป็นบรรทัดใหม่ตามโครงสร้างกุญแจจริง
-if GOOGLE_PRIVATE_KEY:
-    GOOGLE_PRIVATE_KEY = GOOGLE_PRIVATE_KEY.replace("\\n", "\n")
-
-# ประกอบร่าง JSON สำหรับเชื่อมต่อ Google Sheets ภายในโค้ดอัตโนมัติ
-creds_info = {
-    "type": "service_account",
-    "project_id": "regal-subject-505512-p8",
-    "private_key_id": "6730415fcadb3916a0d677bb634a2d256be1219f",
-    "private_key": GOOGLE_PRIVATE_KEY,
-    "client_email": GOOGLE_CLIENT_EMAIL,
-    "token_uri": "https://oauth2.googleapis.com/token",
-}
+# ป้องกันกรณีรันทดสอบในคอมตัวเอง (ถ้าไม่พบใน Render ให้ใช้ไฟล์ในโฟลเดอร์เดียวกัน)
+if not os.path.exists(creds_path):
+    creds_path = 'credentials.json'
 
 scope = ["https://www.spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = Credentials.from_service_account_info(creds_info, scopes=scope)
+creds = Credentials.from_service_account_file(creds_path, scopes=scope)
 client = gspread.authorize(creds)
 
-# เปิดไฟล์ Google Sheets (ระบุชื่อไฟล์ชีทของคุณตรงนี้)
+# เปิดไฟล์ Google Sheets
 sheet = client.open("ข้อมูลราคาบอลสกัดจากภาพ").sheet1
 
 @app.route('/webhook', methods=['POST'])
