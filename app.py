@@ -15,12 +15,16 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-3.5-flash-lite')
 
-# 2. ดึงข้อมูล Google Sheets Credentials (JSON) จาก Environment Variable บน Render
+# 2. ดึงข้อมูล Google Sheets Credentials (JSON) จาก Environment Variable
 google_creds_json = os.environ.get("GOOGLE_CREDS_JSON")
-creds_dict = json.loads(google_creds_json)
+creds_data = json.loads(google_creds_json)
+
+# จัดการแปลงอักขระ \n ใน private_key ป้องกันปัญหา Invalid JWT Signature บน Cloud
+if "private_key" in creds_data:
+    creds_data["private_key"] = creds_data["private_key"].replace("\\n", "\n")
 
 scope = ["https://www.spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+creds = Credentials.from_service_account_info(creds_data, scopes=scope)
 client = gspread.authorize(creds)
 
 # เปิดไฟล์ Google Sheets (ระบุชื่อไฟล์ชีทของคุณตรงนี้)
