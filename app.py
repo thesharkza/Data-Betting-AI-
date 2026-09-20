@@ -24,7 +24,7 @@ creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
 client = gspread.authorize(creds)
 
 # เปิดไฟล์ Google Sheets (ระบุชื่อไฟล์ชีทของคุณตรงนี้)
-sheet = client.open("ชื่อไฟล์_Google_Sheets_ของคุณ").sheet1
+sheet = client.open("ข้อมูลราคาบอลสกัดจากภาพ").sheet1
 
 @app.route('/webhook', methods=['POST'])
 def receive_image():
