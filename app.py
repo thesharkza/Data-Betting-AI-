@@ -9,8 +9,8 @@ import io
 app = Flask(__name__)
 
 # ตั้งค่า API Key ของ Gemini
-genai.configure(api_key="ใส่_GEMINI_API_KEY_ของคุณที่นี่")
-model = genai.GenerativeModel('gemini-1.5-flash')
+genai.configure(api_key="AQ.Ab8RN6KJXET23lF4rk5OXEGsWFPTCkoPzGSN7CcG6hIrbj6cRA")
+model = genai.GenerativeModel('gemini-3.5-flash-lite')
 
 # ตั้งค่าการเชื่อมต่อ Google Sheets โดยอ้างอิงจากไฟล์ credentials.json
 scope = ["https://www.spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
