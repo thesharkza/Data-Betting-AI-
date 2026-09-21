@@ -55,7 +55,7 @@ HTML_TEMPLATE = """
         .metric h3 { margin: 0; font-size: 32px; color: #2c3e50; }
         .metric p { margin: 5px 0 0 0; color: #7f8c8d; font-size: 14px; }
         .charts-row { display: flex; gap: 20px; flex-wrap: wrap; }
-        .chart-col { flex: 1; min-width: 300px; background: white; border: 1px solid #e9ecef; border-radius: 8px; padding: 15px; }
+        .chart-col { flex: 1; min-width: 300px; min-height: 400px; background: white; border: 1px solid #e9ecef; border-radius: 8px; padding: 15px; }
     </style>
 </head>
 <body>
@@ -161,13 +161,17 @@ def dashboard_page():
 
         # สร้างกราฟ Pie
         pie_fig = px.pie(df_comp, names='ผลเปรียบเทียบ', color='ผลเปรียบเทียบ', 
-                         color_discrete_map={'ชนะ': '#2ecc71', 'แพ้': '#e74c3c', 'เจ๊า': '#95a5a6'}, hole=0.4)
+                         color_discrete_map={'ชนะ': '#2ecc71', 'แพ้': '#e74c3c', 'เจ๊า': '#95a5a6'}, hole=0.4,
+                         height=350) # <- เพิ่ม height ตรงนี้
+        pie_fig.update_layout(margin=dict(t=20, b=20, l=20, r=20)) # ลดขอบกราฟ
         pie_html = pie_fig.to_html(full_html=False, include_plotlyjs=False)
 
         # สร้างกราฟ Bar
         bar_df = df_comp.groupby(['แนะนำลงทุน', 'ผลเปรียบเทียบ']).size().reset_index(name='จำนวน')
         bar_fig = px.bar(bar_df, x='แนะนำลงทุน', y='จำนวน', color='ผลเปรียบเทียบ', barmode='group',
-                         color_discrete_map={'ชนะ': '#2ecc71', 'แพ้': '#e74c3c', 'เจ๊า': '#95a5a6'})
+                         color_discrete_map={'ชนะ': '#2ecc71', 'แพ้': '#e74c3c', 'เจ๊า': '#95a5a6'},
+                         height=350) # <- เพิ่ม height ตรงนี้
+        bar_fig.update_layout(margin=dict(t=20, b=20, l=20, r=20), xaxis_title="") # ลดขอบกราฟ
         bar_html = bar_fig.to_html(full_html=False, include_plotlyjs=False)
 
         return render_template_string(
