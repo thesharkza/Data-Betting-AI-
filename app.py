@@ -5,6 +5,7 @@ from PIL import Image
 import requests
 import io
 import os
+import re  # เพิ่มไลบรารีสำหรับตัดแต่งข้อความ/ตัวอักษร
 
 app = Flask(__name__)
 
@@ -45,7 +46,7 @@ HTML_TEMPLATE = """
 <body>
     <div class="container">
         <h2>⚽ อัปโหลดตารางราคาบอล</h2>
-        <p>ให้ AI สกัดข้อมูลและบันทึกลง Google Sheets แบบตัวเลขแท้ๆ (ไม่ติดเครื่องหมาย ')</p>
+        <p>ให้ AI สกัดข้อมูลและบันทึกลง Google Sheets แบบตัวเลขแท้ๆ (คลีนตัวอักษร o/u ออกให้อัตโนมัติ)</p>
         
         <form action="/" method="POST" enctype="multipart/form-data">
             <input type="file" name="file" accept="image/*" required>
@@ -84,8 +85,8 @@ def upload_page():
             img_bytes = file.read()
             img = Image.open(io.BytesIO(img_bytes))
             
-            # คำสั่ง Prompt ให้ Gemini สกัดข้อมูล
-            prompt = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ,ค่าน้ำสูง,ค่าน้ำต่ำ โดยคั่นแต่ละค่าด้วยลูกน้ำ (,) เท่านั้น ห้ามมีข้อความอื่น"
+            # คำสั่ง Prompt ปรับให้เน้นย้ำเรื่องโกลสูงต่ำเพิ่มเติม
+            prompt = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ (ระบุเฉพาะตัวเลข ห้ามมีตัวอักษร o หรือ u นำหน้า),ค่าน้ำสูง,ค่าน้ำต่ำ โดยคั่นแต่ละค่าด้วยลูกน้ำ (,) เท่านั้น ห้ามมีข้อความอื่น"
             
             # ส่งให้ Gemini ประมวลผล
             response = model.generate_content([img, prompt])
@@ -94,22 +95,24 @@ def upload_page():
             # ตัดแบ่งข้อมูลด้วยลูกน้ำ (,)
             raw_data = [item.strip() for item in raw_text.split(',')]
             
-            # แปลงข้อมูลตัวเลขให้อัตโนมัติ ป้องกันปัญหาเครื่องหมาย ' นำหน้า
+            # แปลงข้อมูลตัวเลข และตัดตัวอักษร o/u นำหน้าออก
             row_data = []
             for i, item in enumerate(raw_data):
                 if i < 2:
                     # 2 คอลัมน์แรก (ชื่อทีมเหย้า, ชื่อทีมเยือน) เก็บเป็นข้อความปกติ
                     row_data.append(item)
                 else:
-                    # คอลัมน์ที่เหลือ พยายามแปลงเป็นตัวเลข (int หรือ float) เพื่อให้ชีทมองเป็นตัวเลขแท้ๆ
+                    # ตัดตัวอักษร o, O, u, U หรือช่องว่างที่ติดอยู่ด้านหน้าข้อความออก
+                    cleaned_item = re.sub(r'^[oOuU\s]+', '', item)
+                    
                     try:
-                        if '.' in item:
-                            row_data.append(float(item))
+                        if '.' in cleaned_item:
+                            row_data.append(float(cleaned_item))
                         else:
-                            row_data.append(int(item))
+                            row_data.append(int(cleaned_item))
                     except ValueError:
-                        # ถ้าแปลงไม่ได้ (มีตัวอักษรปน) ให้เก็บเป็นข้อความตามเดิม
-                        row_data.append(item)
+                        # กรณีเป็นช่วงราคา เช่น 2.5-3 ให้เก็บบันทึกข้อความที่คลีนตัว o ออกแล้ว
+                        row_data.append(cleaned_item)
             
             # บันทึกลง Google Sheets ทันที
             sheet.append_row(row_data)
@@ -123,7 +126,7 @@ def upload_page():
     # ถ้าเข้าเว็บมาครั้งแรก (GET) ให้โชว์หน้าอัปโหลดปกติ
     return render_template_string(HTML_TEMPLATE)
 
-# Route สำหรับรับ Webhook แบบเดิม
+# Route สำหรับรับ Webhook
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
@@ -134,7 +137,7 @@ def webhook():
 
         img_bytes = requests.get(image_url).content
         img = Image.open(io.BytesIO(img_bytes))
-        prompt = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ,ค่าน้ำสูง,ค่าน้ำต่ำ,1X2 เหย้า,1X2 เสมอ,1X2 เยือน โดยคั่นแต่ละค่าด้วยลูกน้ำ (,) เท่านั้น ห้ามมีข้อความอื่น"
+        prompt = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ (ระบุเฉพาะตัวเลข ห้ามมีตัวอักษร o หรือ u นำหน้า),ค่าน้ำสูง,ค่าน้ำต่ำ โดยคั่นแต่ละค่าด้วยลูกน้ำ (,) เท่านั้น ห้ามมีข้อความอื่น"
         
         response = model.generate_content([img, prompt])
         raw_text = response.text.strip()
@@ -145,13 +148,14 @@ def webhook():
             if i < 2:
                 row_data.append(item)
             else:
+                cleaned_item = re.sub(r'^[oOuU\s]+', '', item)
                 try:
-                    if '.' in item:
-                        row_data.append(float(item))
+                    if '.' in cleaned_item:
+                        row_data.append(float(cleaned_item))
                     else:
-                        row_data.append(int(item))
+                        row_data.append(int(cleaned_item))
                 except ValueError:
-                    row_data.append(item)
+                    row_data.append(cleaned_item)
         
         sheet.append_row(row_data)
         return jsonify({"status": "success", "data": row_data}), 200
