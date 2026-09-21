@@ -104,27 +104,46 @@ HTML_TEMPLATE = """
 """
 
 def process_and_analyze(raw_text):
-    raw_data = [item.strip() for item in raw_text.split(',')]
-    row_data = []
-    for i, item in enumerate(raw_data):
-        if i < 2:
-            row_data.append(item)
-        else:
-            cleaned = re.sub(r'^[oOuU\s]+', '', item)
-            try:
-                row_data.append(float(cleaned) if '.' in cleaned else int(cleaned))
-            except:
-                row_data.append(cleaned)
+        raw_data = [item.strip() for item in raw_text.split(',')]
+        row_data = []
+        for i, item in enumerate(raw_data):
+            if i < 2:
+                row_data.append(item)
+            else:
+                cleaned = re.sub(r'^[oOuU\s]+', '', item)
+                try:
+                    row_data.append(float(cleaned) if '.' in cleaned else int(cleaned))
+                except:
+                    row_data.append(cleaned)
+                    
+        recommendation = "รอข้อมูลวิเคราะห์"
+        try:
+            home_1x2, away_1x2 = float(row_data[2]), float(row_data[4])
+            hdp_home, hdp_away = float(row_data[6]), float(row_data[8])
+            over_odds, under_odds = float(row_data[10]), float(row_data[11])
+
+            # กฎข้อที่ 1: บอลรองเจ้าบ้าน + น้ำดำ (VIP ⭐️)
+            if home_1x2 > away_1x2 and hdp_home > 0:
+                recommendation = "บอลรองเจ้าบ้านน้ำดำ (VIP ⭐️)"
+            else:
+                # กฎข้อที่ 2: เช็กทั้ง 4 ด้าน แล้วเลือกตัวที่ค่าน้ำบวก (น้ำดำ) สูงที่สุด
+                odds_dict = {
+                    "เชียร์เจ้าบ้าน (น้ำดำ)": hdp_home,
+                    "เชียร์ทีมเยือน (น้ำดำ)": hdp_away,
+                    "ลุ้นสูง (น้ำดำ)": over_odds,
+                    "ลุ้นต่ำ (น้ำดำ)": under_odds
+                }
                 
-    recommendation = "รอข้อมูลวิเคราะห์"
-    try:
-        if float(row_data[2]) > float(row_data[4]) and float(row_data[6]) > 0:
-            recommendation = "บอลรองเจ้าบ้านน้ำดำ (VIP ⭐️)"
-        elif float(row_data[6]) > 0: recommendation = "เชียร์เจ้าบ้าน (น้ำดำ)"
-        elif float(row_data[8]) > 0: recommendation = "เชียร์ทีมเยือน (น้ำดำ)"
-        else: recommendation = "รอดูสถานการณ์ (น้ำแดงทั้งคู่)"
-    except: pass
-    return row_data, recommendation
+                positive_odds = {k: v for k, v in odds_dict.items() if v > 0}
+                
+                if positive_odds:
+                    recommendation = max(positive_odds, key=positive_odds.get)
+                else:
+                    recommendation = "รอดูสถานการณ์ (น้ำแดงหมด)"
+        except: 
+            pass
+            
+        return row_data, recommendation
 
 # Route: หน้าอัปโหลด (Tab 1)
 @app.route('/', methods=['GET', 'POST'])
