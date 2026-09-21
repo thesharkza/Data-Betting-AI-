@@ -5,3 +5,6 @@ google-generativeai
 Pillow
 requests
 gunicorn
+streamlit
+pandas
+plotly
