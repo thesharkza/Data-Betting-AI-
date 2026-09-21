@@ -9,12 +9,10 @@ import re
 
 app = Flask(__name__)
 
-# 1. ตั้งค่า Gemini API Key
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-3.5-flash-lite')
 
-# 2. เชื่อมต่อ Google Sheets
 creds_path = '/etc/secrets/credentials.json'
 if not os.path.exists(creds_path):
     creds_path = 'credentials.json'
@@ -22,7 +20,6 @@ if not os.path.exists(creds_path):
 client = gspread.service_account(filename=creds_path)
 sheet = client.open("ข้อมูลราคาบอลสกัดจากภาพ").sheet1
 
-# 3. HTML สำหรับหน้าเว็บอัปโหลด
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="th">
@@ -46,7 +43,7 @@ HTML_TEMPLATE = """
 <body>
     <div class="container">
         <h2>⚽ สกัดราคาบอล & วิเคราะห์ VIP</h2>
-        <p>AI สกัดข้อมูล 12 คอลัมน์ และ Python จะวิเคราะห์สูตรลงทุนเพิ่มเป็นคอลัมน์ที่ 13 อัตโนมัติ</p>
+        <p>AI สกัดข้อมูล 12 คอลัมน์ ส่งเข้า Sheet (วิเคราะห์ผลอัตโนมัติด้วย ARRAYFORMULA)</p>
         
         <form action="/" method="POST" enctype="multipart/form-data">
             <input type="file" name="file" accept="image/*" required>
@@ -55,7 +52,7 @@ HTML_TEMPLATE = """
 
         {% if result %}
             <div class="result">
-                <strong>✅ สำเร็จ! ข้อมูลที่บันทึกลงชีท:</strong><br><br>
+                <strong>✅ สำเร็จ! ข้อมูล 12 คอลัมน์บันทึกลงชีทแล้ว:</strong><br><br>
                 {{ result|safe }}
             </div>
         {% elif error %}
@@ -70,11 +67,9 @@ HTML_TEMPLATE = """
 """
 
 def process_and_analyze(raw_text):
-    """ฟังก์ชันสำหรับจัดการข้อมูลที่ Gemini สกัดมา และเพิ่มสูตรวิเคราะห์"""
     raw_data = [item.strip() for item in raw_text.split(',')]
     row_data = []
     
-    # 1. จัดการข้อมูลและแปลงเป็นตัวเลข (คลีนตัว o, u ออก)
     for i, item in enumerate(raw_data):
         if i < 2:
             row_data.append(item)
@@ -88,35 +83,29 @@ def process_and_analyze(raw_text):
             except ValueError:
                 row_data.append(cleaned_item)
                 
-    # 2. สูตรวิเคราะห์ (คอลัมน์ที่ 13 แนะนำลงทุน)
     recommendation = "รอข้อมูลวิเคราะห์..."
     try:
-        # ดึงค่าตาม Index (2: 1X2เหย้า, 4: 1X2เยือน, 6: ค่าน้ำHDPเหย้า, 8: ค่าน้ำHDPเยือน)
         home_1x2 = float(row_data[2])
         away_1x2 = float(row_data[4])
         home_hdp_odds = float(row_data[6])
         away_hdp_odds = float(row_data[8])
         
-        # กฎข้อที่ 1: บอลรองเจ้าบ้าน + น้ำดำ (VIP Win Rate 75%)
         if home_1x2 > away_1x2 and home_hdp_odds > 0:
             recommendation = "บอลรองเจ้าบ้านน้ำดำ (VIP ⭐️)"
-        # กฎข้อที่ 2: เจ้าบ้านน้ำดำทั่วไป (Win Rate 61.9%)
         elif home_hdp_odds > 0:
             recommendation = "เชียร์เจ้าบ้าน (น้ำดำ)"
-        # กฎข้อที่ 3: ทีมเยือนน้ำดำ (เผื่อไว้พิจารณา)
         elif away_hdp_odds > 0:
             recommendation = "เชียร์ทีมเยือน (น้ำดำ)"
         else:
             recommendation = "รอดูสถานการณ์ (น้ำแดงทั้งคู่)"
             
     except (IndexError, ValueError, TypeError):
-         recommendation = "ข้อมูลไม่ครบถ้วน (วิเคราะห์สูตรไม่ได้)"
+         recommendation = "ข้อมูลไม่ครบถ้วน"
          
-    # นำคำแนะนำต่อท้ายเป็นคอลัมน์ใหม่
-    row_data.append(recommendation)
-    return row_data
+    # แยกคืนค่า row_data (สำหรับชีท) และ recommendation (สำหรับโชว์หน้าเว็บ) ออกจากกัน
+    # ไม่มีการ .append(recommendation) ลงใน row_data แล้ว
+    return row_data, recommendation
 
-# Route หลัก สำหรับรับไฟล์ผ่านเว็บ
 @app.route('/', methods=['GET', 'POST'])
 def upload_page():
     if request.method == 'POST':
@@ -129,12 +118,15 @@ def upload_page():
             prompt = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ (ระบุเฉพาะตัวเลข ห้ามมีตัวอักษร o หรือ u นำหน้า),ค่าน้ำสูง,ค่าน้ำต่ำ โดยคั่นแต่ละค่าด้วยลูกน้ำ (,) เท่านั้น ห้ามมีข้อความอื่น"
             
             response = model.generate_content([img, prompt])
-            row_data = process_and_analyze(response.text.strip())
             
+            # รับค่า 2 ตัวแปรจากฟังก์ชัน
+            row_data, recommendation = process_and_analyze(response.text.strip())
+            
+            # ส่งแค่ row_data (12 คอลัมน์) ลงชีท
             sheet.append_row(row_data)
             
-            # จัดรูปแบบการแสดงผลหน้าเว็บให้ดูง่ายขึ้น
-            display_text = f"ทีม: {row_data[0]} vs {row_data[1]}<br>วิเคราะห์: <span class='vip-badge'>{row_data[-1]}</span>"
+            # โชว์คำแนะนำบนหน้าเว็บเหมือนเดิม
+            display_text = f"ทีม: {row_data[0]} vs {row_data[1]}<br>วิเคราะห์: <span class='vip-badge'>{recommendation}</span>"
             return render_template_string(HTML_TEMPLATE, result=display_text)
         
         except Exception as e:
@@ -142,7 +134,6 @@ def upload_page():
 
     return render_template_string(HTML_TEMPLATE)
 
-# Route สำหรับ Webhook
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
@@ -154,10 +145,10 @@ def webhook():
         prompt = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ (ระบุเฉพาะตัวเลข ห้ามมีตัวอักษร o หรือ u นำหน้า),ค่าน้ำสูง,ค่าน้ำต่ำ โดยคั่นแต่ละค่าด้วยลูกน้ำ (,) เท่านั้น ห้ามมีข้อความอื่น"
         
         response = model.generate_content([img, prompt])
-        row_data = process_and_analyze(response.text.strip())
+        row_data, recommendation = process_and_analyze(response.text.strip())
         
         sheet.append_row(row_data)
-        return jsonify({"status": "success", "data": row_data, "recommendation": row_data[-1]}), 200
+        return jsonify({"status": "success", "data": row_data, "recommendation": recommendation}), 200
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
