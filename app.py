@@ -108,35 +108,41 @@ with tab1:
             if not sheet:
                 st.error("ไม่สามารถเชื่อมต่อ Google Sheets ได้")
             else:
-                with st.spinner("⏳ กำลังให้ AI วิเคราะห์ข้อมูลและบันทึกเข้า Google Sheets (รอสักครู่)..."):
-                    try:
+                try:
+                    # ขั้นที่ 1: เตรียมรูปภาพ
+                    with st.spinner("📸 กำลังประมวลผลรูปภาพ..."):
                         img = Image.open(uploaded_file)
                         if img.mode != 'RGB':
                             img = img.convert('RGB')
                         img.thumbnail((800, 800))
-                        
+                    
+                    # ขั้นที่ 2: ส่งให้ AI วิเคราะห์
+                    with st.spinner("🤖 กำลังให้ AI สกัดและวิเคราะห์ราคาบอล..."):
                         prompt = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ (ระบุเฉพาะตัวเลข ห้ามมีตัวอักษร o หรือ u นำหน้า),ค่าน้ำสูง,ค่าน้ำต่ำ โดยคั่นแต่ละค่าด้วยลูกน้ำ (,) เท่านั้น ห้ามมีข้อความอื่น"
                         response = model.generate_content([img, prompt])
-                        
-                        gc.collect()
+                    
+                    gc.collect()
 
-                        if not response or not response.text:
-                            st.error("AI ไม่สามารถอ่านข้อมูลจากภาพนี้ได้ กรุณาลองอัปโหลดภาพใหม่อีกครั้ง")
-                        else:
+                    if not response or not response.text:
+                        st.error("❌ AI ไม่สามารถอ่านข้อมูลจากภาพนี้ได้ กรุณาลองอัปโหลดภาพใหม่อีกครั้ง")
+                    else:
+                        # ขั้นที่ 3: บันทึกลง Google Sheets
+                        with st.spinner("📊 กำลังบันทึกข้อมูลลง Google Sheets..."):
                             row_data, rec = process_and_analyze(response.text.strip())
                             sheet.append_row(row_data)
-                            
-                            st.success("✅ สำเร็จ!")
-                            st.markdown(f"""
-                            <div style="padding: 15px; background: #e8f8f5; border: 1px solid #1abc9c; border-radius: 8px; color: #16a085;">
-                                <strong>คู่แข่งขัน:</strong> {row_data[0]} vs {row_data[1]}<br>
-                                <strong>ผลการวิเคราะห์:</strong> <b>{rec}</b>
-                            </div>
-                            """, unsafe_allow_html=True)
-                    except Exception as e:
-                        st.error(f"เกิดข้อผิดพลาด: {str(e)}")
-                    finally:
-                        gc.collect()
+                        
+                        st.success("✅ สำเร็จ!")
+                        st.markdown(f"""
+                        <div style="padding: 15px; background: #e8f8f5; border: 1px solid #1abc9c; border-radius: 8px; color: #16a085;">
+                            <strong>คู่แข่งขัน:</strong> {row_data[0]} vs {row_data[1]}<br>
+                            <strong>ผลการวิเคราะห์:</strong> <b>{rec}</b>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                except Exception as e:
+                    st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
+                finally:
+                    gc.collect()
 
 with tab2:
     st.subheader("📊 สถิติและแดชบอร์ดสรุปผล")
