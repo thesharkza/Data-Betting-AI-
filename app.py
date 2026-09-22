@@ -199,9 +199,14 @@ def dashboard_page():
         wins = len(df_comp[df_comp['ผลเปรียบเทียบ'] == 'ชนะ'])
         win_rate = round((wins / total) * 100, 2) if total > 0 else 0
 
-        # จัดการค่าว่างและ Error เพื่อไม่ให้กราฟแอบซ่อนข้อมูล
-        df_comp['แนะนำลงทุน'] = df_comp['แนะนำลงทุน'].replace('', 'ข้อมูลว่าง/ซ่อนอยู่')
-        df_comp['แนะนำลงทุน'] = df_comp['แนะนำลงทุน'].fillna('ข้อมูลว่าง/ซ่อนอยู่')
+        # จัดการทำความสะอาดข้อความและดักจับค่าว่าง
+        df_comp['แนะนำลงทุน'] = df_comp['แนะนำลงทุน'].astype(str).str.strip()
+        df_comp['แนะนำลงทุน'] = df_comp['แนะนำลงทุน'].replace({
+            '': 'ข้อมูลว่าง/ซ่อนอยู่',
+            'nan': 'ข้อมูลว่าง/ซ่อนอยู่',
+            'None': 'ข้อมูลว่าง/ซ่อนอยู่',
+            'บอลรองเจ้าบ้านน้ำดำ (VIP ⭐️)': 'บอลรองเจ้าบ้านน้ำดำ (VIP)'
+        })
 
         # สร้างกราฟ Pie (สัดส่วน ชนะ/แพ้)
         pie_fig = px.pie(df_comp, names='ผลเปรียบเทียบ', color='ผลเปรียบเทียบ', 
@@ -212,18 +217,17 @@ def dashboard_page():
                                    config={'responsive': True})
 
         # สร้างกราฟ Bar เป็นแบบแนวนอน (Horizontal Bar Chart)
-        df_comp['แนะนำลงทุน'] = df_comp['แนะนำลงทุน'].astype(str).str.strip()
         bar_df = df_comp.groupby(['แนะนำลงทุน', 'ผลเปรียบเทียบ'], dropna=False).size().reset_index(name='จำนวน')
         
         bar_fig = px.bar(bar_df, x='จำนวน', y='แนะนำลงทุน', color='ผลเปรียบเทียบ', barmode='group',
-                         orientation='h', # กำหนดให้เป็นแท่งแนวนอน
+                         orientation='h', 
                          color_discrete_map={'ชนะ': '#2ecc71', 'แพ้': '#e74c3c', 'เจ๊า': '#95a5a6'})
         
         bar_fig.update_layout(
-            margin=dict(t=20, b=20, l=120, r=20), 
+            margin=dict(t=20, b=20, l=140, r=20), 
             xaxis_title="จำนวน (ครั้ง)", 
             yaxis_title="", 
-            yaxis=dict(autorange="reversed"), # ให้สูตรแรกเรียงอยู่ด้านบนสุด
+            yaxis=dict(autorange="reversed"), 
             autosize=True
         )
         
