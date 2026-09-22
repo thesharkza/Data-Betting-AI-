@@ -200,6 +200,9 @@ def dashboard_page():
         wins = len(df_comp[df_comp['ผลเปรียบเทียบ'] == 'ชนะ'])
         win_rate = round((wins / total) * 100, 2) if total > 0 else 0
 
+        # ⭐️ เพิ่มบรรทัดนี้: เพื่อป้องกันไม่ให้กราฟแอบซ่อนข้อมูลที่เป็นค่าว่าง
+        df_comp['แนะนำลงทุน'] = df_comp['แนะนำลงทุน'].fillna('ข้อมูลว่าง/Errorในชีท')
+
         # สร้างกราฟ Pie
         pie_fig = px.pie(df_comp, names='ผลเปรียบเทียบ', color='ผลเปรียบเทียบ', 
                          color_discrete_map={'ชนะ': '#2ecc71', 'แพ้': '#e74c3c', 'เจ๊า': '#95a5a6'}, hole=0.4)
