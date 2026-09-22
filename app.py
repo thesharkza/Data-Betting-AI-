@@ -8,8 +8,8 @@ import os
 import re
 import pandas as pd
 import plotly.express as px
-import gc  # ⭐️ เพิ่มไลบรารีสำหรับล้างหน่วยความจำ (Garbage Collection)
-import tempfile # ⭐️ เพิ่มไลบรารีสำหรับสร้างไฟล์ชั่วคราว
+import gc
+import tempfile
 
 app = Flask(__name__)
 
@@ -24,7 +24,7 @@ if not os.path.exists(creds_path):
 client = gspread.service_account(filename=creds_path)
 sheet = client.open("ข้อมูลราคาบอลสกัดจากภาพ").sheet1
 
-# HTML แบบมี Tab สลับหน้า
+# HTML แบบมี Tab และเพิ่มระบบ Loading ตอนกดอัปโหลด
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="th">
@@ -51,6 +51,9 @@ HTML_TEMPLATE = """
         .result { margin-top: 25px; padding: 15px; background: #e8f8f5; border: 1px solid #1abc9c; border-radius: 8px; color: #16a085; font-size: 14px; }
         .error { margin-top: 25px; padding: 15px; background: #fadbd8; border: 1px solid #e74c3c; border-radius: 8px; color: #c0392b; }
         
+        /* สไตล์สำหรับกล่อง Loading */
+        #loading-overlay { display: none; margin-top: 20px; text-align: center; padding: 15px; background: #fef9e7; border: 1px solid #f1c40f; border-radius: 8px; color: #d68910; font-weight: bold; }
+
         /* CSS สำหรับหน้า Dashboard */
         .metric-box { display: flex; justify-content: space-between; gap: 15px; margin-bottom: 30px; }
         .metric { flex: 1; background: #f8f9fa; padding: 20px; border-radius: 8px; text-align: center; border: 1px solid #e9ecef; }
@@ -72,10 +75,17 @@ HTML_TEMPLATE = """
             <!-- หน้าจออัปโหลดภาพ -->
             <h2>⚽ สกัดราคาบอล & วิเคราะห์ VIP</h2>
             <p class="desc">อัปโหลดภาพตารางราคาเพื่อสกัดข้อมูลส่งเข้า Google Sheets</p>
-            <form action="/" method="POST" enctype="multipart/form-data" style="text-align: center;">
+            
+            <form id="upload-form" action="/" method="POST" enctype="multipart/form-data" style="text-align: center;" onsubmit="showLoading()">
                 <input type="file" name="file" accept="image/*" required>
-                <button type="submit">🚀 อัปโหลดและวิเคราะห์ข้อมูล</button>
+                <button type="submit" id="submit-btn">🚀 อัปโหลดและวิเคราะห์ข้อมูล</button>
             </form>
+
+            <!-- กล่องแจ้งเตือนกำลังโหลด -->
+            <div id="loading-overlay">
+                ⏳ กำลังอัปโหลดและให้ AI วิเคราะห์ข้อมูล กรุณารอสักครู่ (ประมาณ 5-10 วินาที)...
+            </div>
+
             {% if result %}
                 <div class="result"><strong>✅ สำเร็จ!</strong><br><br>{{ result|safe }}</div>
             {% elif error %}
@@ -101,6 +111,15 @@ HTML_TEMPLATE = """
             </div>
         {% endif %}
     </div>
+
+    <script>
+        function showLoading() {
+            document.getElementById('submit-btn').disabled = true;
+            document.getElementById('submit-btn').style.backgroundColor = '#95a5a6';
+            document.getElementById('submit-btn').innerText = 'กำลังประมวลผล...';
+            document.getElementById('loading-overlay').style.display = 'block';
+        }
+    </script>
 </body>
 </html>
 """
@@ -109,7 +128,6 @@ def process_and_analyze(raw_text):
     raw_data = [item.strip() for item in raw_text.split(',')]
     row_data = []
     
-    # 1. ทำความสะอาดข้อมูล
     for i, item in enumerate(raw_data):
         if i < 2:
             row_data.append(item)
@@ -127,19 +145,12 @@ def process_and_analyze(raw_text):
         hdp_home, hdp_away = float(row_data[6]), float(row_data[8])
         over_odds, under_odds = float(row_data[10]), float(row_data[11])
 
-        # กฎข้อ 1: ตรวจสอบความสมบูรณ์ของข้อมูล
         if any(pd.isna(x) for x in [home_1x2, away_1x2, hdp_home, hdp_away, over_odds, under_odds]):
              recommendation = "ข้อมูลไม่ครบถ้วน (ข้าม)"
-
-        # กฎข้อ 2: กรองบอลห่างชั้นเกินไป
         elif abs(home_1x2 - away_1x2) > 2.5:
              recommendation = "ข้าม (บอลห่างชั้นเกินไป)"
-
-        # กฎข้อ 3: VIP Strategy (สถิติ Win Rate สูงสุด)
         elif home_1x2 > away_1x2 and hdp_home > 0:
             recommendation = "บอลรองเจ้าบ้านน้ำดำ (VIP)"
-            
-        # กฎข้อ 4: Value Betting
         else:
             odds_dict = {
                 "เชียร์เจ้าบ้าน (น้ำดำ)": hdp_home,
@@ -147,20 +158,16 @@ def process_and_analyze(raw_text):
                 "ลุ้นสูง (น้ำดำ)": over_odds,
                 "ลุ้นต่ำ (น้ำดำ)": under_odds
             }
-            
             positive_odds = {k: v for k, v in odds_dict.items() if v > 0}
-            
             if positive_odds:
                 best_choice = max(positive_odds, key=positive_odds.get)
                 max_value = positive_odds[best_choice]
-                
                 if max_value < 0.75 or max_value > 0.95:
                     recommendation = "ข้าม (ค่าน้ำเสี่ยงเกินไป)"
                 else:
                     recommendation = best_choice
             else:
                 recommendation = "รอดูสถานการณ์ (น้ำแดงหมด)"
-                
     except Exception as e: 
         print(f"Calculation Error: {e}")
         recommendation = "ตรวจสอบความถูกต้องของข้อมูล (Error)"
@@ -168,7 +175,6 @@ def process_and_analyze(raw_text):
     return row_data, recommendation
 
 
-# Route: หน้าอัปโหลด (Tab 1) - อัปเกรดระบบล้าง RAM และ Temp File
 @app.route('/', methods=['GET', 'POST'])
 def upload_page():
     if request.method == 'POST':
@@ -176,25 +182,19 @@ def upload_page():
         if not file or file.filename == '':
             return render_template_string(HTML_TEMPLATE, active_tab='upload', error="ไม่ได้เลือกไฟล์")
         
-        temp_path = None # กำหนดตัวแปรไว้ก่อน
-        
+        temp_path = None
         try:
-            # ⭐️ 1. บันทึกรูปลงเซิร์ฟเวอร์ชั่วคราว (Harddisk) แทนการเทลง RAM
             fd, temp_path = tempfile.mkstemp(suffix=".jpg")
             file.save(temp_path)
             
-            # ⭐️ 2. เปิดรูปจากไฟล์ที่เซฟไว้ และบังคับปิดไฟล์ทันทีที่ย่อรูปเสร็จ
             with Image.open(temp_path) as img:
                 if img.mode != 'RGB':
                     img = img.convert('RGB')
-                # ย่อรูปให้เล็กลงเหลือ 800px (เพื่อเซฟ RAM ขั้นสุด)
                 img.thumbnail((800, 800))
                 
-                # เตรียมส่งข้อมูลให้ Gemini ทันทีใน Context นี้
                 prompt = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ (ระบุเฉพาะตัวเลข ห้ามมีตัวอักษร o หรือ u นำหน้า),ค่าน้ำสูง,ค่าน้ำต่ำ โดยคั่นแต่ละค่าด้วยลูกน้ำ (,) เท่านั้น ห้ามมีข้อความอื่น"
                 response = model.generate_content([img, prompt])
             
-            # ⭐️ 3. สั่งกวาดขยะใน RAM ทันทีที่ AI วิเคราะห์เสร็จ
             gc.collect()
 
             if not response or not response.text:
@@ -210,18 +210,16 @@ def upload_page():
             return render_template_string(HTML_TEMPLATE, active_tab='upload', error=f"เกิดข้อผิดพลาดในการประมวลผล: {str(e)}")
             
         finally:
-            # ⭐️ 4. ลบไฟล์ภาพชั่วคราวทิ้งทุกครั้ง ไม่ว่าจะสำเร็จหรือ Error เพื่อคืนพื้นที่ให้เซิร์ฟเวอร์
             if temp_path and os.path.exists(temp_path):
                 try:
                     os.remove(temp_path)
                 except:
                     pass
-            gc.collect() # ล้าง RAM รอบสุดท้าย
+            gc.collect()
 
     return render_template_string(HTML_TEMPLATE, active_tab='upload')
 
 
-# Route: หน้า Dashboard (Tab 2)
 @app.route('/dashboard')
 def dashboard_page():
     try:
@@ -231,6 +229,8 @@ def dashboard_page():
         
         df_comp = df[df['ผลเปรียบเทียบ'].isin(['ชนะ', 'แพ้', 'เจ๊า'])].copy()
         total = len(df_comp)
+        wins = len(df_comp[df_comp['ผลเปรียbเทียบ'] == 'ชนะ']) if 'ผลเปรียบเทียบ' in df_comp.columns else 0 # ป้องกัน KeyError เผื่อสะกดผิด
+        # ใช้คำสั่งที่ปลอดภัยกว่า
         wins = len(df_comp[df_comp['ผลเปรียบเทียบ'] == 'ชนะ'])
         win_rate = round((wins / total) * 100, 2) if total > 0 else 0
 
@@ -278,23 +278,30 @@ def dashboard_page():
         )
     except Exception as e:
         print(f"🔥 DASHBOARD ERROR: {str(e)}")
-        return render_template_string(HTML_TEMPLATE, active_tab='dashboard', error="เกิดข้อผิดพลาดในการโหลดข้อมูลสถิติ")
+        return render_template_string(HTML_TEMPLATE, active_tab='dashboard', error=f"เกิดข้อผิดพลาดในการโหลดข้อมูลสถิติ: {str(e)}")
 
 
-# Route: Webhook
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
         image_url = request.json.get('image_url')
-        img = Image.open(io.BytesIO(requests.get(image_url).content))
+        img_resp = requests.get(image_url)
+        fd, temp_path = tempfile.mkstemp(suffix=".jpg")
+        with open(temp_path, 'wb') as f:
+            f.write(img_resp.content)
+            
+        with Image.open(temp_path) as img:
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+            img.thumbnail((800, 800))
+            
+            prompt = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ..."
+            response = model.generate_content([img, prompt])
+            
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        gc.collect()
         
-        # ⭐️ ระบบย่อรูปภาพสำหรับ Webhook
-        if img.mode != 'RGB':
-            img = img.convert('RGB')
-        img.thumbnail((1024, 1024))
-        
-        prompt = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ..."
-        response = model.generate_content([img, prompt])
         row_data, rec = process_and_analyze(response.text.strip())
         sheet.append_row(row_data)
         return jsonify({"status": "success", "data": row_data}), 200
