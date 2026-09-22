@@ -137,7 +137,7 @@ def process_and_analyze(raw_text):
         elif home_1x2 > away_1x2 and hdp_home > 0:
             recommendation = "บอลรองเจ้าบ้านน้ำดำ (VIP)"
             
-        # กฎข้อ 4: Value Betting (เทียบ 4 หน้าและคัดกรองความเสี่ยงค่าน้ำ)
+        # กฎข้อ 4: Value Betting
         else:
             odds_dict = {
                 "เชียร์เจ้าบ้าน (น้ำดำ)": hdp_home,
@@ -159,13 +159,14 @@ def process_and_analyze(raw_text):
             else:
                 recommendation = "รอดูสถานการณ์ (น้ำแดงหมด)"
                 
-    except Exception: 
+    except Exception as e: 
+        print(f"Calculation Error: {e}")
         recommendation = "ตรวจสอบความถูกต้องของข้อมูล (Error)"
         
     return row_data, recommendation
 
 
-# Route: หน้าอัปโหลด (Tab 1)
+# Route: หน้าอัปโหลด (Tab 1) - ปรับปรุงระบบป้องกัน Server Error
 @app.route('/', methods=['GET', 'POST'])
 def upload_page():
     if request.method == 'POST':
@@ -176,11 +177,18 @@ def upload_page():
             img = Image.open(io.BytesIO(file.read()))
             prompt = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ (ระบุเฉพาะตัวเลข ห้ามมีตัวอักษร o หรือ u นำหน้า),ค่าน้ำสูง,ค่าน้ำต่ำ โดยคั่นแต่ละค่าด้วยลูกน้ำ (,) เท่านั้น ห้ามมีข้อความอื่น"
             response = model.generate_content([img, prompt])
+            
+            if not response or not response.text:
+                return render_template_string(HTML_TEMPLATE, active_tab='upload', error="AI ไม่สามารถอ่านข้อมูลจากภาพนี้ได้ กรุณาลองอัปโหลดภาพใหม่อีกครั้ง")
+                
             row_data, rec = process_and_analyze(response.text.strip())
             sheet.append_row(row_data)
             return render_template_string(HTML_TEMPLATE, active_tab='upload', result=f"ทีม: {row_data[0]} vs {row_data[1]}<br>วิเคราะห์: <b>{rec}</b>")
         except Exception as e:
-            return render_template_string(HTML_TEMPLATE, active_tab='upload', error=str(e))
+            # พิมพ์ Error จริงไว้ดูใน Terminal ของเซิร์ฟเวอร์
+            print(f"🔥 UPLOAD ERROR: {str(e)}")
+            # แสดงข้อความปลอดภัยบนหน้าเว็บแทนที่จะเป็นหน้าขาว Internal Server Error
+            return render_template_string(HTML_TEMPLATE, active_tab='upload', error="เกิดข้อผิดพลาดในการประมวลผลภาพหรือเชื่อมต่อ Google Sheets กรุณาลองใหม่อีกครั้ง")
     return render_template_string(HTML_TEMPLATE, active_tab='upload')
 
 
@@ -188,18 +196,15 @@ def upload_page():
 @app.route('/dashboard')
 def dashboard_page():
     try:
-        # ดึงข้อมูลมาแปลงเป็น DataFrame
         df = pd.DataFrame(sheet.get_all_records())
         if df.empty or 'ผลเปรียบเทียบ' not in df.columns:
             return render_template_string(HTML_TEMPLATE, active_tab='dashboard', error="ไม่พบข้อมูลผลเปรียบเทียบในชีท")
         
-        # กรองเฉพาะแถวที่ทราบผลแล้ว
         df_comp = df[df['ผลเปรียบเทียบ'].isin(['ชนะ', 'แพ้', 'เจ๊า'])].copy()
         total = len(df_comp)
         wins = len(df_comp[df_comp['ผลเปรียบเทียบ'] == 'ชนะ'])
         win_rate = round((wins / total) * 100, 2) if total > 0 else 0
 
-        # จัดการทำความสะอาดข้อความและดักจับค่าว่าง
         df_comp['แนะนำลงทุน'] = df_comp['แนะนำลงทุน'].astype(str).str.strip()
         df_comp['แนะนำลงทุน'] = df_comp['แนะนำลงทุน'].replace({
             '': 'ข้อมูลว่าง/ซ่อนอยู่',
@@ -208,7 +213,6 @@ def dashboard_page():
             'บอลรองเจ้าบ้านน้ำดำ (VIP ⭐️)': 'บอลรองเจ้าบ้านน้ำดำ (VIP)'
         })
 
-        # สร้างกราฟ Pie (สัดส่วน ชนะ/แพ้)
         pie_fig = px.pie(df_comp, names='ผลเปรียบเทียบ', color='ผลเปรียบเทียบ', 
                          color_discrete_map={'ชนะ': '#2ecc71', 'แพ้': '#e74c3c', 'เจ๊า': '#95a5a6'}, hole=0.4)
         pie_fig.update_layout(margin=dict(t=20, b=20, l=20, r=20), autosize=True)
@@ -216,7 +220,6 @@ def dashboard_page():
                                    default_width='100%', default_height='350px', 
                                    config={'responsive': True})
 
-        # สร้างกราฟ Bar เป็นแบบแนวนอน (Horizontal Bar Chart)
         bar_df = df_comp.groupby(['แนะนำลงทุน', 'ผลเปรียบเทียบ'], dropna=False).size().reset_index(name='จำนวน')
         
         bar_fig = px.bar(bar_df, x='จำนวน', y='แนะนำลงทุน', color='ผลเปรียบเทียบ', barmode='group',
@@ -245,7 +248,8 @@ def dashboard_page():
             bar_html=bar_html
         )
     except Exception as e:
-        return render_template_string(HTML_TEMPLATE, active_tab='dashboard', error=f"เกิดข้อผิดพลาดในการโหลดข้อมูล: {str(e)}")
+        print(f"🔥 DASHBOARD ERROR: {str(e)}")
+        return render_template_string(HTML_TEMPLATE, active_tab='dashboard', error="เกิดข้อผิดพลาดในการโหลดข้อมูลสถิติ")
 
 
 # Route: Webhook
