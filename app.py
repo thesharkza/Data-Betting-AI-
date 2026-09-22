@@ -102,7 +102,7 @@ with tab1:
     uploaded_file = st.file_uploader("เลือกไฟล์รูปภาพตารางราคาบอล", type=['png', 'jpg', 'jpeg'])
     
     if uploaded_file is not None:
-        st.image(uploaded_file, caption="ภาพที่อัปโหลด", use_column_width=True)
+        st.image(uploaded_file, caption="ภาพที่อัปโหลด", use_container_width=True)
         
         if st.button("🚀 อัปโหลดและวิเคราะห์ข้อมูล", type="primary"):
             if not sheet:
