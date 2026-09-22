@@ -1,10 +1,7 @@
-Flask
-gspread
-google-auth
-google-generativeai
-Pillow
-requests
-gunicorn
 streamlit
+gspread
+google-generativeai
+pillow
+requests
 pandas
 plotly
