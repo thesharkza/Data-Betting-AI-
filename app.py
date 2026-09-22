@@ -211,10 +211,19 @@ def dashboard_page():
                                    default_width='100%', default_height='350px', 
                                    config={'responsive': True})
 
-        # สร้างกราฟ Bar (บังคับ dropna=False เพื่อไม่ให้ข้อมูลหาย)
+        # สร้างกราฟ Bar (บังคับแปลงประเภทข้อมูลให้เป็น String เพื่อป้องกันตัวเลข/ค่าว่างปะปน)
+        df_comp['แนะนำลงทุน'] = df_comp['แนะนำลงทุน'].astype(str).str.strip()
+        
+        # จัดกลุ่มข้อมูลและนับจำนวน
         bar_df = df_comp.groupby(['แนะนำลงทุน', 'ผลเปรียบเทียบ'], dropna=False).size().reset_index(name='จำนวน')
+        
+        # ปริ้นท์เช็กค่าใน Terminal ดูว่า Python อ่านเจอคำว่า 'บอลรองเจ้าบ้านน้ำดำ (VIP)' กี่แถว
+        print("--- บันทึกข้อมูลกราฟ Bar ---")
+        print(bar_df)
+
         bar_fig = px.bar(bar_df, x='แนะนำลงทุน', y='จำนวน', color='ผลเปรียบเทียบ', barmode='group',
                          color_discrete_map={'ชนะ': '#2ecc71', 'แพ้': '#e74c3c', 'เจ๊า': '#95a5a6'})
+        
         bar_fig.update_layout(margin=dict(t=20, b=20, l=20, r=20), xaxis_title="", autosize=True)
         bar_html = bar_fig.to_html(full_html=False, include_plotlyjs=False, 
                                    default_width='100%', default_height='350px', 
