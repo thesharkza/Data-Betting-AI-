@@ -37,7 +37,7 @@ def init_gspread():
         return None
 
 sheet = init_gspread()
-model = genai.GenerativeModel('gemini-3.7-flash')
+model = genai.GenerativeModel('gemini-3.5-flash-lite')
 
 def process_and_analyze(raw_text):
     raw_data = [item.strip() for item in raw_text.split(',')]
