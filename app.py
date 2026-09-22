@@ -135,7 +135,7 @@ def process_and_analyze(raw_text):
 
         # กฎข้อ 3: VIP Strategy (สถิติ Win Rate สูงสุด)
         elif home_1x2 > away_1x2 and hdp_home > 0:
-            recommendation = "บอลรองเจ้าบ้านน้ำดำ (VIP ⭐️)"
+            recommendation = "บอลรองเจ้าบ้านน้ำดำ (VIP)"
             
         # กฎข้อ 4: Value Betting (เทียบ 4 หน้าและคัดกรองความเสี่ยงค่าน้ำ)
         else:
