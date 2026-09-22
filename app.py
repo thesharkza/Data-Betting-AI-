@@ -106,6 +106,8 @@ HTML_TEMPLATE = """
 def process_and_analyze(raw_text):
         raw_data = [item.strip() for item in raw_text.split(',')]
         row_data = []
+        
+        # 1. ทำความสะอาดข้อมูล
         for i, item in enumerate(raw_data):
             if i < 2:
                 row_data.append(item)
@@ -116,17 +118,29 @@ def process_and_analyze(raw_text):
                 except:
                     row_data.append(cleaned)
                     
-        recommendation = "รอข้อมูลวิเคราะห์"
+        recommendation = "รอดูสถานการณ์ (รอข้อมูล)"
+        
         try:
             home_1x2, away_1x2 = float(row_data[2]), float(row_data[4])
             hdp_home, hdp_away = float(row_data[6]), float(row_data[8])
             over_odds, under_odds = float(row_data[10]), float(row_data[11])
 
-            # กฎข้อที่ 1: บอลรองเจ้าบ้าน + น้ำดำ (VIP ⭐️)
-            if home_1x2 > away_1x2 and hdp_home > 0:
+            # กฎข้อ 1: ตรวจสอบความสมบูรณ์ของข้อมูล
+            # (ถ้ามีตัวแปรไหนเป็นค่าว่าง ระบบจะสั่งข้ามทันที)
+            if any(pd.isna(x) for x in [home_1x2, away_1x2, hdp_home, hdp_away, over_odds, under_odds]):
+                 recommendation = "ข้อมูลไม่ครบถ้วน (ข้าม)"
+
+            # กฎข้อ 2: กรองบอลห่างชั้นเกินไป
+            # (ราคาพูลห่างกันเกิน 2.5 มักมีการตั้งราคาต่อรองหลอก ให้ข้าม)
+            elif abs(home_1x2 - away_1x2) > 2.5:
+                 recommendation = "ข้าม (บอลห่างชั้นเกินไป)"
+
+            # กฎข้อ 3: VIP Strategy (สถิติ Win Rate สูงสุด)
+            elif home_1x2 > away_1x2 and hdp_home > 0:
                 recommendation = "บอลรองเจ้าบ้านน้ำดำ (VIP ⭐️)"
+                
+            # กฎข้อ 4: Value Betting (เทียบ 4 หน้าและคัดกรองความเสี่ยงค่าน้ำ)
             else:
-                # กฎข้อที่ 2: เช็กทั้ง 4 ด้าน แล้วเลือกตัวที่ค่าน้ำบวก (น้ำดำ) สูงที่สุด
                 odds_dict = {
                     "เชียร์เจ้าบ้าน (น้ำดำ)": hdp_home,
                     "เชียร์ทีมเยือน (น้ำดำ)": hdp_away,
@@ -137,11 +151,19 @@ def process_and_analyze(raw_text):
                 positive_odds = {k: v for k, v in odds_dict.items() if v > 0}
                 
                 if positive_odds:
-                    recommendation = max(positive_odds, key=positive_odds.get)
+                    best_choice = max(positive_odds, key=positive_odds.get)
+                    max_value = positive_odds[best_choice]
+                    
+                    # กรองค่าน้ำ: ต่ำกว่า 0.75 (ได้ไม่คุ้มเสีย) หรือ สูงกว่า 0.95 (ราคาหลอก)
+                    if max_value < 0.75 or max_value > 0.95:
+                        recommendation = "ข้าม (ค่าน้ำเสี่ยงเกินไป)"
+                    else:
+                        recommendation = best_choice
                 else:
                     recommendation = "รอดูสถานการณ์ (น้ำแดงหมด)"
-        except: 
-            pass
+                    
+        except Exception: 
+            recommendation = "ตรวจสอบความถูกต้องของข้อมูล (Error)"
             
         return row_data, recommendation
 
