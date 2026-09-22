@@ -203,7 +203,7 @@ def dashboard_page():
         df_comp['แนะนำลงทุน'] = df_comp['แนะนำลงทุน'].replace('', 'ข้อมูลว่าง/ซ่อนอยู่')
         df_comp['แนะนำลงทุน'] = df_comp['แนะนำลงทุน'].fillna('ข้อมูลว่าง/ซ่อนอยู่')
 
-        # สร้างกราฟ Pie
+        # สร้างกราฟ Pie (สัดส่วน ชนะ/แพ้)
         pie_fig = px.pie(df_comp, names='ผลเปรียบเทียบ', color='ผลเปรียบเทียบ', 
                          color_discrete_map={'ชนะ': '#2ecc71', 'แพ้': '#e74c3c', 'เจ๊า': '#95a5a6'}, hole=0.4)
         pie_fig.update_layout(margin=dict(t=20, b=20, l=20, r=20), autosize=True)
@@ -211,22 +211,24 @@ def dashboard_page():
                                    default_width='100%', default_height='350px', 
                                    config={'responsive': True})
 
-        # สร้างกราฟ Bar (บังคับแปลงประเภทข้อมูลให้เป็น String เพื่อป้องกันตัวเลข/ค่าว่างปะปน)
+        # สร้างกราฟ Bar เป็นแบบแนวนอน (Horizontal Bar Chart)
         df_comp['แนะนำลงทุน'] = df_comp['แนะนำลงทุน'].astype(str).str.strip()
-        
-        # จัดกลุ่มข้อมูลและนับจำนวน
         bar_df = df_comp.groupby(['แนะนำลงทุน', 'ผลเปรียบเทียบ'], dropna=False).size().reset_index(name='จำนวน')
         
-        # ปริ้นท์เช็กค่าใน Terminal ดูว่า Python อ่านเจอคำว่า 'บอลรองเจ้าบ้านน้ำดำ (VIP)' กี่แถว
-        print("--- บันทึกข้อมูลกราฟ Bar ---")
-        print(bar_df)
-
-        bar_fig = px.bar(bar_df, x='แนะนำลงทุน', y='จำนวน', color='ผลเปรียบเทียบ', barmode='group',
+        bar_fig = px.bar(bar_df, x='จำนวน', y='แนะนำลงทุน', color='ผลเปรียบเทียบ', barmode='group',
+                         orientation='h', # กำหนดให้เป็นแท่งแนวนอน
                          color_discrete_map={'ชนะ': '#2ecc71', 'แพ้': '#e74c3c', 'เจ๊า': '#95a5a6'})
         
-        bar_fig.update_layout(margin=dict(t=20, b=20, l=20, r=20), xaxis_title="", autosize=True)
+        bar_fig.update_layout(
+            margin=dict(t=20, b=20, l=120, r=20), 
+            xaxis_title="จำนวน (ครั้ง)", 
+            yaxis_title="", 
+            yaxis=dict(autorange="reversed"), # ให้สูตรแรกเรียงอยู่ด้านบนสุด
+            autosize=True
+        )
+        
         bar_html = bar_fig.to_html(full_html=False, include_plotlyjs=False, 
-                                   default_width='100%', default_height='350px', 
+                                   default_width='100%', default_height='400px', 
                                    config={'responsive': True})
 
         return render_template_string(
@@ -242,7 +244,7 @@ def dashboard_page():
         return render_template_string(HTML_TEMPLATE, active_tab='dashboard', error=f"เกิดข้อผิดพลาดในการโหลดข้อมูล: {str(e)}")
 
 
-# Route: Webhook (ยังคงทำงานได้ปกติเหมือนเดิม)
+# Route: Webhook
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
