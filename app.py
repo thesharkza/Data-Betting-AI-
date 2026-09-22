@@ -1,128 +1,43 @@
-from flask import Flask, request, jsonify, render_template_string
+import streamlit as st
 import gspread
 import google.generativeai as genai
 from PIL import Image
-import requests
 import io
 import os
 import re
 import pandas as pd
 import plotly.express as px
 import gc
-import tempfile
 
-app = Flask(__name__)
+# ตั้งค่าหน้าเว็บ Streamlit
+st.set_page_config(page_title="ระบบวิเคราะห์ราคาบอล VIP", page_icon="⚽", layout="centered")
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-genai.configure(api_key=GEMINI_API_KEY)
+# ตั้งค่า API Key ของ Gemini (รองรับทั้งจาก Streamlit Secrets และ Environment Variables)
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+else:
+    st.error("❌ ไม่พบ GEMINI_API_KEY กรุณาตั้งค่าใน Streamlit Secrets")
+
+# เชื่อมต่อ Google Sheets
+@st.cache_resource
+def init_gspread():
+    try:
+        if "gspread" in st.secrets:
+            creds_dict = dict(st.secrets["gspread"])
+            client = gspread.service_account_from_dict(creds_dict)
+        else:
+            creds_path = 'credentials.json'
+            client = gspread.service_account(filename=creds_path)
+        
+        sheet = client.open("ข้อมูลราคาบอลสกัดจากภาพ").sheet1
+        return sheet
+    except Exception as e:
+        st.error(f"❌ เชื่อมต่อ Google Sheets ไม่สำเร็จ: {e}")
+        return None
+
+sheet = init_gspread()
 model = genai.GenerativeModel('gemini-3.5-flash-lite')
-
-creds_path = '/etc/secrets/credentials.json'
-if not os.path.exists(creds_path):
-    creds_path = 'credentials.json'
-
-client = gspread.service_account(filename=creds_path)
-sheet = client.open("ข้อมูลราคาบอลสกัดจากภาพ").sheet1
-
-# HTML แบบมี Tab และเพิ่มระบบ Loading ตอนกดอัปโหลด
-HTML_TEMPLATE = """
-<!DOCTYPE html>
-<html lang="th">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ระบบวิเคราะห์ราคาบอล VIP</title>
-    <!-- โหลด Plotly JS -->
-    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
-    <style>
-        body { font-family: 'Tahoma', sans-serif; background-color: #f4f7f6; display: flex; justify-content: center; padding-top: 50px; margin: 0; min-height: 100vh; }
-        .container { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); width: 90%; max-width: {% if active_tab == 'dashboard' %}1000px{% else %}550px{% endif %}; margin-bottom: 50px;}
-        .tab-menu { display: flex; border-bottom: 2px solid #ecf0f1; margin-bottom: 25px; }
-        .tab-menu a { flex: 1; text-align: center; padding: 12px; text-decoration: none; color: #7f8c8d; font-weight: bold; font-size: 16px; transition: 0.3s; }
-        .tab-menu a:hover { background-color: #f9f9f9; }
-        .tab-menu a.active { border-bottom: 3px solid #27ae60; color: #27ae60; }
-        
-        /* CSS สำหรับหน้า Upload */
-        h2 { color: #2c3e50; margin-bottom: 5px; text-align: center; }
-        p.desc { color: #7f8c8d; font-size: 14px; margin-bottom: 25px; text-align: center; }
-        input[type="file"] { margin: 10px 0 20px 0; padding: 10px; border: 2px dashed #bdc3c7; border-radius: 8px; width: 90%; background: #fafafa; cursor: pointer; }
-        button { background-color: #27ae60; color: white; border: none; padding: 12px 25px; font-size: 16px; border-radius: 8px; cursor: pointer; font-weight: bold; width: 100%; transition: background 0.3s; }
-        button:hover { background-color: #219150; }
-        .result { margin-top: 25px; padding: 15px; background: #e8f8f5; border: 1px solid #1abc9c; border-radius: 8px; color: #16a085; font-size: 14px; }
-        .error { margin-top: 25px; padding: 15px; background: #fadbd8; border: 1px solid #e74c3c; border-radius: 8px; color: #c0392b; }
-        
-        /* สไตล์สำหรับกล่อง Loading */
-        #loading-overlay { display: none; margin-top: 20px; text-align: center; padding: 15px; background: #fef9e7; border: 1px solid #f1c40f; border-radius: 8px; color: #d68910; font-weight: bold; }
-
-        /* CSS สำหรับหน้า Dashboard */
-        .metric-box { display: flex; justify-content: space-between; gap: 15px; margin-bottom: 30px; }
-        .metric { flex: 1; background: #f8f9fa; padding: 20px; border-radius: 8px; text-align: center; border: 1px solid #e9ecef; }
-        .metric h3 { margin: 0; font-size: 32px; color: #2c3e50; }
-        .metric p { margin: 5px 0 0 0; color: #7f8c8d; font-size: 14px; }
-        .charts-row { display: flex; gap: 20px; flex-wrap: wrap; }
-        .chart-col { flex: 1; min-width: 300px; min-height: 400px; background: white; border: 1px solid #e9ecef; border-radius: 8px; padding: 15px; overflow: hidden; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <!-- เมนู Tab สลับหน้า -->
-        <div class="tab-menu">
-            <a href="/" class="{% if active_tab == 'upload' %}active{% endif %}">📸 อัปโหลดราคาบอล</a>
-            <a href="/dashboard" class="{% if active_tab == 'dashboard' %}active{% endif %}">📊 สถิติ (Dashboard)</a>
-        </div>
-
-        {% if active_tab == 'upload' %}
-            <!-- หน้าจออัปโหลดภาพ -->
-            <h2>⚽ สกัดราคาบอล & วิเคราะห์ VIP</h2>
-            <p class="desc">อัปโหลดภาพตารางราคาเพื่อสกัดข้อมูลส่งเข้า Google Sheets</p>
-            
-            <form id="upload-form" action="/" method="POST" enctype="multipart/form-data" style="text-align: center;" onsubmit="showLoading()">
-                <input type="file" name="file" accept="image/*" required>
-                <button type="submit" id="submit-btn">🚀 อัปโหลดและวิเคราะห์ข้อมูล</button>
-            </form>
-
-            <!-- กล่องแจ้งเตือนกำลังโหลด -->
-            <div id="loading-overlay">
-                ⏳ กำลังอัปโหลดและให้ AI วิเคราะห์ข้อมูล กรุณารอสักครู่ (ประมาณ 5-10 วินาที)...
-            </div>
-
-            {% if result %}
-                <div class="result"><strong>✅ สำเร็จ!</strong><br><br>{{ result|safe }}</div>
-            {% elif error %}
-                <div class="error"><strong>❌ เกิดข้อผิดพลาด:</strong><br>{{ error }}</div>
-            {% endif %}
-        
-        {% elif active_tab == 'dashboard' %}
-            <!-- หน้าจอ Dashboard -->
-            <div class="metric-box">
-                <div class="metric"><h3>{{ total_matches }}</h3><p>แมตช์ที่สรุปผลแล้ว</p></div>
-                <div class="metric"><h3>{{ win_matches }}</h3><p>จำนวนที่ชนะ</p></div>
-                <div class="metric"><h3>{{ win_rate }}%</h3><p>Win Rate รวม</p></div>
-            </div>
-            <div class="charts-row">
-                <div class="chart-col">
-                    <h4 style="text-align:center; color:#2c3e50;">สัดส่วน ชนะ/แพ้</h4>
-                    {{ pie_html|safe }}
-                </div>
-                <div class="chart-col">
-                    <h4 style="text-align:center; color:#2c3e50;">ความแม่นยำแยกตามสูตร</h4>
-                    {{ bar_html|safe }}
-                </div>
-            </div>
-        {% endif %}
-    </div>
-
-    <script>
-        function showLoading() {
-            document.getElementById('submit-btn').disabled = true;
-            document.getElementById('submit-btn').style.backgroundColor = '#95a5a6';
-            document.getElementById('submit-btn').innerText = 'กำลังประมวลผล...';
-            document.getElementById('loading-overlay').style.display = 'block';
-        }
-    </script>
-</body>
-</html>
-"""
 
 def process_and_analyze(raw_text):
     raw_data = [item.strip() for item in raw_text.split(',')]
@@ -169,145 +84,119 @@ def process_and_analyze(raw_text):
             else:
                 recommendation = "รอดูสถานการณ์ (น้ำแดงหมด)"
     except Exception as e: 
-        print(f"Calculation Error: {e}")
         recommendation = "ตรวจสอบความถูกต้องของข้อมูล (Error)"
         
     return row_data, recommendation
 
 
-@app.route('/', methods=['GET', 'POST'])
-def upload_page():
-    if request.method == 'POST':
-        file = request.files.get('file')
-        if not file or file.filename == '':
-            return render_template_string(HTML_TEMPLATE, active_tab='upload', error="ไม่ได้เลือกไฟล์")
+# หัวข้อหลักของแอป
+st.title("⚽ ระบบวิเคราะห์ราคาบอล VIP")
+
+# สร้าง Tab สลับหน้า
+tab1, tab2 = st.tabs(["📸 อัปโหลดราคาบอล", "📊 สถิติ (Dashboard)"])
+
+with tab1:
+    st.subheader("สกัดราคาบอล & วิเคราะห์ VIP")
+    st.write("อัปโหลดภาพตารางราคาเพื่อสกัดข้อมูลส่งเข้า Google Sheets อัตโนมัติ")
+    
+    uploaded_file = st.file_uploader("เลือกไฟล์รูปภาพตารางราคาบอล", type=['png', 'jpg', 'jpeg'])
+    
+    if uploaded_file is not None:
+        st.image(uploaded_file, caption="ภาพที่อัปโหลด", use_column_width=True)
         
-        temp_path = None
+        if st.button("🚀 อัปโหลดและวิเคราะห์ข้อมูล", type="primary"):
+            if not sheet:
+                st.error("ไม่สามารถเชื่อมต่อ Google Sheets ได้")
+            else:
+                with st.spinner("⏳ กำลังให้ AI วิเคราะห์ข้อมูลและบันทึกเข้า Google Sheets (รอสักครู่)..."):
+                    try:
+                        img = Image.open(uploaded_file)
+                        if img.mode != 'RGB':
+                            img = img.convert('RGB')
+                        img.thumbnail((800, 800))
+                        
+                        prompt = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ (ระบุเฉพาะตัวเลข ห้ามมีตัวอักษร o หรือ u นำหน้า),ค่าน้ำสูง,ค่าน้ำต่ำ โดยคั่นแต่ละค่าด้วยลูกน้ำ (,) เท่านั้น ห้ามมีข้อความอื่น"
+                        response = model.generate_content([img, prompt])
+                        
+                        gc.collect()
+
+                        if not response or not response.text:
+                            st.error("AI ไม่สามารถอ่านข้อมูลจากภาพนี้ได้ กรุณาลองอัปโหลดภาพใหม่อีกครั้ง")
+                        else:
+                            row_data, rec = process_and_analyze(response.text.strip())
+                            sheet.append_row(row_data)
+                            
+                            st.success("✅ สำเร็จ!")
+                            st.markdown(f"""
+                            <div style="padding: 15px; background: #e8f8f5; border: 1px solid #1abc9c; border-radius: 8px; color: #16a085;">
+                                <strong>คู่แข่งขัน:</strong> {row_data[0]} vs {row_data[1]}<br>
+                                <strong>ผลการวิเคราะห์:</strong> <b>{rec}</b>
+                            </div>
+                            """, unsafe_allow_html=True)
+                    except Exception as e:
+                        st.error(f"เกิดข้อผิดพลาด: {str(e)}")
+                    finally:
+                        gc.collect()
+
+with tab2:
+    st.subheader("📊 สถิติและแดชบอร์ดสรุปผล")
+    if not sheet:
+        st.error("ไม่สามารถเชื่อมต่อ Google Sheets ได้")
+    else:
         try:
-            fd, temp_path = tempfile.mkstemp(suffix=".jpg")
-            file.save(temp_path)
+            data = sheet.get_all_records()
+            df = pd.DataFrame(data)
             
-            with Image.open(temp_path) as img:
-                if img.mode != 'RGB':
-                    img = img.convert('RGB')
-                img.thumbnail((800, 800))
-                
-                prompt = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ (ระบุเฉพาะตัวเลข ห้ามมีตัวอักษร o หรือ u นำหน้า),ค่าน้ำสูง,ค่าน้ำต่ำ โดยคั่นแต่ละค่าด้วยลูกน้ำ (,) เท่านั้น ห้ามมีข้อความอื่น"
-                response = model.generate_content([img, prompt])
-            
-            gc.collect()
+            if df.empty or 'ผลเปรียบเทียบ' not in df.columns:
+                st.warning("ไม่พบข้อมูลผลเปรียบเทียบใน Google Sheets")
+            else:
+                df_comp = df[df['ผลเปรียบเทียบ'].isin(['ชนะ', 'แพ้', 'เจ๊า'])].copy()
+                total = len(df_comp)
+                wins = len(df_comp[df_comp['ผลเปรียบเทียบ'] == 'ชนะ'])
+                win_rate = round((wins / total) * 100, 2) if total > 0 else 0
 
-            if not response or not response.text:
-                return render_template_string(HTML_TEMPLATE, active_tab='upload', error="AI ไม่สามารถอ่านข้อมูลจากภาพนี้ได้ กรุณาลองอัปโหลดภาพใหม่อีกครั้ง")
-                
-            row_data, rec = process_and_analyze(response.text.strip())
-            sheet.append_row(row_data)
-            
-            return render_template_string(HTML_TEMPLATE, active_tab='upload', result=f"ทีม: {row_data[0]} vs {row_data[1]}<br>วิเคราะห์: <b>{rec}</b>")
-            
+                # แสดง Metric ด้านบน
+                col1, col2, col3 = st.columns(3)
+                col1.metric("แมตช์ที่สรุปผลแล้ว", f"{total} คู่")
+                col2.metric("จำนวนที่ชนะ", f"{wins} คู่")
+                col3.metric("Win Rate รวม", f"{win_rate}%")
+
+                st.markdown("---")
+
+                df_comp['แนะนำลงทุน'] = df_comp['แนะนำลงทุน'].astype(str).str.strip()
+                df_comp['แนะนำลงทุน'] = df_comp['แนะนำลงทุน'].replace({
+                    '': 'ข้อมูลว่าง/ซ่อนอยู่',
+                    'nan': 'ข้อมูลว่าง/ซ่อนอยู่',
+                    'None': 'ข้อมูลว่าง/ซ่อนอยู่',
+                    'บอลรองเจ้าบ้านน้ำดำ (VIP ⭐️)': 'บอลรองเจ้าบ้านน้ำดำ (VIP)'
+                })
+
+                # แสดงกราฟ 2 ฝั่ง
+                col_chart1, col_chart2 = st.columns(2)
+
+                with col_chart1:
+                    st.markdown("<h5 style='text-align: center;'>สัดส่วน ชนะ/แพ้</h5>", unsafe_allow_html=True)
+                    pie_fig = px.pie(df_comp, names='ผลเปรียบเทียบ', color='ผลเปรียบเทียบ', 
+                                     color_discrete_map={'ชนะ': '#2ecc71', 'แพ้': '#e74c3c', 'เจ๊า': '#95a5a6'}, hole=0.4)
+                    pie_fig.update_layout(margin=dict(t=20, b=20, l=20, r=20), autosize=True)
+                    st.plotly_chart(pie_fig, use_container_width=True)
+
+                with col_chart2:
+                    st.markdown("<h5 style='text-align: center;'>ความแม่นยำแยกตามสูตร</h5>", unsafe_allow_html=True)
+                    bar_df = df_comp.groupby(['แนะนำลงทุน', 'ผลเปรียบเทียบ'], dropna=False).size().reset_index(name='จำนวน')
+                    
+                    bar_fig = px.bar(bar_df, x='จำนวน', y='แนะนำลงทุน', color='ผลเปรียบเทียบ', barmode='group',
+                                     orientation='h', 
+                                     color_discrete_map={'ชนะ': '#2ecc71', 'แพ้': '#e74c3c', 'เจ๊า': '#95a5a6'})
+                    
+                    bar_fig.update_layout(
+                        margin=dict(t=20, b=20, l=140, r=20), 
+                        xaxis_title="จำนวน (ครั้ง)", 
+                        yaxis_title="", 
+                        yaxis=dict(autorange="reversed"), 
+                        autosize=True
+                    )
+                    st.plotly_chart(bar_fig, use_container_width=True)
+
         except Exception as e:
-            print(f"🔥 UPLOAD ERROR: {str(e)}")
-            return render_template_string(HTML_TEMPLATE, active_tab='upload', error=f"เกิดข้อผิดพลาดในการประมวลผล: {str(e)}")
-            
-        finally:
-            if temp_path and os.path.exists(temp_path):
-                try:
-                    os.remove(temp_path)
-                except:
-                    pass
-            gc.collect()
-
-    return render_template_string(HTML_TEMPLATE, active_tab='upload')
-
-
-@app.route('/dashboard')
-def dashboard_page():
-    try:
-        df = pd.DataFrame(sheet.get_all_records())
-        if df.empty or 'ผลเปรียบเทียบ' not in df.columns:
-            return render_template_string(HTML_TEMPLATE, active_tab='dashboard', error="ไม่พบข้อมูลผลเปรียบเทียบในชีท")
-        
-        df_comp = df[df['ผลเปรียบเทียบ'].isin(['ชนะ', 'แพ้', 'เจ๊า'])].copy()
-        total = len(df_comp)
-        wins = len(df_comp[df_comp['ผลเปรียbเทียบ'] == 'ชนะ']) if 'ผลเปรียบเทียบ' in df_comp.columns else 0 # ป้องกัน KeyError เผื่อสะกดผิด
-        # ใช้คำสั่งที่ปลอดภัยกว่า
-        wins = len(df_comp[df_comp['ผลเปรียบเทียบ'] == 'ชนะ'])
-        win_rate = round((wins / total) * 100, 2) if total > 0 else 0
-
-        df_comp['แนะนำลงทุน'] = df_comp['แนะนำลงทุน'].astype(str).str.strip()
-        df_comp['แนะนำลงทุน'] = df_comp['แนะนำลงทุน'].replace({
-            '': 'ข้อมูลว่าง/ซ่อนอยู่',
-            'nan': 'ข้อมูลว่าง/ซ่อนอยู่',
-            'None': 'ข้อมูลว่าง/ซ่อนอยู่',
-            'บอลรองเจ้าบ้านน้ำดำ (VIP ⭐️)': 'บอลรองเจ้าบ้านน้ำดำ (VIP)'
-        })
-
-        pie_fig = px.pie(df_comp, names='ผลเปรียบเทียบ', color='ผลเปรียบเทียบ', 
-                         color_discrete_map={'ชนะ': '#2ecc71', 'แพ้': '#e74c3c', 'เจ๊า': '#95a5a6'}, hole=0.4)
-        pie_fig.update_layout(margin=dict(t=20, b=20, l=20, r=20), autosize=True)
-        pie_html = pie_fig.to_html(full_html=False, include_plotlyjs=False, 
-                                   default_width='100%', default_height='350px', 
-                                   config={'responsive': True})
-
-        bar_df = df_comp.groupby(['แนะนำลงทุน', 'ผลเปรียบเทียบ'], dropna=False).size().reset_index(name='จำนวน')
-        
-        bar_fig = px.bar(bar_df, x='จำนวน', y='แนะนำลงทุน', color='ผลเปรียบเทียบ', barmode='group',
-                         orientation='h', 
-                         color_discrete_map={'ชนะ': '#2ecc71', 'แพ้': '#e74c3c', 'เจ๊า': '#95a5a6'})
-        
-        bar_fig.update_layout(
-            margin=dict(t=20, b=20, l=140, r=20), 
-            xaxis_title="จำนวน (ครั้ง)", 
-            yaxis_title="", 
-            yaxis=dict(autorange="reversed"), 
-            autosize=True
-        )
-        
-        bar_html = bar_fig.to_html(full_html=False, include_plotlyjs=False, 
-                                   default_width='100%', default_height='400px', 
-                                   config={'responsive': True})
-
-        return render_template_string(
-            HTML_TEMPLATE, 
-            active_tab='dashboard', 
-            total_matches=total, 
-            win_matches=wins, 
-            win_rate=win_rate,
-            pie_html=pie_html,
-            bar_html=bar_html
-        )
-    except Exception as e:
-        print(f"🔥 DASHBOARD ERROR: {str(e)}")
-        return render_template_string(HTML_TEMPLATE, active_tab='dashboard', error=f"เกิดข้อผิดพลาดในการโหลดข้อมูลสถิติ: {str(e)}")
-
-
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    try:
-        image_url = request.json.get('image_url')
-        img_resp = requests.get(image_url)
-        fd, temp_path = tempfile.mkstemp(suffix=".jpg")
-        with open(temp_path, 'wb') as f:
-            f.write(img_resp.content)
-            
-        with Image.open(temp_path) as img:
-            if img.mode != 'RGB':
-                img = img.convert('RGB')
-            img.thumbnail((800, 800))
-            
-            prompt = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ..."
-            response = model.generate_content([img, prompt])
-            
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-        gc.collect()
-        
-        row_data, rec = process_and_analyze(response.text.strip())
-        sheet.append_row(row_data)
-        return jsonify({"status": "success", "data": row_data}), 200
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+            st.error(f"เกิดข้อผิดพลาดในการโหลดข้อมูลสถิติ: {str(e)}")
