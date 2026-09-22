@@ -8,6 +8,8 @@ import os
 import re
 import pandas as pd
 import plotly.express as px
+import gc  # ⭐️ เพิ่มไลบรารีสำหรับล้างหน่วยความจำ (Garbage Collection)
+import tempfile # ⭐️ เพิ่มไลบรารีสำหรับสร้างไฟล์ชั่วคราว
 
 app = Flask(__name__)
 
@@ -166,38 +168,56 @@ def process_and_analyze(raw_text):
     return row_data, recommendation
 
 
-# Route: หน้าอัปโหลด (Tab 1) - ปรับปรุงระบบป้องกัน Server Error
+# Route: หน้าอัปโหลด (Tab 1) - อัปเกรดระบบล้าง RAM และ Temp File
 @app.route('/', methods=['GET', 'POST'])
 def upload_page():
     if request.method == 'POST':
         file = request.files.get('file')
         if not file or file.filename == '':
             return render_template_string(HTML_TEMPLATE, active_tab='upload', error="ไม่ได้เลือกไฟล์")
+        
+        temp_path = None # กำหนดตัวแปรไว้ก่อน
+        
         try:
-            # 1. โหลดภาพขึ้นมา
-            img = Image.open(io.BytesIO(file.read()))
+            # ⭐️ 1. บันทึกรูปลงเซิร์ฟเวอร์ชั่วคราว (Harddisk) แทนการเทลง RAM
+            fd, temp_path = tempfile.mkstemp(suffix=".jpg")
+            file.save(temp_path)
             
-            # 2. แปลงโหมดสีเป็น RGB (ลดขนาด RAM ลงจากภาพ PNG ที่โปร่งใสหรือ 32-bit)
-            if img.mode != 'RGB':
-                img = img.convert('RGB')
+            # ⭐️ 2. เปิดรูปจากไฟล์ที่เซฟไว้ และบังคับปิดไฟล์ทันทีที่ย่อรูปเสร็จ
+            with Image.open(temp_path) as img:
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+                # ย่อรูปให้เล็กลงเหลือ 800px (เพื่อเซฟ RAM ขั้นสุด)
+                img.thumbnail((800, 800))
                 
-            # 3. บีบอัดและย่อขนาดภาพให้กว้าง/ยาว ไม่เกิน 1024 พิกเซล (ประหยัด RAM ของ Render ได้เกิน 70%)
-            img.thumbnail((1024, 1024))
-
-            prompt = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ (ระบุเฉพาะตัวเลข ห้ามมีตัวอักษร o หรือ u นำหน้า),ค่าน้ำสูง,ค่าน้ำต่ำ โดยคั่นแต่ละค่าด้วยลูกน้ำ (,) เท่านั้น ห้ามมีข้อความอื่น"
-            response = model.generate_content([img, prompt])
+                # เตรียมส่งข้อมูลให้ Gemini ทันทีใน Context นี้
+                prompt = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ (ระบุเฉพาะตัวเลข ห้ามมีตัวอักษร o หรือ u นำหน้า),ค่าน้ำสูง,ค่าน้ำต่ำ โดยคั่นแต่ละค่าด้วยลูกน้ำ (,) เท่านั้น ห้ามมีข้อความอื่น"
+                response = model.generate_content([img, prompt])
             
+            # ⭐️ 3. สั่งกวาดขยะใน RAM ทันทีที่ AI วิเคราะห์เสร็จ
+            gc.collect()
+
             if not response or not response.text:
                 return render_template_string(HTML_TEMPLATE, active_tab='upload', error="AI ไม่สามารถอ่านข้อมูลจากภาพนี้ได้ กรุณาลองอัปโหลดภาพใหม่อีกครั้ง")
                 
             row_data, rec = process_and_analyze(response.text.strip())
             sheet.append_row(row_data)
+            
             return render_template_string(HTML_TEMPLATE, active_tab='upload', result=f"ทีม: {row_data[0]} vs {row_data[1]}<br>วิเคราะห์: <b>{rec}</b>")
+            
         except Exception as e:
-            # พิมพ์ Error จริงไว้ดูใน Terminal ของเซิร์ฟเวอร์
             print(f"🔥 UPLOAD ERROR: {str(e)}")
-            # แสดงข้อความปลอดภัยบนหน้าเว็บแทนที่จะเป็นหน้าขาว Internal Server Error
-            return render_template_string(HTML_TEMPLATE, active_tab='upload', error="เกิดข้อผิดพลาดในการประมวลผลภาพหรือเชื่อมต่อ Google Sheets กรุณาลองใหม่อีกครั้ง")
+            return render_template_string(HTML_TEMPLATE, active_tab='upload', error=f"เกิดข้อผิดพลาดในการประมวลผล: {str(e)}")
+            
+        finally:
+            # ⭐️ 4. ลบไฟล์ภาพชั่วคราวทิ้งทุกครั้ง ไม่ว่าจะสำเร็จหรือ Error เพื่อคืนพื้นที่ให้เซิร์ฟเวอร์
+            if temp_path and os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except:
+                    pass
+            gc.collect() # ล้าง RAM รอบสุดท้าย
+
     return render_template_string(HTML_TEMPLATE, active_tab='upload')
 
 
