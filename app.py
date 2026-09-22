@@ -174,7 +174,16 @@ def upload_page():
         if not file or file.filename == '':
             return render_template_string(HTML_TEMPLATE, active_tab='upload', error="ไม่ได้เลือกไฟล์")
         try:
+            # 1. โหลดภาพขึ้นมา
             img = Image.open(io.BytesIO(file.read()))
+            
+            # 2. แปลงโหมดสีเป็น RGB (ลดขนาด RAM ลงจากภาพ PNG ที่โปร่งใสหรือ 32-bit)
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+                
+            # 3. บีบอัดและย่อขนาดภาพให้กว้าง/ยาว ไม่เกิน 1024 พิกเซล (ประหยัด RAM ของ Render ได้เกิน 70%)
+            img.thumbnail((1024, 1024))
+
             prompt = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ (ระบุเฉพาะตัวเลข ห้ามมีตัวอักษร o หรือ u นำหน้า),ค่าน้ำสูง,ค่าน้ำต่ำ โดยคั่นแต่ละค่าด้วยลูกน้ำ (,) เท่านั้น ห้ามมีข้อความอื่น"
             response = model.generate_content([img, prompt])
             
@@ -258,6 +267,12 @@ def webhook():
     try:
         image_url = request.json.get('image_url')
         img = Image.open(io.BytesIO(requests.get(image_url).content))
+        
+        # ⭐️ ระบบย่อรูปภาพสำหรับ Webhook
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+        img.thumbnail((1024, 1024))
+        
         prompt = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ..."
         response = model.generate_content([img, prompt])
         row_data, rec = process_and_analyze(response.text.strip())
