@@ -43,9 +43,10 @@ def process_and_analyze(raw_text):
     raw_data = [item.strip() for item in raw_text.split(',')]
     row_data = []
     
+    # 1. ทำความสะอาดข้อมูลที่สกัดจากภาพ
     for i, item in enumerate(raw_data):
         if i < 2:
-            row_data.append(item)
+            row_data.append(item) # ชื่อทีมเหย้า, ชื่อทีมเยือน
         else:
             cleaned = re.sub(r'^[oOuU\s]+', '', item)
             try:
@@ -56,35 +57,66 @@ def process_and_analyze(raw_text):
     recommendation = "รอดูสถานการณ์ (รอข้อมูล)"
     
     try:
-        home_1x2, away_1x2 = float(row_data[2]), float(row_data[4])
-        hdp_home, hdp_away = float(row_data[6]), float(row_data[8])
-        over_odds, under_odds = float(row_data[10]), float(row_data[11])
-
-        if any(pd.isna(x) for x in [home_1x2, away_1x2, hdp_home, hdp_away, over_odds, under_odds]):
-             recommendation = "ข้อมูลไม่ครบถ้วน (ข้าม)"
-        elif abs(home_1x2 - away_1x2) > 2.5:
-             recommendation = "ข้าม (บอลห่างชั้นเกินไป)"
-        elif home_1x2 > away_1x2 and hdp_home > 0:
-            recommendation = "บอลรองเจ้าบ้านน้ำดำ (VIP)"
-        else:
-            odds_dict = {
-                "เชียร์เจ้าบ้าน (น้ำดำ)": hdp_home,
-                "เชียร์ทีมเยือน (น้ำดำ)": hdp_away,
-                "ลุ้นสูง (น้ำดำ)": over_odds,
-                "ลุ้นต่ำ (น้ำดำ)": under_odds
-            }
-            positive_odds = {k: v for k, v in odds_dict.items() if v > 0}
-            if positive_odds:
-                best_choice = max(positive_odds, key=positive_odds.get)
-                max_value = positive_odds[best_choice]
-                if max_value < 0.75 or max_value > 0.95:
-                    recommendation = "ข้าม (ค่าน้ำเสี่ยงเกินไป)"
+        # เช็กว่าข้อมูลมีครบ 12 ค่าตามที่ Prompt กำหนดหรือไม่
+        if len(row_data) < 12:
+            return row_data, "ข้อมูลไม่ครบถ้วน (ข้าม)"
+            
+        # 2. แมปตัวแปรตามลำดับใน Prompt
+        home1x2 = float(row_data[2])
+        away1x2 = float(row_data[4])
+        hdp_line = float(row_data[5])   # แฮนดิแคป (เหย้า)
+        hdp_home = float(row_data[6])   # ค่าน้ำ HDP (เหย้า)
+        hdp_away = float(row_data[8])   # ค่าน้ำ HDP (เยือน)
+        over_odds = float(row_data[10]) # ค่าน้ำสูง
+        under_odds = float(row_data[11])# ค่าน้ำต่ำ
+        
+        # ดักจับข้อมูลค่าน้ำ 1X2 ที่ผิดปกติ
+        if home1x2 <= 0 or away1x2 <= 0:
+            return row_data, "ข้อมูลผิดพลาด (ไม่ใช่ตัวเลข/ค่าน้ำเสีย - ตรวจสอบ)"
+            
+        # 3. คำนวณ Implied Probability Gap เพื่อดูความห่างชั้น
+        implied_gap = abs((1 / home1x2) - (1 / away1x2))
+        if implied_gap > 0.35:
+            recommendation = "ข้าม (บอลห่างชั้นเกินไป)"
+            
+        # 4. เช็กเงื่อนไข VIP (บอลรองเจ้าบ้าน)
+        elif home1x2 > away1x2 and hdp_home > 0:
+            if hdp_line >= 0.5:
+                if 0.5 <= hdp_home <= 1.2:
+                    recommendation = "บอลรองเจ้าบ้านน้ำดำ (VIP)"
                 else:
-                    recommendation = best_choice
+                    recommendation = "ข้าม (VIP ค่าน้ำผิดปกติ)"
             else:
+                recommendation = "ข้าม (VIP แต้มต่อน้อยเกินไป)"
+                
+        # 5. กรณีไม่เข้า VIP ให้เช็กค่าน้ำปกติเพื่อหาตัวเลือกที่ดีที่สุด
+        else:
+            max_odds = max(hdp_home, hdp_away, over_odds, under_odds)
+            if max_odds <= 0:
                 recommendation = "รอดูสถานการณ์ (น้ำแดงหมด)"
-    except Exception as e: 
-        recommendation = "ตรวจสอบความถูกต้องของข้อมูล (Error)"
+            elif max_odds < 0.75 or max_odds > 0.95:
+                recommendation = "ข้าม (ค่าน้ำเสี่ยงเกินไป)"
+            else:
+                # เรียงลำดับความสำคัญในกรณีที่ค่าน้ำเท่ากัน
+                if max_odds == hdp_home:
+                    recommendation = "เชียร์เจ้าบ้าน (น้ำดำ)"
+                elif max_odds == hdp_away:
+                    recommendation = "เชียร์ทีมเยือน (น้ำดำ)"
+                elif max_odds == over_odds:
+                    recommendation = "ลุ้นสูง (น้ำดำ)"
+                else:
+                    recommendation = "ลุ้นต่ำ (น้ำดำ)"
+
+    except ValueError:
+        # หากแปลงข้อมูลเป็น float ไม่ได้ (อ่านมาเป็นตัวหนังสือ)
+        recommendation = "ข้อมูลผิดพลาด (ไม่ใช่ตัวเลข/ค่าน้ำเสีย - ตรวจสอบ)"
+    except Exception as e:
+        recommendation = f"ตรวจสอบความถูกต้องของข้อมูล (Error: {str(e)})"
+        
+    # เพิ่มคำแนะนำใหม่เข้าไปใน List เพื่อเตรียมส่งต่อ
+    if len(row_data) == 12:
+        # สมมติว่ายังไม่มีคอลัมน์ แนะนำลงทุน ใน row_data เราจะแทรกเข้าไป หรือถ้าชีทรับแค่ 12 ตัว ก็ต้องขยาย
+        pass # Streamlit จะเอา rec ไปเขียนแยกต่างหาก หรือ append ต่อท้าย
         
     return row_data, recommendation
 
