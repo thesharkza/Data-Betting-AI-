@@ -39,7 +39,7 @@ def init_gspread():
 
 sheet = init_gspread()
 # ใช้โมเดล gemini-1.5-flash เพื่อความรวดเร็วและความเสถียร (ไม่ติด Rate Limit ง่ายๆ)
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-3.5-flash-lite')
 
 def process_and_analyze(raw_text):
     """
