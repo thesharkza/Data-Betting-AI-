@@ -10,7 +10,7 @@ import plotly.express as px
 import gc
 
 # ตั้งค่าหน้าเว็บ Streamlit
-st.set_page_config(page_title="ระบบวิเคราะห์ราคาบอล VIP", page_icon="⚽", layout="centered")
+st.set_page_config(page_title="ระบบวิเคราะห์ราคาบอล VIP", page_icon="⚽", layout="wide")
 
 # ตั้งค่า API Key ของ Gemini (รองรับทั้งจาก Streamlit Secrets และ Environment Variables)
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
@@ -38,13 +38,12 @@ def init_gspread():
         return None
 
 sheet = init_gspread()
-# ใช้โมเดล gemini-1.5-flash เพื่อความรวดเร็วและความเสถียร (ไม่ติด Rate Limit ง่ายๆ)
-model = genai.GenerativeModel('gemini-3.5-flash-lite')
+# ใช้โมเดล gemini-1.5-flash เพื่อความรวดเร็วและความเสถียร
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 def process_and_analyze(raw_text):
     """
     ฟังก์ชันทำความสะอาดข้อมูลดิบและวิเคราะห์เพื่อหาคำแนะนำการลงทุน
-    ตามเงื่อนไขทางสถิติ (Implied Probability, Handicap Line, Value Odds)
     """
     raw_data = [item.strip() for item in raw_text.split(',')]
     row_data = []
@@ -87,7 +86,6 @@ def process_and_analyze(raw_text):
             
         # 4. เช็กเงื่อนไข VIP (บอลรองเจ้าบ้าน)
         elif home1x2 > away1x2 and hdp_home > 0:
-            # เพิ่มเงื่อนไขเช็กว่าแต้มต่อต้องมากกว่าหรือเท่ากับ 0.5
             if hdp_line >= 0.5:
                 if 0.5 <= hdp_home <= 1.2:
                     recommendation = "บอลรองเจ้าบ้านน้ำดำ (VIP)"
@@ -96,7 +94,7 @@ def process_and_analyze(raw_text):
             else:
                 recommendation = "ข้าม (VIP แต้มต่อน้อยเกินไป)"
                 
-        # 5. กรณีไม่เข้า VIP ให้เช็กค่าน้ำปกติเพื่อหาตัวเลือกที่ดีที่สุด (Value Bet)
+        # 5. กรณีไม่เข้า VIP ให้เช็กค่าน้ำปกติเพื่อหาตัวเลือกที่ดีที่สุด
         else:
             max_odds = max(hdp_home, hdp_away, over_odds, under_odds)
             if max_odds <= 0:
@@ -115,7 +113,6 @@ def process_and_analyze(raw_text):
                     recommendation = "ลุ้นต่ำ (น้ำดำ)"
 
     except ValueError:
-        # หากแปลงข้อมูลเป็น float ไม่ได้ (อ่านมาเป็นตัวหนังสือ)
         recommendation = "ข้อมูลผิดพลาด (ไม่ใช่ตัวเลข/ค่าน้ำเสีย - ตรวจสอบ)"
     except Exception as e:
         recommendation = f"ตรวจสอบความถูกต้องของข้อมูล (Error: {str(e)})"
@@ -136,7 +133,7 @@ with tab1:
     uploaded_file = st.file_uploader("เลือกไฟล์รูปภาพตารางราคาบอล", type=['png', 'jpg', 'jpeg'])
     
     if uploaded_file is not None:
-        st.image(uploaded_file, caption="ภาพที่อัปโหลด", use_container_width=True)
+        st.image(uploaded_file, caption="ภาพที่อัปโหลด", width=600)
         
         if st.button("🚀 อัปโหลดและวิเคราะห์ข้อมูล", type="primary"):
             if not sheet:
@@ -150,7 +147,6 @@ with tab1:
                             img = img.convert('RGB')
                         img.thumbnail((800, 800))
                         
-                        # บีบอัดเป็น JPEG ไบต์ เพื่อส่งข้อมูลขึ้น Server AI ได้เร็วขึ้น
                         img_byte_arr = io.BytesIO()
                         img.save(img_byte_arr, format='JPEG', quality=80)
                         img_bytes = img_byte_arr.getvalue()
@@ -173,26 +169,36 @@ with tab1:
                         with st.spinner("📊 กำลังบันทึกข้อมูลลง Google Sheets..."):
                             row_data, rec = process_and_analyze(response.text.strip())
                             
-                            # ส่งข้อมูลเข้าชีทแค่ 12 ตัวแรก (คอลัมน์ A ถึง L) เท่านั้น 
-                            # เพื่อไม่ให้ไปทับที่ของสูตร Array ในคอลัมน์ M-S
+                            # ส่งข้อมูลเข้าชีทแค่ 12 ตัวแรก (คอลัมน์ A ถึง L) เพื่อไม่กวนสูตร Array ท้ายตาราง
                             row_data_to_sheet = row_data[:12]
                             
                             # กรองหาบรรทัดว่างที่แท้จริง
                             col_a_values = sheet.col_values(1)
+                            col_b_values = sheet.col_values(2) 
+                            
                             last_row = 0
                             for i, val in enumerate(col_a_values):
                                 if str(val).strip() != "":
                                     last_row = i + 1
-                                    
-                            next_row = last_row + 1
                             
-                            # สั่งเขียนเฉพาะคอลัมน์ A-L
-                            sheet.update(range_name=f"A{next_row}", values=[row_data_to_sheet])
-                            
-                            # เพิ่ม table_range="A1" เพื่อบังคับให้ค้นหาบรรทัดว่างอิงจากคอลัมน์ A (ป้องกันไปต่อท้ายสูตร)
-                            sheet.append_row(row_data_to_sheet, table_range="A1")
+                            # 🛡️ ระบบป้องกันข้อมูลเบิ้ล (Duplicate Check)
+                            is_duplicate = False
+                            if last_row > 1 and len(row_data_to_sheet) >= 2: 
+                                last_home_team = str(col_a_values[last_row - 1]).strip()
+                                last_away_team = str(col_b_values[last_row - 1]).strip()
+                                
+                                if str(row_data_to_sheet[0]).strip() == last_home_team and str(row_data_to_sheet[1]).strip() == last_away_team:
+                                    is_duplicate = True
+
+                            if is_duplicate:
+                                st.warning(f"⚠️ ข้อมูลคู่นี้ ({row_data_to_sheet[0]} vs {row_data_to_sheet[1]}) ถูกบันทึกลง Sheet ไปแล้ว (ระบบข้ามการบันทึกซ้ำ)")
+                            else:
+                                next_row = last_row + 1
+                                # สั่งเขียนเฉพาะคอลัมน์ A-L เมื่อข้อมูลไม่ซ้ำ
+                                sheet.update(range_name=f"A{next_row}", values=[row_data_to_sheet])
+                                st.success("✅ บันทึกข้อมูลลง Google Sheets สำเร็จ!")
                         
-                        st.success("✅ สำเร็จ!")
+                        # แสดงผลลัพธ์บนหน้าเว็บ
                         st.markdown(f"""
                         <div style="padding: 15px; background: #e8f8f5; border: 1px solid #1abc9c; border-radius: 8px; color: #16a085;">
                             <strong>คู่แข่งขัน:</strong> {row_data[0]} vs {row_data[1]}<br>
@@ -217,18 +223,16 @@ with tab2:
             if df.empty or 'ผลเปรียบเทียบ' not in df.columns:
                 st.warning("ไม่พบข้อมูลผลเปรียบเทียบใน Google Sheets")
             else:
-                # กรองเฉพาะแถวที่มีการสรุปผลแล้ว (ชนะ, ชนะครึ่ง, แพ้, แพ้ครึ่ง, เจ๊า)
+                # กรองเฉพาะแถวที่มีการสรุปผลแล้ว
                 df_comp = df[df['ผลเปรียบเทียบ'].astype(str).str.contains('ชนะ|แพ้|เจ๊า', na=False)].copy()
                 total = len(df_comp)
                 
-                # นับจำนวนชนะ (รวมชนะเต็มและชนะครึ่ง)
+                # นับคะแนนแบบแยก ชนะเต็ม(1) ชนะครึ่ง(0.5)
                 wins_full = len(df_comp[df_comp['ผลเปรียบเทียบ'] == 'ชนะเต็ม'])
                 wins_half = len(df_comp[df_comp['ผลเปรียบเทียบ'] == 'ชนะครึ่ง'])
                 total_wins = wins_full + (wins_half * 0.5)
-                
                 draws = len(df_comp[df_comp['ผลเปรียบเทียบ'] == 'เจ๊า'])
                 
-                # คำนวณ Win Rate หักลบเจ๊า
                 win_rate = round((total_wins / (total - draws)) * 100, 2) if (total - draws) > 0 else 0
 
                 # แสดง Metric ด้านบน
@@ -243,15 +247,14 @@ with tab2:
                 df_comp['แนะนำลงทุน'] = df_comp['แนะนำลงทุน'].replace({
                     '': 'ข้อมูลว่าง/ซ่อนอยู่',
                     'nan': 'ข้อมูลว่าง/ซ่อนอยู่',
-                    'None': 'ข้อมูลว่าง/ซ่อนอยู่',
-                    'บอลรองเจ้าบ้านน้ำดำ (VIP ⭐️)': 'บอลรองเจ้าบ้านน้ำดำ (VIP)'
+                    'None': 'ข้อมูลว่าง/ซ่อนอยู่'
                 })
 
-                # แสดงกราฟ 2 ฝั่ง
+                # สร้างกราฟ 2 ฝั่ง
                 col_chart1, col_chart2 = st.columns(2)
 
                 with col_chart1:
-                    st.markdown("<h5 style='text-align: center;'>สัดส่วนผลลัพธ์</h5>", unsafe_allow_html=True)
+                    st.markdown("<h5 style='text-align: center;'>สัดส่วนผลลัพธ์โดยรวม</h5>", unsafe_allow_html=True)
                     pie_fig = px.pie(df_comp, names='ผลเปรียบเทียบ', color='ผลเปรียบเทียบ', 
                                      color_discrete_map={
                                          'ชนะเต็ม': '#2ecc71', 'ชนะครึ่ง': '#27ae60', 
@@ -262,10 +265,10 @@ with tab2:
                     st.plotly_chart(pie_fig, use_container_width=True)
 
                 with col_chart2:
-                    st.markdown("<h5 style='text-align: center;'>ความแม่นยำแยกตามสูตร</h5>", unsafe_allow_html=True)
+                    st.markdown("<h5 style='text-align: center;'>ความแม่นยำแยกตามสูตรการลงทุน</h5>", unsafe_allow_html=True)
                     bar_df = df_comp.groupby(['แนะนำลงทุน', 'ผลเปรียบเทียบ'], dropna=False).size().reset_index(name='จำนวน')
                     
-                    bar_fig = px.bar(bar_df, x='จำนวน', y='แนะนำลงทุน', color='ผลเปรียบเทียบ', barmode='group',
+                    bar_fig = px.bar(bar_df, x='จำนวน', y='แนะนำลงทุน', color='ผลเปรียบเทียบ', barmode='stack',
                                      orientation='h', 
                                      color_discrete_map={
                                          'ชนะเต็ม': '#2ecc71', 'ชนะครึ่ง': '#27ae60', 
