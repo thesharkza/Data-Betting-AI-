@@ -173,18 +173,21 @@ with tab1:
                         with st.spinner("📊 กำลังบันทึกข้อมูลลง Google Sheets..."):
                             row_data, rec = process_and_analyze(response.text.strip())
                             
-                            # เตรียม Array ให้ตรงกับคอลัมน์ใน Sheets 
-                            row_data_to_sheet = row_data.copy()
-                            row_data_to_sheet.extend(["", "", "", rec])
+                            # ส่งข้อมูลเข้าชีทแค่ 12 ตัวแรก (คอลัมน์ A ถึง L) เท่านั้น 
+                            # เพื่อไม่ให้ไปทับที่ของสูตร Array ในคอลัมน์ M-S
+                            row_data_to_sheet = row_data[:12]
                             
-                            # --- โค้ดชุดใหม่ บังคับเขียนต่อท้ายคอลัมน์ A ---
-                            # 1. เช็กว่าคอลัมน์ A มีข้อมูลถึงบรรทัดไหน
+                            # กรองหาบรรทัดว่างที่แท้จริง
                             col_a_values = sheet.col_values(1)
-                            # 2. หาหมายเลขบรรทัดถัดไปที่ว่างจริงๆ
-                            next_row = len(col_a_values) + 1
-                            # 3. สั่งอัปเดตข้อมูลเจาะจงไปที่บรรทัดนั้นเลย 
+                            last_row = 0
+                            for i, val in enumerate(col_a_values):
+                                if str(val).strip() != "":
+                                    last_row = i + 1
+                                    
+                            next_row = last_row + 1
+                            
+                            # สั่งเขียนเฉพาะคอลัมน์ A-L
                             sheet.update(range_name=f"A{next_row}", values=[row_data_to_sheet])
-                            # ----------------------------------------
                             
                             # เพิ่ม table_range="A1" เพื่อบังคับให้ค้นหาบรรทัดว่างอิงจากคอลัมน์ A (ป้องกันไปต่อท้ายสูตร)
                             sheet.append_row(row_data_to_sheet, table_range="A1")
