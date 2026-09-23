@@ -173,9 +173,18 @@ with tab1:
                         with st.spinner("📊 กำลังบันทึกข้อมูลลง Google Sheets..."):
                             row_data, rec = process_and_analyze(response.text.strip())
                             
-                            # เตรียม Array ให้ตรงกับคอลัมน์ใน Sheets (แทรกช่องว่างผลสกอร์, HDP, สูงต่ำ เพื่อดัน rec ไปตกคอลัมน์ P)
+                            # เตรียม Array ให้ตรงกับคอลัมน์ใน Sheets 
                             row_data_to_sheet = row_data.copy()
                             row_data_to_sheet.extend(["", "", "", rec])
+                            
+                            # --- โค้ดชุดใหม่ บังคับเขียนต่อท้ายคอลัมน์ A ---
+                            # 1. เช็กว่าคอลัมน์ A มีข้อมูลถึงบรรทัดไหน
+                            col_a_values = sheet.col_values(1)
+                            # 2. หาหมายเลขบรรทัดถัดไปที่ว่างจริงๆ
+                            next_row = len(col_a_values) + 1
+                            # 3. สั่งอัปเดตข้อมูลเจาะจงไปที่บรรทัดนั้นเลย 
+                            sheet.update(range_name=f"A{next_row}", values=[row_data_to_sheet])
+                            # ----------------------------------------
                             
                             # เพิ่ม table_range="A1" เพื่อบังคับให้ค้นหาบรรทัดว่างอิงจากคอลัมน์ A (ป้องกันไปต่อท้ายสูตร)
                             sheet.append_row(row_data_to_sheet, table_range="A1")
