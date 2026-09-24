@@ -84,9 +84,11 @@ def process_and_analyze(raw_text):
         if implied_gap > 0.35:
             recommendation = "ข้าม (บอลห่างชั้นเกินไป)"
             
-        # 4. เช็กเงื่อนไข VIP (บอลรองเจ้าบ้าน)
+        # 4. เช็กเงื่อนไข Super VIP และ VIP (บอลรองเจ้าบ้าน)
         elif home1x2 > away1x2 and hdp_home > 0:
-            if hdp_line >= 0.5:
+            if hdp_line >= 0.75 and 0.15 <= implied_gap <= 0.35 and hdp_home >= 0.80:
+                recommendation = "Super VIP 💎 (รองเหย้าสู้ตาย)"
+            elif hdp_line >= 0.5:
                 if 0.5 <= hdp_home <= 1.2:
                     recommendation = "บอลรองเจ้าบ้านน้ำดำ (VIP)"
                 else:
@@ -94,7 +96,11 @@ def process_and_analyze(raw_text):
             else:
                 recommendation = "ข้าม (VIP แต้มต่อน้อยเกินไป)"
                 
-        # 5. กรณีไม่เข้า VIP ให้เช็กค่าน้ำปกติเพื่อหาตัวเลือกที่ดีที่สุด
+        # 5. เช็กเงื่อนไข Away Sneak (ทีมเยือนต่อเรทสูสี)
+        elif away1x2 < home1x2 and implied_gap < 0.15 and hdp_line <= 0.25 and hdp_away >= 0.80:
+            recommendation = "ทีเด็ดทีมเยือน 🚀 (Away Sneak)"
+                
+        # 6. กรณีทั่วไป ให้เช็กค่าน้ำเพื่อหาตัวเลือกที่ดีที่สุด
         else:
             max_odds = max(hdp_home, hdp_away, over_odds, under_odds)
             if max_odds <= 0:
@@ -102,8 +108,10 @@ def process_and_analyze(raw_text):
             elif max_odds < 0.75 or max_odds > 0.95:
                 recommendation = "ข้าม (ค่าน้ำเสี่ยงเกินไป)"
             else:
-                # เรียงลำดับความสำคัญในกรณีที่ค่าน้ำเท่ากัน
-                if max_odds == hdp_home:
+                # อัปเกรดเงื่อนไขสูง/ต่ำ
+                if max_odds == over_odds and over_odds >= 0.80 and ou_line != 2.5:
+                    recommendation = "สูงสั่งตาย 🔥 (Over Master)"
+                elif max_odds == hdp_home:
                     recommendation = "เชียร์เจ้าบ้าน (น้ำดำ)"
                 elif max_odds == hdp_away:
                     recommendation = "เชียร์ทีมเยือน (น้ำดำ)"
