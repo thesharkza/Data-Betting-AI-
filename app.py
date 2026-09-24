@@ -82,9 +82,12 @@ def process_and_analyze(raw_text):
         # 3. คำนวณ Implied Probability Gap
         implied_gap = abs((1 / home1x2) - (1 / away1x2))
         
-        # --- เพิ่มเงื่อนไข David vs Goliath (รองเหย้าหนีตาย) ก่อนเช็ก Gap ปกติ ---
-        if away1x2 < home1x2 and implied_gap > 0.35 and hdp_line >= 0.75:
-            recommendation = "David vs Goliath 🏰 (รองเหย้าหนีตาย)"
+        # แทรกเงื่อนไข David vs Goliath ตรงนี้ (ห่างชั้นเกินไป แต่ทีมเยือนต่อแพง)
+        if implied_gap > 0.35:
+            if away1x2 < home1x2 and hdp_line >= 0.75:
+                recommendation = "David vs Goliath 🏰 (รองเจ้าบ้านหนีตาย)"
+            else:
+                recommendation = "ข้าม (บอลห่างชั้นเกินไป)"
             
         # ถ้าห่างชั้นกันเกินไป แต่ไม่เข้าเงื่อนไขด้านบน ให้ข้ามเหมือนเดิม
         elif implied_gap > 0.35:
