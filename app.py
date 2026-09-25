@@ -12,7 +12,7 @@ import gc
 # ตั้งค่าหน้าเว็บ Streamlit
 st.set_page_config(page_title="ระบบวิเคราะห์ราคาบอล VIP", page_icon="⚽", layout="wide")
 
-# ตั้งค่า API Key ของ Gemini (รองรับทั้งจาก Streamlit Secrets และ Environment Variables)
+# ตั้งค่า API Key ของ Gemini
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
@@ -30,7 +30,7 @@ def init_gspread():
             creds_path = 'credentials.json'
             client = gspread.service_account(filename=creds_path)
         
-        # 💡 เปลี่ยนเป็นเชื่อมต่อแบบดึงมาทั้งไฟล์ (Workbook) เพื่อให้เข้าถึงได้หลายชีท
+        # เชื่อมต่อ Sheet ชื่อ 'ข้อมูลราคาบอลสกัดจากภาพ'
         workbook = client.open("ข้อมูลราคาบอลสกัดจากภาพ")
         return workbook
     except Exception as e:
@@ -38,13 +38,17 @@ def init_gspread():
         return None
 
 workbook = init_gspread()
-# ใช้โมเดล gemini-3.5-flash เพื่อความรวดเร็ว
-model = genai.GenerativeModel('gemini-3.5-flash-lite')
+# ใช้โมเดล gemini-1.5-flash เพื่อความรวดเร็วและความเสถียรสูงสุด
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 def process_and_analyze(raw_text):
+    """
+    ฟังก์ชันทำความสะอาดข้อมูลดิบและวิเคราะห์เพื่อหาคำแนะนำการลงทุน
+    """
     raw_data = [item.strip() for item in raw_text.split(',')]
     row_data = []
 
+    # 1. ทำความสะอาดข้อมูลที่สกัดจากภาพ
     for i, item in enumerate(raw_data):
         if i < 2:
             row_data.append(item) 
@@ -58,9 +62,11 @@ def process_and_analyze(raw_text):
     recommendation = "รอดูสถานการณ์ (รอข้อมูล)"
 
     try:
+        # เช็กความครบถ้วนของข้อมูล
         if len(row_data) < 12:
             return row_data, "ข้อมูลไม่ครบถ้วน (ข้าม)"
 
+        # 2. แมปตัวแปร
         home1x2 = float(row_data[2])
         away1x2 = float(row_data[4])
         hdp_line = float(row_data[5])   
@@ -70,32 +76,35 @@ def process_and_analyze(raw_text):
         over_odds = float(row_data[10]) 
         under_odds = float(row_data[11])
 
+        # ตรวจสอบความถูกต้องของค่าน้ำ 1X2
         if home1x2 <= 0 or away1x2 <= 0:
             return row_data, "ข้อมูลผิดพลาด (ไม่ใช่ตัวเลข/ค่าน้ำเสีย - ตรวจสอบ)"
 
+        # 3. คำนวณ Implied Probability Gap และค่าสัมบูรณ์แต้มต่อ
         implied_gap = abs((1 / home1x2) - (1 / away1x2))
+        abs_hdp_line = abs(hdp_line) # บังคับมองเป็นแต้มต่อบวกเสมอ เพื่อป้องกัน OCR ดึงเครื่องหมายผิด
 
-        # เรียงลำดับกฎเหล็กตาม % Win Rate
+        # 4. เรียงลำดับกฎเหล็กการลงทุนตาม % Win Rate
         if 2.5 <= home1x2 <= 3.5 and 1.9 <= away1x2 <= 2.6 and hdp_home >= 0.95:
-            recommendation = "ทีเด็ดทีมเยือน 🚀 (Bookie Trap)"
+            recommendation = "ทีเด็ดทีมเยือน 🚀 (Bookie Trap - WR:83%)"
             
-        # อัปเกรด David vs Goliath 2.0 (ล็อก Gap ไม่เกิน 0.55 และแต้มต่อไม่เกิน 1.25)
-        elif 0.35 < implied_gap <= 0.55 and away1x2 < home1x2 and 0.75 <= hdp_line <= 1.25:
-            recommendation = "David vs Goliath 🏰 (รองเจ้าบ้านหนีตาย)"
+        elif implied_gap > 0.35 and away1x2 < home1x2 and 0.75 <= abs_hdp_line <= 1.25:
+            recommendation = "David vs Goliath 🏰 (รองเจ้าบ้านหนีตาย - WR:78%)"
             
         elif ou_line >= 2.5 and over_odds < 0:
-            recommendation = "ต่ำดักควาย 🕳️ (Under Trap)"
+            recommendation = "ต่ำดักควาย 🕳️ (Under Trap - WR:73%)"
             
-        elif home1x2 > away1x2 and 0 < hdp_home <= 0.85 and hdp_line >= 0.25:
-            recommendation = "Super VIP 💎 (รองเหย้าค่าน้ำสวย)"
+        elif home1x2 > away1x2 and 0 < hdp_home <= 0.85 and abs_hdp_line >= 0.25:
+            recommendation = "Super VIP 💎 (รองเหย้าค่าน้ำสวย - WR:70%)"
             
         elif implied_gap < 0.15 and ou_line <= 2.25:
-            recommendation = "สูงสั่งตาย 🔥 (Over Master)"
+            recommendation = "สูงสั่งตาย 🔥 (Over Master - WR:69%)"
             
         elif implied_gap > 0.35:
             recommendation = "ข้าม (บอลห่างชั้นเกินไป - 50/50)"
             
         else:
+            # กฎ Value Bet มาตรฐาน (หาค่าน้ำที่ดีที่สุด)
             max_odds = max(hdp_home, hdp_away, over_odds, under_odds)
             if max_odds <= 0:
                 recommendation = "รอดูสถานการณ์ (น้ำแดงหมด)"
@@ -119,10 +128,11 @@ def process_and_analyze(raw_text):
     return row_data, recommendation
 
 
-# หัวข้อหลักของแอป
+# ----------------------------------------
+# หัวข้อหลักของหน้าเว็บ (UI)
+# ----------------------------------------
 st.title("⚽ ระบบวิเคราะห์ราคาบอล VIP")
 
-# สร้าง Tab สลับหน้า
 tab1, tab2 = st.tabs(["📸 อัปโหลดราคาบอล", "📊 สถิติ (Dashboard)"])
 
 with tab1:
@@ -132,16 +142,16 @@ with tab1:
     uploaded_file = st.file_uploader("เลือกไฟล์รูปภาพตารางราคาบอล", type=['png', 'jpg', 'jpeg'])
     
     if uploaded_file is not None:
-        st.image(uploaded_file, caption="ภาพที่อัปโหลด", width=600)
+        st.image(uploaded_file, caption="ภาพที่อัปโหลด", use_container_width=True)
         
         if st.button("🚀 อัปโหลดและวิเคราะห์ข้อมูล", type="primary"):
             if not workbook:
                 st.error("ไม่สามารถเชื่อมต่อ Google Sheets ได้")
             else:
                 try:
-                    # เชื่อมต่อชีทแรก (DATA) สำหรับรับข้อมูลเข้า
                     ws_data = workbook.sheet1
                     
+                    # ขั้นที่ 1: เตรียมและบีบอัดรูปภาพ
                     with st.spinner("📸 กำลังประมวลผลรูปภาพ..."):
                         img = Image.open(uploaded_file)
                         if img.mode != 'RGB':
@@ -152,6 +162,7 @@ with tab1:
                         img.save(img_byte_arr, format='JPEG', quality=80)
                         img_bytes = img_byte_arr.getvalue()
                     
+                    # ขั้นที่ 2: ส่งให้ AI วิเคราะห์
                     with st.spinner("🤖 กำลังให้ AI สกัดและวิเคราะห์ราคาบอล..."):
                         prompt = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ (ระบุเฉพาะตัวเลข ห้ามมีตัวอักษร o หรือ u นำหน้า),ค่าน้ำสูง,ค่าน้ำต่ำ โดยคั่นแต่ละค่าด้วยลูกน้ำ (,) เท่านั้น ห้ามมีข้อความอื่น"
                         
@@ -165,6 +176,7 @@ with tab1:
                     if not response or not response.text:
                         st.error("❌ AI ไม่สามารถอ่านข้อมูลจากภาพนี้ได้ กรุณาลองอัปโหลดภาพใหม่อีกครั้ง")
                     else:
+                        # ขั้นที่ 3: บันทึกลง Google Sheets
                         with st.spinner("📊 กำลังบันทึกข้อมูลลง Google Sheets..."):
                             row_data, rec = process_and_analyze(response.text.strip())
                             
@@ -178,7 +190,7 @@ with tab1:
                                 if str(val).strip() != "":
                                     last_row = i + 1
                             
-                            # 🛡️ ระบบป้องกันข้อมูลเบิ้ล
+                            # 🛡️ ระบบป้องกันข้อมูลเบิ้ล (Duplicate Check)
                             is_duplicate = False
                             if last_row > 1 and len(row_data_to_sheet) >= 2: 
                                 last_home_team = str(col_a_values[last_row - 1]).strip()
@@ -212,22 +224,18 @@ with tab2:
         st.error("ไม่สามารถเชื่อมต่อ Google Sheets ได้")
     else:
         try:
-            # 💡 ส่วนที่ 1: ดึงตาราง 'สรุปสถิติ' มาแสดงให้ตรงกัน 100% (Single Source of Truth)
+            # 💡 ส่วนที่ 1: ดึงตาราง 'สรุปสถิติ'
             ws_stats = workbook.worksheet("สรุปสถิติ")
             data_stats = ws_stats.get_all_records()
             df_stats = pd.DataFrame(data_stats)
             
             if not df_stats.empty:
-                # คลีนชื่อคอลัมน์ เผื่อมีเว้นวรรคซ่อนอยู่
                 df_stats.columns = [str(c).strip() for c in df_stats.columns]
                 
-                # จัดฟอร์แมต 'อัตราชนะ' อย่างปลอดภัย
                 if 'อัตราชนะ' in df_stats.columns:
                     def format_winrate(val):
-                        # ถ้ามี % ติดมาจาก Google Sheets อยู่แล้ว ให้โชว์เลย
                         if isinstance(val, str) and '%' in val:
                             return val
-                        # แต่ถ้าดึงมาเป็นตัวเลขทศนิยม (เช่น 0.7778) ให้คูณ 100 แล้วใส่ %
                         try:
                             return f"{float(val) * 100:.2f}%"
                         except:
@@ -235,12 +243,11 @@ with tab2:
                             
                     df_stats['อัตราชนะ'] = df_stats['อัตราชนะ'].apply(format_winrate)
                 
-                # โชว์ตารางแบบเต็มความกว้าง
                 st.dataframe(df_stats, use_container_width=True)
 
             st.markdown("---")
             
-            # 💡 ส่วนที่ 2: ดึงข้อมูลดิบมาทำกราฟสัดส่วนเหมือนเดิม (Visual Dashboard)
+            # 💡 ส่วนที่ 2: ดึงข้อมูลดิบมาทำกราฟสัดส่วน (Visual Dashboard)
             st.subheader("📈 กราฟแสดงสัดส่วนภาพรวม (Visual Dashboard)")
             ws_data = workbook.sheet1
             data = ws_data.get_all_records()
