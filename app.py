@@ -77,19 +77,20 @@ def process_and_analyze(raw_text):
 
         # เรียงลำดับกฎเหล็กตาม % Win Rate
         if 2.5 <= home1x2 <= 3.5 and 1.9 <= away1x2 <= 2.6 and hdp_home >= 0.95:
-            recommendation = "ทีเด็ดทีมเยือน 🚀 (Bookie Trap - WR:83%)"
+            recommendation = "ทีเด็ดทีมเยือน 🚀 (Bookie Trap)"
             
-        elif implied_gap > 0.35 and away1x2 < home1x2 and hdp_line >= 0.75:
-            recommendation = "David vs Goliath 🏰 (รองเจ้าบ้านหนีตาย - WR:80%)"
+        # อัปเกรด David vs Goliath 2.0 (ล็อก Gap ไม่เกิน 0.55 และแต้มต่อไม่เกิน 1.25)
+        elif 0.35 < implied_gap <= 0.55 and away1x2 < home1x2 and 0.75 <= hdp_line <= 1.25:
+            recommendation = "David vs Goliath 🏰 (รองเจ้าบ้านหนีตาย)"
             
         elif ou_line >= 2.5 and over_odds < 0:
-            recommendation = "ต่ำดักควาย 🕳️ (Under Trap - WR:73%)"
+            recommendation = "ต่ำดักควาย 🕳️ (Under Trap)"
             
         elif home1x2 > away1x2 and 0 < hdp_home <= 0.85 and hdp_line >= 0.25:
-            recommendation = "Super VIP 💎 (รองเหย้าค่าน้ำสวย - WR:70%)"
+            recommendation = "Super VIP 💎 (รองเหย้าค่าน้ำสวย)"
             
         elif implied_gap < 0.15 and ou_line <= 2.25:
-            recommendation = "สูงสั่งตาย 🔥 (Over Master - WR:69%)"
+            recommendation = "สูงสั่งตาย 🔥 (Over Master)"
             
         elif implied_gap > 0.35:
             recommendation = "ข้าม (บอลห่างชั้นเกินไป - 50/50)"
