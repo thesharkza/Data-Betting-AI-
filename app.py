@@ -30,25 +30,21 @@ def init_gspread():
             creds_path = 'credentials.json'
             client = gspread.service_account(filename=creds_path)
         
-        # เชื่อมต่อ Sheet ชื่อ 'ข้อมูลราคาบอลสกัดจากภาพ'
-        sheet = client.open("ข้อมูลราคาบอลสกัดจากภาพ").sheet1
-        return sheet
+        # 💡 เปลี่ยนเป็นเชื่อมต่อแบบดึงมาทั้งไฟล์ (Workbook) เพื่อให้เข้าถึงได้หลายชีท
+        workbook = client.open("ข้อมูลราคาบอลสกัดจากภาพ")
+        return workbook
     except Exception as e:
         st.error(f"❌ เชื่อมต่อ Google Sheets ไม่สำเร็จ: {e}")
         return None
 
-sheet = init_gspread()
-# ใช้โมเดล gemini-1.5-flash เพื่อความรวดเร็วและความเสถียร
+workbook = init_gspread()
+# ใช้โมเดล gemini-3.5-flash เพื่อความรวดเร็ว
 model = genai.GenerativeModel('gemini-3.5-flash-lite')
 
 def process_and_analyze(raw_text):
-    """
-    ฟังก์ชันทำความสะอาดข้อมูลดิบและวิเคราะห์เพื่อหาคำแนะนำการลงทุน
-    """
     raw_data = [item.strip() for item in raw_text.split(',')]
     row_data = []
 
-    # 1. ทำความสะอาดข้อมูลที่สกัดจากภาพ
     for i, item in enumerate(raw_data):
         if i < 2:
             row_data.append(item) 
@@ -65,34 +61,38 @@ def process_and_analyze(raw_text):
         if len(row_data) < 12:
             return row_data, "ข้อมูลไม่ครบถ้วน (ข้าม)"
 
-        # 2. แมปตัวแปรตามลำดับ
         home1x2 = float(row_data[2])
         away1x2 = float(row_data[4])
         hdp_line = float(row_data[5])   
         hdp_home = float(row_data[6])   
         hdp_away = float(row_data[8])   
-        ou_line = float(row_data[9])    # ดึงเส้นโกลสูงต่ำมาใช้
+        ou_line = float(row_data[9])
         over_odds = float(row_data[10]) 
         under_odds = float(row_data[11])
 
         if home1x2 <= 0 or away1x2 <= 0:
             return row_data, "ข้อมูลผิดพลาด (ไม่ใช่ตัวเลข/ค่าน้ำเสีย - ตรวจสอบ)"
 
-        # 3. คำนวณ Implied Probability Gap
         implied_gap = abs((1 / home1x2) - (1 / away1x2))
 
-        # 4. กฎเหล็ก AI (อัปเดตเปอร์เซ็นต์ Win Rate ล่าสุด)
+        # เรียงลำดับกฎเหล็กตาม % Win Rate
         if 2.5 <= home1x2 <= 3.5 and 1.9 <= away1x2 <= 2.6 and hdp_home >= 0.95:
             recommendation = "ทีเด็ดทีมเยือน 🚀 (Bookie Trap - WR:83%)"
             
         elif implied_gap > 0.35 and away1x2 < home1x2 and hdp_line >= 0.75:
             recommendation = "David vs Goliath 🏰 (รองเจ้าบ้านหนีตาย - WR:80%)"
             
-        elif implied_gap > 0.35:
-            recommendation = "ข้าม (บอลห่างชั้นเกินไป - 50/50)"
+        elif ou_line >= 2.5 and over_odds < 0:
+            recommendation = "ต่ำดักควาย 🕳️ (Under Trap - WR:73%)"
             
         elif home1x2 > away1x2 and 0 < hdp_home <= 0.85 and hdp_line >= 0.25:
             recommendation = "Super VIP 💎 (รองเหย้าค่าน้ำสวย - WR:70%)"
+            
+        elif implied_gap < 0.15 and ou_line <= 2.25:
+            recommendation = "สูงสั่งตาย 🔥 (Over Master - WR:69%)"
+            
+        elif implied_gap > 0.35:
+            recommendation = "ข้าม (บอลห่างชั้นเกินไป - 50/50)"
             
         else:
             max_odds = max(hdp_home, hdp_away, over_odds, under_odds)
@@ -101,9 +101,7 @@ def process_and_analyze(raw_text):
             elif max_odds < 0.75 or max_odds > 0.95:
                 recommendation = "ข้าม (ค่าน้ำเสี่ยงเกินไป)"
             else:
-                if max_odds == over_odds and over_odds >= 0.8 and ou_line != 2.5:
-                    recommendation = "สูงสั่งตาย 🔥 (Over Master)"
-                elif max_odds == hdp_home:
+                if max_odds == hdp_home:
                     recommendation = "เชียร์เจ้าบ้าน (น้ำดำ)"
                 elif max_odds == hdp_away:
                     recommendation = "เชียร์ทีมเยือน (น้ำดำ)"
@@ -136,11 +134,13 @@ with tab1:
         st.image(uploaded_file, caption="ภาพที่อัปโหลด", width=600)
         
         if st.button("🚀 อัปโหลดและวิเคราะห์ข้อมูล", type="primary"):
-            if not sheet:
+            if not workbook:
                 st.error("ไม่สามารถเชื่อมต่อ Google Sheets ได้")
             else:
                 try:
-                    # ขั้นที่ 1: เตรียมและบีบอัดรูปภาพ
+                    # เชื่อมต่อชีทแรก (DATA) สำหรับรับข้อมูลเข้า
+                    ws_data = workbook.sheet1
+                    
                     with st.spinner("📸 กำลังประมวลผลรูปภาพ..."):
                         img = Image.open(uploaded_file)
                         if img.mode != 'RGB':
@@ -151,7 +151,6 @@ with tab1:
                         img.save(img_byte_arr, format='JPEG', quality=80)
                         img_bytes = img_byte_arr.getvalue()
                     
-                    # ขั้นที่ 2: ส่งให้ AI วิเคราะห์
                     with st.spinner("🤖 กำลังให้ AI สกัดและวิเคราะห์ราคาบอล..."):
                         prompt = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ (ระบุเฉพาะตัวเลข ห้ามมีตัวอักษร o หรือ u นำหน้า),ค่าน้ำสูง,ค่าน้ำต่ำ โดยคั่นแต่ละค่าด้วยลูกน้ำ (,) เท่านั้น ห้ามมีข้อความอื่น"
                         
@@ -165,23 +164,20 @@ with tab1:
                     if not response or not response.text:
                         st.error("❌ AI ไม่สามารถอ่านข้อมูลจากภาพนี้ได้ กรุณาลองอัปโหลดภาพใหม่อีกครั้ง")
                     else:
-                        # ขั้นที่ 3: บันทึกลง Google Sheets
                         with st.spinner("📊 กำลังบันทึกข้อมูลลง Google Sheets..."):
                             row_data, rec = process_and_analyze(response.text.strip())
                             
-                            # ส่งข้อมูลเข้าชีทแค่ 12 ตัวแรก (คอลัมน์ A ถึง L) เพื่อไม่กวนสูตร Array ท้ายตาราง
                             row_data_to_sheet = row_data[:12]
                             
-                            # กรองหาบรรทัดว่างที่แท้จริง
-                            col_a_values = sheet.col_values(1)
-                            col_b_values = sheet.col_values(2) 
+                            col_a_values = ws_data.col_values(1)
+                            col_b_values = ws_data.col_values(2) 
                             
                             last_row = 0
                             for i, val in enumerate(col_a_values):
                                 if str(val).strip() != "":
                                     last_row = i + 1
                             
-                            # 🛡️ ระบบป้องกันข้อมูลเบิ้ล (Duplicate Check)
+                            # 🛡️ ระบบป้องกันข้อมูลเบิ้ล
                             is_duplicate = False
                             if last_row > 1 and len(row_data_to_sheet) >= 2: 
                                 last_home_team = str(col_a_values[last_row - 1]).strip()
@@ -194,11 +190,9 @@ with tab1:
                                 st.warning(f"⚠️ ข้อมูลคู่นี้ ({row_data_to_sheet[0]} vs {row_data_to_sheet[1]}) ถูกบันทึกลง Sheet ไปแล้ว (ระบบข้ามการบันทึกซ้ำ)")
                             else:
                                 next_row = last_row + 1
-                                # สั่งเขียนเฉพาะคอลัมน์ A-L เมื่อข้อมูลไม่ซ้ำ
-                                sheet.update(range_name=f"A{next_row}", values=[row_data_to_sheet])
+                                ws_data.update(range_name=f"A{next_row}", values=[row_data_to_sheet])
                                 st.success("✅ บันทึกข้อมูลลง Google Sheets สำเร็จ!")
                         
-                        # แสดงผลลัพธ์บนหน้าเว็บ
                         st.markdown(f"""
                         <div style="padding: 15px; background: #e8f8f5; border: 1px solid #1abc9c; border-radius: 8px; color: #16a085;">
                             <strong>คู่แข่งขัน:</strong> {row_data[0]} vs {row_data[1]}<br>
@@ -212,22 +206,39 @@ with tab1:
                     gc.collect()
 
 with tab2:
-    st.subheader("📊 สถิติและแดชบอร์ดสรุปผล")
-    if not sheet:
+    st.subheader("📊 ตารางสรุปความแม่นยำ (Real-Time จาก Google Sheets)")
+    if not workbook:
         st.error("ไม่สามารถเชื่อมต่อ Google Sheets ได้")
     else:
         try:
-            data = sheet.get_all_records()
+            # 💡 ส่วนที่ 1: ดึงตาราง 'สรุปสถิติ' มาแสดงให้ตรงกัน 100% (Single Source of Truth)
+            ws_stats = workbook.worksheet("สรุปสถิติ")
+            data_stats = ws_stats.get_all_records()
+            df_stats = pd.DataFrame(data_stats)
+            
+            if not df_stats.empty:
+                # จัดฟอร์แมต 'อัตราชนะ' ให้สวยงามบนเว็บ
+                if 'อัตราชนะ' in df_stats.columns:
+                    df_stats['อัตราชนะ'] = pd.to_numeric(df_stats['อัตราชนะ'], errors='coerce')
+                    df_stats['อัตราชนะ'] = df_stats['อัตราชนะ'].apply(lambda x: f"{x * 100:.2f}%" if pd.notnull(x) else "0.00%")
+                
+                # โชว์ตารางแบบเต็มความกว้าง
+                st.dataframe(df_stats, use_container_width=True)
+
+            st.markdown("---")
+            
+            # 💡 ส่วนที่ 2: ดึงข้อมูลดิบมาทำกราฟสัดส่วนเหมือนเดิม (Visual Dashboard)
+            st.subheader("📈 กราฟแสดงสัดส่วนภาพรวม (Visual Dashboard)")
+            ws_data = workbook.sheet1
+            data = ws_data.get_all_records()
             df = pd.DataFrame(data)
             
             if df.empty or 'ผลเปรียบเทียบ' not in df.columns:
                 st.warning("ไม่พบข้อมูลผลเปรียบเทียบใน Google Sheets")
             else:
-                # กรองเฉพาะแถวที่มีการสรุปผลแล้ว
                 df_comp = df[df['ผลเปรียบเทียบ'].astype(str).str.contains('ชนะ|แพ้|เจ๊า', na=False)].copy()
                 total = len(df_comp)
                 
-                # นับคะแนนแบบแยก ชนะเต็ม(1) ชนะครึ่ง(0.5)
                 wins_full = len(df_comp[df_comp['ผลเปรียบเทียบ'] == 'ชนะเต็ม'])
                 wins_half = len(df_comp[df_comp['ผลเปรียบเทียบ'] == 'ชนะครึ่ง'])
                 total_wins = wins_full + (wins_half * 0.5)
@@ -235,11 +246,10 @@ with tab2:
                 
                 win_rate = round((total_wins / (total - draws)) * 100, 2) if (total - draws) > 0 else 0
 
-                # แสดง Metric ด้านบน
                 col1, col2, col3 = st.columns(3)
-                col1.metric("แมตช์ที่สรุปผลแล้ว", f"{total} คู่")
-                col2.metric("คะแนนชนะ (Win Score)", f"{total_wins}")
-                col3.metric("Win Rate รวม", f"{win_rate}%")
+                col1.metric("แมตช์ทั้งหมด (ที่มีผลลัพธ์)", f"{total} คู่")
+                col2.metric("คะแนนชนะรวม (Win Score)", f"{total_wins}")
+                col3.metric("Win Rate เฉลี่ยรวมทั้งหมด", f"{win_rate}%")
 
                 st.markdown("---")
 
@@ -250,7 +260,6 @@ with tab2:
                     'None': 'ข้อมูลว่าง/ซ่อนอยู่'
                 })
 
-                # สร้างกราฟ 2 ฝั่ง
                 col_chart1, col_chart2 = st.columns(2)
 
                 with col_chart1:
