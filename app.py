@@ -217,10 +217,22 @@ with tab2:
             df_stats = pd.DataFrame(data_stats)
             
             if not df_stats.empty:
-                # จัดฟอร์แมต 'อัตราชนะ' ให้สวยงามบนเว็บ
+                # คลีนชื่อคอลัมน์ เผื่อมีเว้นวรรคซ่อนอยู่
+                df_stats.columns = [str(c).strip() for c in df_stats.columns]
+                
+                # จัดฟอร์แมต 'อัตราชนะ' อย่างปลอดภัย
                 if 'อัตราชนะ' in df_stats.columns:
-                    df_stats['อัตราชนะ'] = pd.to_numeric(df_stats['อัตราชนะ'], errors='coerce')
-                    df_stats['อัตราชนะ'] = df_stats['อัตราชนะ'].apply(lambda x: f"{x * 100:.2f}%" if pd.notnull(x) else "0.00%")
+                    def format_winrate(val):
+                        # ถ้ามี % ติดมาจาก Google Sheets อยู่แล้ว ให้โชว์เลย
+                        if isinstance(val, str) and '%' in val:
+                            return val
+                        # แต่ถ้าดึงมาเป็นตัวเลขทศนิยม (เช่น 0.7778) ให้คูณ 100 แล้วใส่ %
+                        try:
+                            return f"{float(val) * 100:.2f}%"
+                        except:
+                            return val 
+                            
+                    df_stats['อัตราชนะ'] = df_stats['อัตราชนะ'].apply(format_winrate)
                 
                 # โชว์ตารางแบบเต็มความกว้าง
                 st.dataframe(df_stats, use_container_width=True)
