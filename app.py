@@ -8,6 +8,7 @@ import re
 import pandas as pd
 import plotly.express as px
 import gc
+import time  # เพิ่มไลบรารี time สำหรับหน่วงเวลารอ Sheet คำนวณ
 
 # ตั้งค่าหน้าเว็บ Streamlit
 st.set_page_config(page_title="ระบบวิเคราะห์ราคาบอล VIP", page_icon="⚽", layout="wide")
@@ -30,7 +31,6 @@ def init_gspread():
             creds_path = 'credentials.json'
             client = gspread.service_account(filename=creds_path)
         
-        # เชื่อมต่อ Sheet ชื่อ 'ข้อมูลราคาบอลสกัดจากภาพ'
         workbook = client.open("ข้อมูลราคาบอลสกัดจากภาพ")
         return workbook
     except Exception as e:
@@ -38,17 +38,16 @@ def init_gspread():
         return None
 
 workbook = init_gspread()
-# ใช้โมเดล gemini-1.5-flash เพื่อความรวดเร็วและความเสถียรสูงสุด
 model = genai.GenerativeModel('gemini-3.5-flash-lite')
 
-def process_and_analyze(raw_text):
+def clean_raw_data(raw_text):
     """
-    ฟังก์ชันทำความสะอาดข้อมูลดิบและวิเคราะห์เพื่อหาคำแนะนำการลงทุน
+    ฟังก์ชันทำความสะอาดข้อมูลดิบ (เหลือหน้าที่แค่จัดฟอร์แมต 12 คอลัมน์แรก)
+    ตัดการวิเคราะห์ออก ปล่อยให้ Google Sheets ทำงานแทน
     """
     raw_data = [item.strip() for item in raw_text.split(',')]
     row_data = []
 
-    # 1. ทำความสะอาดข้อมูลที่สกัดจากภาพ
     for i, item in enumerate(raw_data):
         if i < 2:
             row_data.append(item) 
@@ -59,77 +58,12 @@ def process_and_analyze(raw_text):
             except:
                 row_data.append(cleaned)
 
-    recommendation = "รอดูสถานการณ์ (รอข้อมูล)"
-
-    try:
-        # เช็กความครบถ้วนของข้อมูล
-        if len(row_data) < 12:
-            return row_data, "ข้อมูลไม่ครบถ้วน (ข้าม)"
-
-        # 2. แมปตัวแปร
-        home1x2 = float(row_data[2])
-        away1x2 = float(row_data[4])
-        hdp_line = float(row_data[5])   
-        hdp_home = float(row_data[6])   
-        hdp_away = float(row_data[8])   
-        ou_line = float(row_data[9])
-        over_odds = float(row_data[10]) 
-        under_odds = float(row_data[11])
-
-        # ตรวจสอบความถูกต้องของค่าน้ำ 1X2
-        if home1x2 <= 0 or away1x2 <= 0:
-            return row_data, "ข้อมูลผิดพลาด (ไม่ใช่ตัวเลข/ค่าน้ำเสีย - ตรวจสอบ)"
-
-        # 3. คำนวณ Implied Probability Gap และค่าสัมบูรณ์แต้มต่อ
-        implied_gap = abs((1 / home1x2) - (1 / away1x2))
-        abs_hdp_line = abs(hdp_line) # บังคับมองเป็นแต้มต่อบวกเสมอ เพื่อป้องกัน OCR ดึงเครื่องหมายผิด
-
-        # 4. เรียงลำดับกฎเหล็กการลงทุนตาม % Win Rate
-        if 2.5 <= home1x2 <= 3.5 and 1.9 <= away1x2 <= 2.6 and hdp_home >= 0.95:
-            recommendation = "ทีเด็ดทีมเยือน 🚀 (Bookie Trap - WR:83%)"
-            
-        elif implied_gap > 0.35 and away1x2 < home1x2 and 0.75 <= abs_hdp_line <= 1.25:
-            recommendation = "David vs Goliath 🏰 (รองเจ้าบ้านหนีตาย - WR:78%)"
-            
-        elif ou_line >= 2.5 and over_odds < 0:
-            recommendation = "ต่ำดักควาย 🕳️ (Under Trap - WR:73%)"
-            
-        elif home1x2 > away1x2 and 0 < hdp_home <= 0.85 and abs_hdp_line >= 0.25:
-            recommendation = "Super VIP 💎 (รองเหย้าค่าน้ำสวย - WR:70%)"
-            
-        elif implied_gap < 0.15 and ou_line <= 2.25:
-            recommendation = "สูงสั่งตาย 🔥 (Over Master - WR:69%)"
-            
-        elif implied_gap > 0.35:
-            recommendation = "ข้าม (บอลห่างชั้นเกินไป - 50/50)"
-            
-        else:
-            # กฎ Value Bet มาตรฐาน (หาค่าน้ำที่ดีที่สุด)
-            max_odds = max(hdp_home, hdp_away, over_odds, under_odds)
-            if max_odds <= 0:
-                recommendation = "รอดูสถานการณ์ (น้ำแดงหมด)"
-            elif max_odds < 0.75 or max_odds > 0.95:
-                recommendation = "ข้าม (ค่าน้ำเสี่ยงเกินไป)"
-            else:
-                if max_odds == hdp_home:
-                    recommendation = "เชียร์เจ้าบ้าน (น้ำดำ)"
-                elif max_odds == hdp_away:
-                    recommendation = "เชียร์ทีมเยือน (น้ำดำ)"
-                elif max_odds == over_odds:
-                    recommendation = "ลุ้นสูง (น้ำดำ)"
-                else:
-                    recommendation = "ลุ้นต่ำ (น้ำดำ)"
-
-    except ValueError:
-        recommendation = "ข้อมูลผิดพลาด (ไม่ใช่ตัวเลข/ค่าน้ำเสีย - ตรวจสอบ)"
-    except Exception as e:
-        recommendation = f"ตรวจสอบความถูกต้องของข้อมูล (Error: {str(e)})"
-
-    return row_data, recommendation
+    # คืนค่ากลับไปเฉพาะ 12 คอลัมน์แรก (คอลัมน์ A ถึง L)
+    return row_data[:12]
 
 
 # ----------------------------------------
-# หัวข้อหลักของหน้าเว็บ (UI)
+# หัวข้อหลักของแอป
 # ----------------------------------------
 st.title("⚽ ระบบวิเคราะห์ราคาบอล VIP")
 
@@ -142,16 +76,15 @@ with tab1:
     uploaded_file = st.file_uploader("เลือกไฟล์รูปภาพตารางราคาบอล", type=['png', 'jpg', 'jpeg'])
     
     if uploaded_file is not None:
-        st.image(uploaded_file, caption="ภาพที่อัปโหลด", use_container_width=True)
+        st.image(uploaded_file, caption="ภาพที่อัปโหลด", width=600)
         
-        if st.button("🚀 อัปโหลดและวิเคราะห์ข้อมูล", type="primary"):
+        if st.button("🚀 อัปโหลดและบันทึกข้อมูล", type="primary"):
             if not workbook:
                 st.error("ไม่สามารถเชื่อมต่อ Google Sheets ได้")
             else:
                 try:
                     ws_data = workbook.sheet1
                     
-                    # ขั้นที่ 1: เตรียมและบีบอัดรูปภาพ
                     with st.spinner("📸 กำลังประมวลผลรูปภาพ..."):
                         img = Image.open(uploaded_file)
                         if img.mode != 'RGB':
@@ -162,8 +95,7 @@ with tab1:
                         img.save(img_byte_arr, format='JPEG', quality=80)
                         img_bytes = img_byte_arr.getvalue()
                     
-                    # ขั้นที่ 2: ส่งให้ AI วิเคราะห์
-                    with st.spinner("🤖 กำลังให้ AI สกัดและวิเคราะห์ราคาบอล..."):
+                    with st.spinner("🤖 กำลังให้ AI สกัดราคาบอล..."):
                         prompt = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ (ระบุเฉพาะตัวเลข ห้ามมีตัวอักษร o หรือ u นำหน้า),ค่าน้ำสูง,ค่าน้ำต่ำ โดยคั่นแต่ละค่าด้วยลูกน้ำ (,) เท่านั้น ห้ามมีข้อความอื่น"
                         
                         response = model.generate_content([
@@ -176,11 +108,8 @@ with tab1:
                     if not response or not response.text:
                         st.error("❌ AI ไม่สามารถอ่านข้อมูลจากภาพนี้ได้ กรุณาลองอัปโหลดภาพใหม่อีกครั้ง")
                     else:
-                        # ขั้นที่ 3: บันทึกลง Google Sheets
-                        with st.spinner("📊 กำลังบันทึกข้อมูลลง Google Sheets..."):
-                            row_data, rec = process_and_analyze(response.text.strip())
-                            
-                            row_data_to_sheet = row_data[:12]
+                        with st.spinner("📊 กำลังบันทึกและรอ Google Sheets ประมวลผลลัพธ์..."):
+                            row_data_to_sheet = clean_raw_data(response.text.strip())
                             
                             col_a_values = ws_data.col_values(1)
                             col_b_values = ws_data.col_values(2) 
@@ -190,7 +119,7 @@ with tab1:
                                 if str(val).strip() != "":
                                     last_row = i + 1
                             
-                            # 🛡️ ระบบป้องกันข้อมูลเบิ้ล (Duplicate Check)
+                            # 🛡️ ระบบป้องกันข้อมูลเบิ้ล
                             is_duplicate = False
                             if last_row > 1 and len(row_data_to_sheet) >= 2: 
                                 last_home_team = str(col_a_values[last_row - 1]).strip()
@@ -203,15 +132,32 @@ with tab1:
                                 st.warning(f"⚠️ ข้อมูลคู่นี้ ({row_data_to_sheet[0]} vs {row_data_to_sheet[1]}) ถูกบันทึกลง Sheet ไปแล้ว (ระบบข้ามการบันทึกซ้ำ)")
                             else:
                                 next_row = last_row + 1
+                                # 1. ส่งข้อมูล 12 คอลัมน์แรกลงชีท
                                 ws_data.update(range_name=f"A{next_row}", values=[row_data_to_sheet])
-                                st.success("✅ บันทึกข้อมูลลง Google Sheets สำเร็จ!")
-                        
-                        st.markdown(f"""
-                        <div style="padding: 15px; background: #e8f8f5; border: 1px solid #1abc9c; border-radius: 8px; color: #16a085;">
-                            <strong>คู่แข่งขัน:</strong> {row_data[0]} vs {row_data[1]}<br>
-                            <strong>ผลการวิเคราะห์:</strong> <b>{rec}</b>
-                        </div>
-                        """, unsafe_allow_html=True)
+                                
+                                # 2. หน่วงเวลา 3 วินาที รอให้สูตร MAP ใน Sheets คำนวณเสร็จ
+                                time.sleep(3)
+                                
+                                # 3. ดึงข้อมูลทั้งบรรทัดกลับมาเพื่อเอาผลลัพธ์
+                                updated_row = ws_data.row_values(next_row)
+                                
+                                # คอลัมน์ P (Index 15), คอลัมน์ R (Index 17), คอลัมน์ S (Index 18)
+                                rec = updated_row[15] if len(updated_row) > 15 else "กำลังคำนวณ..."
+                                confidence = updated_row[17] if len(updated_row) > 17 else "-"
+                                radar = updated_row[18] if len(updated_row) > 18 else "-"
+
+                                st.success("✅ บันทึกและดึงผลวิเคราะห์สำเร็จ!")
+                                
+                                # แสดงผลลัพธ์ที่ดึงมาจาก Google Sheets
+                                st.markdown(f"""
+                                <div style="padding: 20px; background: #e8f8f5; border: 1px solid #1abc9c; border-radius: 10px; color: #2c3e50;">
+                                    <h4 style="color: #16a085; margin-top: 0;">⚽ {row_data_to_sheet[0]} vs {row_data_to_sheet[1]}</h4>
+                                    <hr style="border-top: 1px solid #1abc9c;">
+                                    <strong>🎯 แนะนำลงทุน:</strong> <span style="color: #c0392b; font-weight: bold;">{rec}</span><br><br>
+                                    <strong>📊 สถิติความเชื่อมั่น:</strong> {confidence}<br><br>
+                                    <strong>🚨 เช็กราคา (Radar):</strong> {radar}
+                                </div>
+                                """, unsafe_allow_html=True)
                         
                 except Exception as e:
                     st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
@@ -224,7 +170,6 @@ with tab2:
         st.error("ไม่สามารถเชื่อมต่อ Google Sheets ได้")
     else:
         try:
-            # 💡 ส่วนที่ 1: ดึงตาราง 'สรุปสถิติ'
             ws_stats = workbook.worksheet("สรุปสถิติ")
             data_stats = ws_stats.get_all_records()
             df_stats = pd.DataFrame(data_stats)
@@ -247,7 +192,6 @@ with tab2:
 
             st.markdown("---")
             
-            # 💡 ส่วนที่ 2: ดึงข้อมูลดิบมาทำกราฟสัดส่วน (Visual Dashboard)
             st.subheader("📈 กราฟแสดงสัดส่วนภาพรวม (Visual Dashboard)")
             ws_data = workbook.sheet1
             data = ws_data.get_all_records()
