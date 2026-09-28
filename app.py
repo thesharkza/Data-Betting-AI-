@@ -38,7 +38,7 @@ def init_gspread():
         return None
 
 workbook = init_gspread()
-model = genai.GenerativeModel('gemini-3.1-flash-lite')
+model = genai.GenerativeModel('gemini-3.5-flash-lite')
 
 def clean_raw_data(raw_text):
     """
