@@ -141,49 +141,55 @@ with tab1:
                                 if str(val).strip() != "":
                                     last_row = i + 1
                             
-                            # 🛡️ ระบบป้องกันข้อมูลเบิ้ล
-                            is_duplicate = False
-                            if last_row > 1 and len(row_data_to_sheet) >= 2: 
-                                last_home_team = str(col_a_values[last_row - 1]).strip()
-                                last_away_team = str(col_b_values[last_row - 1]).strip()
+                            # 🔍 ระบบค้นหาและบันทึกทับ (Overwrite) หากทีมซ้ำ
+                            new_home = str(row_data_to_sheet[0]).strip()
+                            new_away = str(row_data_to_sheet[1]).strip()
+                            target_row = None
+                            
+                            # วนลูปเช็คทีมเหย้าและเยือนว่าซ้ำไหม
+                            for i in range(len(col_a_values)):
+                                sheet_home = str(col_a_values[i]).strip()
+                                sheet_away = str(col_b_values[i]).strip() if i < len(col_b_values) else ""
                                 
-                                if str(row_data_to_sheet[0]).strip() == last_home_team and str(row_data_to_sheet[1]).strip() == last_away_team:
-                                    is_duplicate = True
+                                if sheet_home == new_home and sheet_away == new_away:
+                                    target_row = i + 1
+                                    break
 
-                            if is_duplicate:
-                                st.warning(f"⚠️ ข้อมูลคู่นี้ ({row_data_to_sheet[0]} vs {row_data_to_sheet[1]}) ถูกบันทึกลง Sheet ไปแล้ว (ระบบข้ามการบันทึกซ้ำ)")
+                            if target_row is not None:
+                                # 1A. กรณีพบข้อมูลซ้ำ -> บันทึกทับแถวเดิม
+                                ws_data.update(range_name=f"A{target_row}", values=[row_data_to_sheet])
+                                st.warning(f"🔄 พบข้อมูลคู่ {new_home} vs {new_away} ในระบบ ทำการ **บันทึกทับ** ที่แถว {target_row} เรียบร้อยแล้ว")
                             else:
-                                next_row = last_row + 1
-                                # 1. ส่งข้อมูล 12 คอลัมน์แรกลงชีท
-                                ws_data.update(range_name=f"A{next_row}", values=[row_data_to_sheet])
+                                # 1B. กรณีไม่พบข้อมูลซ้ำ -> บันทึกบรรทัดใหม่
+                                target_row = last_row + 1
+                                ws_data.update(range_name=f"A{target_row}", values=[row_data_to_sheet])
+                                st.success("✅ บันทึกข้อมูลคู่ใหม่สำเร็จ!")
                                 
-                                # 2. หน่วงเวลา 3 วินาที รอให้สูตร MAP ใน Sheets คำนวณเสร็จ
-                                time.sleep(3)
-                                
-                                # 3. ดึงข้อมูลทั้งบรรทัดกลับมาเพื่อเอาผลลัพธ์
-                                updated_row = ws_data.row_values(next_row)
-                                
-                                # คอลัมน์ P (Index 15), คอลัมน์ R (Index 17), คอลัมน์ S (Index 18)
-                                rec = updated_row[15] if len(updated_row) > 15 else "กำลังคำนวณ..."
-                                confidence = updated_row[17] if len(updated_row) > 17 else "-"
-                                radar = updated_row[18] if len(updated_row) > 18 else "-"
+                            # 2. หน่วงเวลา 3 วินาที รอให้สูตร MAP ใน Sheets คำนวณเสร็จ
+                            time.sleep(3)
+                            
+                            # 3. ดึงข้อมูลทั้งบรรทัดกลับมาเพื่อเอาผลลัพธ์ (ดึงจาก target_row)
+                            updated_row = ws_data.row_values(target_row)
+                            
+                            # คอลัมน์ P (Index 15), คอลัมน์ R (Index 17), คอลัมน์ S (Index 18)
+                            rec = updated_row[15] if len(updated_row) > 15 else "กำลังคำนวณ..."
+                            confidence = updated_row[17] if len(updated_row) > 17 else "-"
+                            radar = updated_row[18] if len(updated_row) > 18 else "-"
 
-                                # 4. ประมวลผล Money Management
-                                mm_text = get_money_management(rec, confidence)
-
-                                st.success("✅ บันทึกและดึงผลวิเคราะห์สำเร็จ!")
-                                
-                                # แสดงผลลัพธ์ที่ดึงมาจาก Google Sheets
-                                st.markdown(f"""
-                                <div style="padding: 20px; background: #e8f8f5; border: 1px solid #1abc9c; border-radius: 10px; color: #2c3e50;">
-                                    <h4 style="color: #16a085; margin-top: 0;">⚽ {row_data_to_sheet[0]} vs {row_data_to_sheet[1]}</h4>
-                                    <hr style="border-top: 1px solid #1abc9c;">
-                                    <strong>🎯 แนะนำลงทุน:</strong> <span style="color: #c0392b; font-weight: bold;">{rec}</span><br><br>
-                                    <strong>💰 Money Management:</strong> <span style="color: #2980b9; font-weight: bold;">{mm_text}</span><br><br>
-                                    <strong>📊 สถิติความเชื่อมั่น:</strong> {confidence}<br><br>
-                                    <strong>🚨 เช็กราคา (Radar):</strong> {radar}
-                                </div>
-                                """, unsafe_allow_html=True)
+                            # 4. ประมวลผล Money Management
+                            mm_text = get_money_management(rec, confidence)
+                            
+                            # แสดงผลลัพธ์ที่ดึงมาจาก Google Sheets
+                            st.markdown(f"""
+                            <div style="padding: 20px; background: #e8f8f5; border: 1px solid #1abc9c; border-radius: 10px; color: #2c3e50;">
+                                <h4 style="color: #16a085; margin-top: 0;">⚽ {row_data_to_sheet[0]} vs {row_data_to_sheet[1]}</h4>
+                                <hr style="border-top: 1px solid #1abc9c;">
+                                <strong>🎯 แนะนำลงทุน:</strong> <span style="color: #c0392b; font-weight: bold;">{rec}</span><br><br>
+                                <strong>💰 Money Management:</strong> <span style="color: #2980b9; font-weight: bold;">{mm_text}</span><br><br>
+                                <strong>📊 สถิติความเชื่อมั่น:</strong> {confidence}<br><br>
+                                <strong>🚨 เช็กราคา (Radar):</strong> {radar}
+                            </div>
+                            """, unsafe_allow_html=True)
                         
                 except Exception as e:
                     st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
