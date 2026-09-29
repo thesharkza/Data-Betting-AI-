@@ -61,6 +61,28 @@ def clean_raw_data(raw_text):
     # คืนค่ากลับไปเฉพาะ 12 คอลัมน์แรก (คอลัมน์ A ถึง L)
     return row_data[:12]
 
+def get_money_management(rec_text, conf_text):
+    """
+    ฟังก์ชันคำนวณ Money Management (ดึงตัวเลข % ออกมาจากข้อความ)
+    """
+    # ถ้าช่องแนะนำลงทุนมีคำว่า "ข้าม" ให้ลงทุน 0
+    if "ข้าม" in str(rec_text):
+        return "0 Unit (ข้าม ห้ามลงทุน) 🛑"
+    
+    # ใช้ Regex ดึงเฉพาะตัวเลขที่อยู่หน้าเครื่องหมาย %
+    match = re.search(r'(\d+(\.\d+)?)%', str(conf_text))
+    if match:
+        pct_val = float(match.group(1))
+        if pct_val >= 70:
+            return "⭐⭐⭐⭐ 3 Units (Max Bet 🎯)"
+        elif pct_val >= 60:
+            return "⭐⭐⭐ 2 Units (High 🚀)"
+        elif pct_val >= 50:
+            return "⭐⭐ 1 Unit (Normal 👍)"
+        else:
+            return "⭐ 0.5 Unit (Low / Test 🧪)"
+    else:
+        return "⭐ 0.5 Unit (รอเก็บสถิติ ⏳)"
 
 # ----------------------------------------
 # หัวข้อหลักของแอป
@@ -146,6 +168,9 @@ with tab1:
                                 confidence = updated_row[17] if len(updated_row) > 17 else "-"
                                 radar = updated_row[18] if len(updated_row) > 18 else "-"
 
+                                # 4. ประมวลผล Money Management
+                                mm_text = get_money_management(rec, confidence)
+
                                 st.success("✅ บันทึกและดึงผลวิเคราะห์สำเร็จ!")
                                 
                                 # แสดงผลลัพธ์ที่ดึงมาจาก Google Sheets
@@ -154,6 +179,7 @@ with tab1:
                                     <h4 style="color: #16a085; margin-top: 0;">⚽ {row_data_to_sheet[0]} vs {row_data_to_sheet[1]}</h4>
                                     <hr style="border-top: 1px solid #1abc9c;">
                                     <strong>🎯 แนะนำลงทุน:</strong> <span style="color: #c0392b; font-weight: bold;">{rec}</span><br><br>
+                                    <strong>💰 Money Management:</strong> <span style="color: #2980b9; font-weight: bold;">{mm_text}</span><br><br>
                                     <strong>📊 สถิติความเชื่อมั่น:</strong> {confidence}<br><br>
                                     <strong>🚨 เช็กราคา (Radar):</strong> {radar}
                                 </div>
