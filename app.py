@@ -367,7 +367,11 @@ with tab2:
                     
                     # แสดงตารางพร้อมการระบายสี
                     # ใช้ getattr เพื่อให้รองรับ pandas ทั้งเวอร์ชันเก่า (applymap) และใหม่ (map)
-                    styled_df = getattr(df_stats.style, 'map', getattr(df_stats.style, 'applymap'))(color_winrate_table, subset=['อัตราชนะ'])
+                    try:
+                        styled_df = df_stats.style.map(color_winrate_table, subset=['อัตราชนะ'])
+                    except AttributeError:
+                        styled_df = df_stats.style.applymap(color_winrate_table, subset=['อัตราชนะ'])
+                        
                     st.dataframe(styled_df, use_container_width=True)
 
         except Exception as e:
