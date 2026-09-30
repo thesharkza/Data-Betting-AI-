@@ -63,26 +63,30 @@ def clean_raw_data(raw_text):
 
 def get_money_management(rec_text, conf_text):
     """
-    ฟังก์ชันคำนวณ Money Management (ดึงตัวเลข % ออกมาจากข้อความ)
+    ฟังก์ชันคำนวณ Money Management พร้อมระบบ Auto-Pause หาก Win Rate < 55%
     """
-    # ถ้าช่องแนะนำลงทุนมีคำว่า "ข้าม" ให้ลงทุน 0
     if "ข้าม" in str(rec_text):
-        return "0 Unit (ข้าม ห้ามลงทุน) 🛑"
+        return "0 Unit (ข้าม ห้ามลงทุน) 🛑", rec_text
     
-    # ใช้ Regex ดึงเฉพาะตัวเลขที่อยู่หน้าเครื่องหมาย %
     match = re.search(r'(\d+(\.\d+)?)%', str(conf_text))
     if match:
         pct_val = float(match.group(1))
+        
+        # 🛡️ ระบบ Auto-Pause: ถ้า % ต่ำกว่า 55 และอยู่ในหมวด SNIPER ให้พักการลงทุนทันที
+        if pct_val < 55 and "SNIPER" in str(rec_text):
+            modified_rec = f"⏸️ พักชั่วคราว: {rec_text} (สถิติตกเหลือ {pct_val}%)"
+            return "0 Unit (รอสถิติฟื้นตัว 🛑)", modified_rec
+            
         if pct_val >= 70:
-            return "⭐⭐⭐⭐ 3 Units (Max Bet 🎯)"
+            return "⭐⭐⭐⭐ 3 Units (Max Bet 🎯)", rec_text
         elif pct_val >= 60:
-            return "⭐⭐⭐ 2 Units (High 🚀)"
-        elif pct_val >= 50:
-            return "⭐⭐ 1 Unit (Normal 👍)"
+            return "⭐⭐⭐ 2 Units (High 🚀)", rec_text
+        elif pct_val >= 55:
+            return "⭐⭐ 1 Unit (Normal 👍)", rec_text
         else:
-            return "⭐ 0.5 Unit (Low / Test 🧪)"
+            return "⭐ 0.5 Unit (Low / Test 🧪)", rec_text
     else:
-        return "⭐ 0.5 Unit (รอเก็บสถิติ ⏳)"
+        return "⭐ 0.5 Unit (รอเก็บสถิติ ⏳)", rec_text
 
 # ----------------------------------------
 # หัวข้อหลักของแอป
@@ -176,8 +180,8 @@ with tab1:
                             confidence = updated_row[17] if len(updated_row) > 17 else "-"
                             radar = updated_row[18] if len(updated_row) > 18 else "-"
 
-                            # 4. ประมวลผล Money Management
-                            mm_text = get_money_management(rec, confidence)
+                            # 4. ประมวลผล Money Management และรับค่า rec ที่ถูกดัดแปลงจากระบบ Gatekeeper
+                            mm_text, rec = get_money_management(rec, confidence)
                             
                             # แสดงผลลัพธ์ที่ดึงมาจาก Google Sheets
                             st.markdown(f"""
