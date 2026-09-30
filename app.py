@@ -62,20 +62,26 @@ def clean_raw_data(raw_text):
     return row_data[:12]
 
 def get_money_management(rec_text, conf_text):
-    """
-    ฟังก์ชันคำนวณ Money Management พร้อมระบบ Auto-Pause หาก Win Rate < 55%
-    """
     if "ข้าม" in str(rec_text):
         return "0 Unit (ข้าม ห้ามลงทุน) 🛑", rec_text
     
-    match = re.search(r'(\d+(\.\d+)?)%', str(conf_text))
-    if match:
-        pct_val = float(match.group(1))
+    match_pct = re.search(r'(\d+(\.\d+)?)%', str(conf_text))
+    match_n = re.search(r'n=(\d+)', str(conf_text)) # เพิ่มตัวจับค่า n
+    
+    if match_pct:
+        pct_val = float(match_pct.group(1))
+        n_val = int(match_n.group(1)) if match_n else 0 # ดึงค่า n
         
-        # 🛡️ ระบบ Auto-Pause: ถ้า % ต่ำกว่า 55 และอยู่ในหมวด SNIPER ให้พักการลงทุนทันที
+        # ถ้ายอด n ยังไม่ถึง 5 แมตช์ ให้ถือว่าอยู่ในช่วง "ทดสอบโมเดล"
+        if n_val < 5 and "SNIPER" in str(rec_text):
+            return "⭐ 0.5 Unit (ช่วงทดสอบโมเดลใหม่ 🧪)", rec_text
+            
+        # ระบบ Auto-Pause: จะทำงานก็ต่อเมื่อ n >= 5 และสถิติต่ำกว่า 55% เท่านั้น
         if pct_val < 55 and "SNIPER" in str(rec_text):
             modified_rec = f"⏸️ พักชั่วคราว: {rec_text} (สถิติตกเหลือ {pct_val}%)"
             return "0 Unit (รอสถิติฟื้นตัว 🛑)", modified_rec
+            
+        # ... (ส่วนจัดเกรด Unit เหมือนเดิม) ...
             
         if pct_val >= 70:
             return "⭐⭐⭐⭐ 3 Units (Max Bet 🎯)", rec_text
