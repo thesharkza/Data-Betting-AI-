@@ -7,15 +7,16 @@ import os
 import re
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go  # เพิ่มไลบรารีนี้สำหรับกราฟขั้นสูง
 import gc
-import time  # เพิ่มไลบรารี time สำหรับหน่วงเวลารอ Sheet คำนวณ
+import time
 
 # ----------------------------------------
 # ตั้งค่าหน้าเว็บ Streamlit (กำหนดให้รองรับ CSS พิเศษ)
 # ----------------------------------------
 st.set_page_config(page_title="ระบบวิเคราะห์ราคาบอล VIP", page_icon="⚽", layout="wide")
 
-# CSS สำหรับตกแต่ง Dashboard ให้เป็นแบบ 3D Modern & Glassmorphism
+# CSS สำหรับการ์ดด้านบน (3D Modern & Glassmorphism)
 st.markdown("""
 <style>
     .metric-card {
@@ -70,12 +71,8 @@ workbook = init_gspread()
 model = genai.GenerativeModel('gemini-3.7-flash')
 
 def clean_raw_data(raw_text):
-    """
-    ฟังก์ชันทำความสะอาดข้อมูลดิบ (เหลือหน้าที่แค่จัดฟอร์แมต 12 คอลัมน์แรก)
-    """
     raw_data = [item.strip() for item in raw_text.split(',')]
     row_data = []
-
     for i, item in enumerate(raw_data):
         if i < 2:
             row_data.append(item) 
@@ -85,42 +82,30 @@ def clean_raw_data(raw_text):
                 row_data.append(float(cleaned) if '.' in cleaned else int(cleaned))
             except:
                 row_data.append(cleaned)
-
-    # คืนค่ากลับไปเฉพาะ 12 คอลัมน์แรก (คอลัมน์ A ถึง L)
     return row_data[:12]
 
 def get_money_management(rec_text, conf_text):
-    """
-    ฟังก์ชันคำนวณ Money Management พร้อมระบบ Auto-Pause และ Grace Period
-    """
     if "ข้าม" in str(rec_text):
         return "0 Unit (ข้าม ห้ามลงทุน) 🛑", rec_text
     
     match_pct = re.search(r'(\d+(\.\d+)?)%', str(conf_text))
-    match_n = re.search(r'n=(\d+)', str(conf_text)) # เพิ่มตัวจับค่า n
+    match_n = re.search(r'n=(\d+)', str(conf_text))
     
     if match_pct:
         pct_val = float(match_pct.group(1))
-        n_val = int(match_n.group(1)) if match_n else 0 # ดึงค่า n
+        n_val = int(match_n.group(1)) if match_n else 0
         
-        # ถ้ายอด n ยังไม่ถึง 5 แมตช์ ให้ถือว่าอยู่ในช่วง "ทดสอบโมเดล"
         if n_val < 5 and "SNIPER" in str(rec_text):
             return "⭐ 0.5 Unit (ช่วงทดสอบโมเดลใหม่ 🧪)", rec_text
             
-        # ระบบ Auto-Pause: จะทำงานก็ต่อเมื่อ n >= 5 และสถิติต่ำกว่า 55% เท่านั้น
         if pct_val < 55 and "SNIPER" in str(rec_text):
             modified_rec = f"⏸️ พักชั่วคราว: {rec_text} (สถิติตกเหลือ {pct_val}%)"
             return "0 Unit (รอสถิติฟื้นตัว 🛑)", modified_rec
             
-        # จัดเกรด Unit ตามปกติ หากผ่านเกณฑ์ด่านตรวจแล้ว
-        if pct_val >= 70:
-            return "⭐⭐⭐⭐ 3 Units (Max Bet 🎯)", rec_text
-        elif pct_val >= 60:
-            return "⭐⭐⭐ 2 Units (High 🚀)", rec_text
-        elif pct_val >= 55:
-            return "⭐⭐ 1 Unit (Normal 👍)", rec_text
-        else:
-            return "⭐ 0.5 Unit (Low / Test 🧪)", rec_text
+        if pct_val >= 70: return "⭐⭐⭐⭐ 3 Units (Max Bet 🎯)", rec_text
+        elif pct_val >= 60: return "⭐⭐⭐ 2 Units (High 🚀)", rec_text
+        elif pct_val >= 55: return "⭐⭐ 1 Unit (Normal 👍)", rec_text
+        else: return "⭐ 0.5 Unit (Low / Test 🧪)", rec_text
     else:
         return "⭐ 0.5 Unit (รอเก็บสถิติ ⏳)", rec_text
 
@@ -149,8 +134,7 @@ with tab1:
                     
                     with st.spinner("📸 กำลังประมวลผลรูปภาพ..."):
                         img = Image.open(uploaded_file)
-                        if img.mode != 'RGB':
-                            img = img.convert('RGB')
+                        if img.mode != 'RGB': img = img.convert('RGB')
                         img.thumbnail((800, 800))
                         
                         img_byte_arr = io.BytesIO()
@@ -159,11 +143,7 @@ with tab1:
                     
                     with st.spinner("🤖 กำลังให้ AI สกัดราคาบอล..."):
                         prompt = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ (ระบุเฉพาะตัวเลข ห้ามมีตัวอักษร o หรือ u นำหน้า),ค่าน้ำสูง,ค่าน้ำต่ำ โดยคั่นแต่ละค่าด้วยลูกน้ำ (,) เท่านั้น ห้ามมีข้อความอื่น"
-                        
-                        response = model.generate_content([
-                            {"mime_type": "image/jpeg", "data": img_bytes}, 
-                            prompt
-                        ])
+                        response = model.generate_content([{"mime_type": "image/jpeg", "data": img_bytes}, prompt])
                     
                     gc.collect()
 
@@ -175,51 +155,36 @@ with tab1:
                             
                             col_a_values = ws_data.col_values(1)
                             col_b_values = ws_data.col_values(2) 
+                            last_row = sum(1 for val in col_a_values if str(val).strip() != "")
                             
-                            last_row = 0
-                            for i, val in enumerate(col_a_values):
-                                if str(val).strip() != "":
-                                    last_row = i + 1
-                            
-                            # 🔍 ระบบค้นหาและบันทึกทับ (Overwrite) หากทีมซ้ำ
                             new_home = str(row_data_to_sheet[0]).strip()
                             new_away = str(row_data_to_sheet[1]).strip()
                             target_row = None
                             
-                            # วนลูปเช็คทีมเหย้าและเยือนว่าซ้ำไหม
                             for i in range(len(col_a_values)):
                                 sheet_home = str(col_a_values[i]).strip()
                                 sheet_away = str(col_b_values[i]).strip() if i < len(col_b_values) else ""
-                                
                                 if sheet_home == new_home and sheet_away == new_away:
                                     target_row = i + 1
                                     break
 
                             if target_row is not None:
-                                # 1A. กรณีพบข้อมูลซ้ำ -> บันทึกทับแถวเดิม
                                 ws_data.update(range_name=f"A{target_row}", values=[row_data_to_sheet])
                                 st.warning(f"🔄 พบข้อมูลคู่ {new_home} vs {new_away} ในระบบ ทำการ **บันทึกทับ** ที่แถว {target_row} เรียบร้อยแล้ว")
                             else:
-                                # 1B. กรณีไม่พบข้อมูลซ้ำ -> บันทึกบรรทัดใหม่
                                 target_row = last_row + 1
                                 ws_data.update(range_name=f"A{target_row}", values=[row_data_to_sheet])
                                 st.success("✅ บันทึกข้อมูลคู่ใหม่สำเร็จ!")
                                 
-                            # 2. หน่วงเวลา 3 วินาที รอให้สูตร MAP ใน Sheets คำนวณเสร็จ
                             time.sleep(3)
-                            
-                            # 3. ดึงข้อมูลทั้งบรรทัดกลับมาเพื่อเอาผลลัพธ์ (ดึงจาก target_row)
                             updated_row = ws_data.row_values(target_row)
                             
-                            # คอลัมน์ P (Index 15), คอลัมน์ R (Index 17), คอลัมน์ S (Index 18)
                             rec = updated_row[15] if len(updated_row) > 15 else "กำลังคำนวณ..."
                             confidence = updated_row[17] if len(updated_row) > 17 else "-"
                             radar = updated_row[18] if len(updated_row) > 18 else "-"
 
-                            # 4. ประมวลผล Money Management และรับค่า rec ที่ถูกดัดแปลงจากระบบ Gatekeeper
                             mm_text, rec = get_money_management(rec, confidence)
                             
-                            # แสดงผลลัพธ์ที่ดึงมาจาก Google Sheets
                             st.markdown(f"""
                             <div style="padding: 25px; background: linear-gradient(to right, #f8fafc, #f1f5f9); border-left: 6px solid #1abc9c; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
                                 <h3 style="color: #0f172a; margin-top: 0;">⚽ {row_data_to_sheet[0]} <span style="color:#94a3b8;">vs</span> {row_data_to_sheet[1]}</h3>
@@ -238,17 +203,24 @@ with tab1:
                     gc.collect()
 
 # ----------------------------------------
-# TAB 2 : Dashboard แบบ 3 มิติ และตารางสี
+# TAB 2 : Dashboard อัปเกรดใหม่ (Clean Chart + SaaS Table)
 # ----------------------------------------
 with tab2:
     if not workbook:
         st.error("ไม่สามารถเชื่อมต่อ Google Sheets ได้")
     else:
         try:
-            # 1. ดึงข้อมูล
+            # --- ดึงข้อมูลจากชีต DATA เพื่อทำกราฟโดนัท ---
             ws_data = workbook.sheet1
             data = ws_data.get_all_records()
             df = pd.DataFrame(data)
+            
+            # --- ดึงข้อมูลจากชีต สรุปสถิติ เพื่อทำกราฟแท่งแนวนอนและตาราง ---
+            ws_stats = workbook.worksheet("สรุปสถิติ")
+            data_stats = ws_stats.get_all_records()
+            df_stats = pd.DataFrame(data_stats)
+            if not df_stats.empty:
+                df_stats.columns = [str(c).strip() for c in df_stats.columns]
             
             if not df.empty and 'ผลเปรียบเทียบ' in df.columns:
                 df_comp = df[df['ผลเปรียบเทียบ'].astype(str).str.contains('ชนะ|แพ้|เจ๊า', na=False)].copy()
@@ -259,120 +231,168 @@ with tab2:
                 draws = len(df_comp[df_comp['ผลเปรียบเทียบ'] == 'เจ๊า'])
                 win_rate = round((total_wins / (total - draws)) * 100, 2) if (total - draws) > 0 else 0
 
-                # 2. สร้างการ์ดแสดงผล 3D (HTML/CSS)
+                # --- 1. การ์ด 3D สรุปผล ---
                 col1, col2, col3 = st.columns(3)
-                
                 with col1:
                     st.markdown(f"""
                     <div class="metric-card bg-blue">
                         <div class="card-title">🏟️ แมตช์ทั้งหมด (จบแล้ว)</div>
                         <p class="card-value">{total} <span class="card-unit">คู่</span></p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
+                    </div>""", unsafe_allow_html=True)
                 with col2:
                     st.markdown(f"""
                     <div class="metric-card bg-purple">
                         <div class="card-title">🔥 คะแนนชนะสะสม (Win Score)</div>
                         <p class="card-value">{total_wins} <span class="card-unit">แต้ม</span></p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
+                    </div>""", unsafe_allow_html=True)
                 with col3:
                     st.markdown(f"""
                     <div class="metric-card bg-green">
                         <div class="card-title">🏆 Win Rate รวมทั้งหมด</div>
                         <p class="card-value">{win_rate} <span class="card-unit">%</span></p>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    </div>""", unsafe_allow_html=True)
 
                 st.markdown("<br>", unsafe_allow_html=True)
-
-                # 3. จัดการข้อมูลก่อนวาดกราฟ
-                df_comp['แนะนำลงทุน'] = df_comp['แนะนำลงทุน'].astype(str).str.strip()
-                df_comp['แนะนำลงทุน'] = df_comp['แนะนำลงทุน'].replace({
-                    '': 'ข้อมูลว่าง/ซ่อนอยู่', 'nan': 'ข้อมูลว่าง/ซ่อนอยู่', 'None': 'ข้อมูลว่าง/ซ่อนอยู่'
-                })
-
                 col_chart1, col_chart2 = st.columns(2)
 
-                # กราฟโดนัท 3D (Pop-out effect)
+                # --- 2. กราฟวงกลมแบบเจาะรู (Donut 3D) ---
                 with col_chart1:
-                    st.markdown("<h4 style='text-align: center; color: #334155;'>สัดส่วนผลลัพธ์โดยรวม</h4>", unsafe_allow_html=True)
-                    
-                    # หาสัดส่วนและดึงชิ้น "ชนะเต็ม" ให้เด้งออกมา 10%
+                    st.markdown("<h4 style='text-align: center; color: #334155;'>สัดส่วนผลลัพธ์รวมทั้งหมด</h4>", unsafe_allow_html=True)
                     pull_array = [0.1 if label == 'ชนะเต็ม' else 0 for label in df_comp['ผลเปรียบเทียบ'].unique()]
                     
                     pie_fig = px.pie(df_comp, names='ผลเปรียบเทียบ', color='ผลเปรียบเทียบ', 
                                      color_discrete_map={
                                          'ชนะเต็ม': '#10b981', 'ชนะครึ่ง': '#34d399', 
-                                         'แพ้เต็ม': '#f43f5e', 'แพ้ครึ่ง': '#fb7185', 
-                                         'เจ๊า': '#94a3b8'
-                                     }, hole=0.5) # เจาะรูตรงกลางเป็น Donut
-                    
+                                         'แพ้เต็ม': '#f43f5e', 'แพ้ครึ่ง': '#fb7185', 'เจ๊า': '#94a3b8'
+                                     }, hole=0.5)
                     pie_fig.update_traces(pull=pull_array, textinfo='percent+label', textfont_size=14,
-                                          marker=dict(line=dict(color='#ffffff', width=2))) # ใส่ขอบขาวให้ดูมีมิติ
+                                          marker=dict(line=dict(color='#ffffff', width=2)))
                     pie_fig.update_layout(margin=dict(t=20, b=20, l=20, r=20), autosize=True, showlegend=False)
                     st.plotly_chart(pie_fig, use_container_width=True)
 
-                # กราฟแท่งแนวนอน (Rounded & Bordered)
+                # --- 3. กราฟ Win-Rate แยกตามกฎ (Clean & Readability Focus) ---
                 with col_chart2:
-                    st.markdown("<h4 style='text-align: center; color: #334155;'>ความแม่นยำแยกตามกฎ (Sniper Rules)</h4>", unsafe_allow_html=True)
-                    bar_df = df_comp.groupby(['แนะนำลงทุน', 'ผลเปรียบเทียบ'], dropna=False).size().reset_index(name='จำนวน')
+                    st.markdown("<h4 style='text-align: center; color: #334155;'>🎯 อัตราชนะแยกตามกฎ (Win Rate %)</h4>", unsafe_allow_html=True)
                     
-                    bar_fig = px.bar(bar_df, x='จำนวน', y='แนะนำลงทุน', color='ผลเปรียบเทียบ', barmode='stack',
-                                     orientation='h', 
-                                     color_discrete_map={
-                                         'ชนะเต็ม': '#10b981', 'ชนะครึ่ง': '#34d399', 
-                                         'แพ้เต็ม': '#f43f5e', 'แพ้ครึ่ง': '#fb7185', 'เจ๊า': '#94a3b8'
-                                     })
-                    
-                    bar_fig.update_traces(marker=dict(line=dict(color='#ffffff', width=1.5))) # ใส่ขอบแท่งกราฟให้ดูป๊อปอัพ
-                    bar_fig.update_layout(
-                        margin=dict(t=20, b=20, l=150, r=20), 
-                        xaxis_title="จำนวนครั้ง", yaxis_title="", 
-                        yaxis=dict(autorange="reversed"), 
-                        plot_bgcolor='rgba(0,0,0,0)' # พื้นหลังโปร่งใส
-                    )
-                    st.plotly_chart(bar_fig, use_container_width=True)
-                    
+                    if not df_stats.empty and 'อัตราชนะ' in df_stats.columns:
+                        plot_df = df_stats.copy()
+                        rule_col = plot_df.columns[0]
+                        # แปลงเปอร์เซ็นต์เป็นตัวเลข Float
+                        plot_df['WinRate_Val'] = plot_df['อัตราชนะ'].astype(str).str.replace('%', '').apply(lambda x: float(x) if x.replace('.','').isdigit() else 0)
+                        
+                        # เอาเฉพาะกฎที่มีค่าเปอร์เซ็นต์มากกว่า 0 และจัดเรียงจากน้อยไปมาก
+                        plot_df = plot_df[plot_df['WinRate_Val'] > 0].sort_values('WinRate_Val', ascending=True)
+                        
+                        # กำหนดสีแท่งกราฟ (เขียว = 60+, ส้ม = 55+, แดง = ต่ำกว่า 55)
+                        colors = ['#10b981' if val >= 60 else '#f59e0b' if val >= 55 else '#ef4444' for val in plot_df['WinRate_Val']]
+                        
+                        fig_bar = go.Figure(go.Bar(
+                            x=plot_df['WinRate_Val'],
+                            y=plot_df[rule_col],
+                            orientation='h',
+                            marker=dict(color=colors),
+                            text=plot_df['อัตราชนะ'],
+                            textposition='inside',
+                            insidetextfont=dict(color='white', size=13, family='Arial Black')
+                        ))
+                        
+                        fig_bar.update_layout(
+                            xaxis=dict(range=[0, 100], showgrid=False, zeroline=False, visible=False),
+                            yaxis=dict(showgrid=False, title="", tickfont=dict(size=12, color='#475569')),
+                            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                            margin=dict(l=10, r=20, t=10, b=10),
+                            height=400, showlegend=False
+                        )
+                        st.plotly_chart(fig_bar, use_container_width=True)
+                    else:
+                        st.info("ยังไม่มีข้อมูลสถิติเพียงพอสำหรับสร้างกราฟ")
+                        
+            # --- 4. ตาราง Leaderboard (SaaS Glassmorphism Style) ---
             st.markdown("<br><hr>", unsafe_allow_html=True)
-            
-            # 4. ตารางสถิติ (Color-coded)
-            st.markdown("<h3 style='color: #1e293b;'>📋 ตารางสรุปสถิติความเชื่อมั่น (แยกรายกฎ)</h3>", unsafe_allow_html=True)
-            ws_stats = workbook.worksheet("สรุปสถิติ")
-            data_stats = ws_stats.get_all_records()
-            df_stats = pd.DataFrame(data_stats)
+            st.markdown("<h3 style='color: #1e293b; text-align: center; margin-bottom: 20px;'>📋 เจาะลึกสถิติรายกฎ (Leaderboard)</h3>", unsafe_allow_html=True)
             
             if not df_stats.empty:
-                df_stats.columns = [str(c).strip() for c in df_stats.columns]
+                # สร้างโค้ด HTML CSS สำหรับตารางสไตล์ Modern Web
+                html_table = """
+                <style>
+                    .modern-table-container { width: 100%; overflow-x: auto; padding-bottom: 20px; }
+                    .modern-table {
+                        width: 100%; border-collapse: separate; border-spacing: 0 12px;
+                        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    }
+                    .modern-table th {
+                        background-color: transparent; color: #64748b; font-weight: 700;
+                        text-transform: uppercase; letter-spacing: 0.5px; padding: 10px 15px;
+                        text-align: center; border-bottom: 2px solid #e2e8f0; white-space: nowrap;
+                    }
+                    .modern-table th:first-child { text-align: left; }
+                    .modern-table tbody tr {
+                        background-color: #ffffff;
+                        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+                        border-radius: 12px; transition: all 0.3s ease;
+                    }
+                    .modern-table tbody tr:hover {
+                        transform: translateY(-3px) scale(1.005);
+                        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+                    }
+                    .modern-table td {
+                        padding: 18px 15px; color: #334155; text-align: center;
+                        vertical-align: middle; border: none; font-size: 1.05rem;
+                    }
+                    .modern-table td:first-child { 
+                        border-top-left-radius: 12px; border-bottom-left-radius: 12px; 
+                        text-align: left; font-weight: 600; color: #0f172a;
+                    }
+                    .modern-table td:last-child { border-top-right-radius: 12px; border-bottom-right-radius: 12px; }
+                    
+                    /* สร้างป้ายกำกับ Capsule สำหรับเปอร์เซ็นต์ */
+                    .badge-green { background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 6px 16px; border-radius: 20px; font-weight: bold; font-size: 0.9em; box-shadow: 0 4px 6px rgba(16, 185, 129, 0.3);}
+                    .badge-orange { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; padding: 6px 16px; border-radius: 20px; font-weight: bold; font-size: 0.9em; box-shadow: 0 4px 6px rgba(245, 158, 11, 0.3);}
+                    .badge-red { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color: white; padding: 6px 16px; border-radius: 20px; font-weight: bold; font-size: 0.9em; box-shadow: 0 4px 6px rgba(239, 68, 68, 0.3);}
+                </style>
+                <div class="modern-table-container">
+                <table class="modern-table">
+                    <thead><tr>
+                """
+                # สร้างหัวตาราง
+                for col in df_stats.columns:
+                    html_table += f"<th>{col}</th>"
+                html_table += "</tr></thead><tbody>"
                 
-                if 'อัตราชนะ' in df_stats.columns:
-                    def format_winrate(val):
-                        if isinstance(val, str) and '%' in val: return val
-                        try: return f"{float(val) * 100:.2f}%"
-                        except: return val 
-                    
-                    df_stats['อัตราชนะ'] = df_stats['อัตราชนะ'].apply(format_winrate)
-                    
-                    # ฟังก์ชันระบายสีตามเกณฑ์ Win Rate
-                    def color_winrate_table(val):
-                        try:
-                            v = float(str(val).replace('%', '').strip())
-                            if v >= 60: return 'background-color: #d1fae5; color: #065f46; font-weight: bold;' # สีเขียว
-                            elif v >= 55: return 'background-color: #fef3c7; color: #92400e; font-weight: bold;' # สีส้ม
-                            else: return 'background-color: #ffe4e6; color: #9f1239; font-weight: bold;' # สีแดง
-                        except:
-                            return ''
-                    
-                    # แสดงตารางพร้อมการระบายสี
-                    # ใช้ getattr เพื่อให้รองรับ pandas ทั้งเวอร์ชันเก่า (applymap) และใหม่ (map)
-                    try:
-                        styled_df = df_stats.style.map(color_winrate_table, subset=['อัตราชนะ'])
-                    except AttributeError:
-                        styled_df = df_stats.style.applymap(color_winrate_table, subset=['อัตราชนะ'])
-                        
-                    st.dataframe(styled_df, use_container_width=True)
+                # นำข้อมูลจาก df_stats มาใส่ในตารางทีละแถว
+                for _, row in df_stats.iterrows():
+                    html_table += "<tr>"
+                    for col in df_stats.columns:
+                        val = row[col]
+                        if col == 'อัตราชนะ':
+                            # จัดการเงื่อนไขสีและการใส่ไอคอน
+                            val_str = str(val).replace('%', '').strip()
+                            try:
+                                v_float = float(val_str)
+                            except:
+                                v_float = 0
+                                
+                            if v_float >= 60: 
+                                badge = "badge-green"
+                                icon = "🎯 "
+                            elif v_float >= 55: 
+                                badge = "badge-orange"
+                                icon = "⚠️️ "
+                            else: 
+                                badge = "badge-red"
+                                icon = "🛑 "
+                                
+                            html_table += f"<td><span class='{badge}'>{icon}{val}</span></td>"
+                        else:
+                            html_table += f"<td>{val}</td>"
+                    html_table += "</tr>"
+                
+                html_table += "</tbody></table></div>"
+                
+                # แสดงผลตาราง HTML ออกทางหน้าจอ
+                st.markdown(html_table, unsafe_allow_html=True)
+            else:
+                st.warning("ไม่พบข้อมูลสถิติในตาราง")
 
         except Exception as e:
             st.error(f"เกิดข้อผิดพลาดในการโหลดข้อมูลสถิติ: {str(e)}")
