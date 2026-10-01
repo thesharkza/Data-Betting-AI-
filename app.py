@@ -90,24 +90,23 @@ p, label, span { color: inherit; }
 .panel-title { font-size: 1.05rem; font-weight: 500; color: #e6f2ea; margin: 0 0 2px 0; }
 .panel-sub { font-size: 0.85rem; color: #7f9a8b; margin: 0 0 6px 0; }
 
-/* Leaderboard */
-.lb { width: 100%; border-collapse: collapse; }
-.lb th {
-    color: #7f9a8b; font-weight: 500; font-size: 0.85rem; text-align: center;
-    padding: 12px 14px; border-bottom: 1px solid #1b2a22; white-space: nowrap;
-}
-.lb td {
-    padding: 14px; text-align: center; color: #cfe3d6; font-size: 0.98rem;
-    border-bottom: 1px solid #111c16; vertical-align: middle;
-}
-.lb th.left, .lb td.left { text-align: left; }
-.lb tbody tr:hover td { background: #0c130f; }
-.lb td.rank { color: #7f9a8b; width: 48px; }
-.lb td.rule { color: #e6f2ea; font-weight: 500; }
-.pill { display: inline-block; padding: 4px 14px; border-radius: 999px; font-weight: 600; font-size: 0.9rem; }
-.pill-g { background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.4); }
-.pill-a { background: rgba(217,164,65,0.14); color: #e8bb62; border: 1px solid rgba(217,164,65,0.4); }
-.pill-r { background: rgba(229,72,77,0.14); color: #f06b70; border: 1px solid rgba(229,72,77,0.4); }
+/* Rule cards */
+.rule-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }
+.rule-card { background: #0c130f; border: 1px solid #1b2a22; border-radius: 16px; padding: 20px 22px; }
+.rule-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.rule-name { color: #e6f2ea; font-weight: 500; font-size: 1rem; }
+.rule-tag { font-size: 0.78rem; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
+.rule-rate { font-size: 2.4rem; font-weight: 600; line-height: 1.2; margin: 10px 0 8px 0; }
+.rule-bar { height: 6px; background: #17241d; border-radius: 6px; overflow: hidden; }
+.rule-bar > div { height: 100%; border-radius: 6px; }
+.rule-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 14px; }
+.rule-meta span { color: #7f9a8b; font-size: 0.85rem; }
+.rule-meta b { color: #cfe3d6; font-weight: 500; margin-left: 4px; }
+.t-g { color: #4ade80; } .t-a { color: #e8bb62; } .t-r { color: #f06b70; }
+.b-g { background: #22c55e; } .b-a { background: #d9a441; } .b-r { background: #e5484d; }
+.tag-g { background: rgba(34,197,94,0.15); color: #4ade80; }
+.tag-a { background: rgba(217,164,65,0.14); color: #e8bb62; }
+.tag-r { background: rgba(229,72,77,0.14); color: #f06b70; }
 
 /* Result card (tab 1) */
 .result-card {
@@ -399,39 +398,35 @@ with tab2:
                     else:
                         st.info("ยังไม่มีข้อมูลสถิติเพียงพอสำหรับสร้างกราฟ")
 
-            # --- 4. Leaderboard ---
+            # --- 4. การ์ดสถิติรายกฎ ---
             st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
             panel_header("สถิติรายกฎ", "เรียงจากอัตราชนะสูงสุดลงมา")
 
-            if not df_stats.empty:
+            if not df_stats.empty and 'อัตราชนะ' in df_stats.columns:
                 tbl = df_stats.copy()
-                if 'อัตราชนะ' in tbl.columns:
-                    tbl['_v'] = pd.to_numeric(
-                        tbl['อัตราชนะ'].astype(str).str.replace('%', '').str.strip(),
-                        errors='coerce').fillna(0)
-                    tbl = tbl.sort_values('_v', ascending=False)
-                cols = [c for c in tbl.columns if c != '_v']
+                tbl['_v'] = pd.to_numeric(
+                    tbl['อัตราชนะ'].astype(str).str.replace('%', '').str.strip(),
+                    errors='coerce').fillna(0)
+                tbl = tbl.sort_values('_v', ascending=False)
+                rule_col = df_stats.columns[0]
+                extra_cols = [c for c in df_stats.columns if c not in (rule_col, 'อัตราชนะ')]
 
-                h = ["<div style='overflow-x:auto'><table class='lb'><thead><tr><th>#</th>"]
-                for i, c in enumerate(cols):
-                    h.append(f"<th class='{'left' if i == 0 else ''}'>{c}</th>")
-                h.append("</tr></thead><tbody>")
-
-                for n, (_, row) in enumerate(tbl.iterrows(), start=1):
-                    h.append(f"<tr><td class='rank'>{n}</td>")
-                    for i, c in enumerate(cols):
-                        val = row[c]
-                        if c == 'อัตราชนะ':
-                            v = row['_v']
-                            cls, icon = ("pill-g", "🎯") if v >= 60 else ("pill-a", "⚠️") if v >= 55 else ("pill-r", "🛑")
-                            h.append(f"<td><span class='pill {cls}'>{icon} {val}</span></td>")
-                        elif i == 0:
-                            h.append(f"<td class='left rule'>{val}</td>")
-                        else:
-                            h.append(f"<td>{val}</td>")
-                    h.append("</tr>")
-                h.append("</tbody></table></div>")
-                st.markdown("".join(h), unsafe_allow_html=True)
+                cards = ["<div class='rule-grid'>"]
+                for _, row in tbl.iterrows():
+                    v = row['_v']
+                    k, tag = ("g", "แนะนำ") if v >= 60 else ("a", "ระวัง") if v >= 55 else ("r", "หลีกเลี่ยง")
+                    meta = "".join(f"<span>{c}<b>{row[c]}</b></span>" for c in extra_cols
+                                   if str(row[c]).strip() != "")
+                    cards.append(
+                        f"<div class='rule-card'>"
+                        f"<div class='rule-top'><span class='rule-name'>{row[rule_col]}</span>"
+                        f"<span class='rule-tag tag-{k}'>{tag}</span></div>"
+                        f"<div class='rule-rate t-{k}'>{row['อัตราชนะ']}</div>"
+                        f"<div class='rule-bar'><div class='b-{k}' style='width:{min(v, 100)}%'></div></div>"
+                        f"<div class='rule-meta'>{meta}</div>"
+                        f"</div>")
+                cards.append("</div>")
+                st.markdown("".join(cards), unsafe_allow_html=True)
             else:
                 st.warning("ไม่พบข้อมูลสถิติในตาราง")
 
