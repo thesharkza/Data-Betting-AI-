@@ -6,39 +6,122 @@ import io
 import os
 import re
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go  # เพิ่มไลบรารีนี้สำหรับกราฟขั้นสูง
+import plotly.graph_objects as go
 import gc
 import time
 
 # ----------------------------------------
-# ตั้งค่าหน้าเว็บ Streamlit (กำหนดให้รองรับ CSS พิเศษ)
+# ตั้งค่าหน้าเว็บ
 # ----------------------------------------
 st.set_page_config(page_title="ระบบวิเคราะห์ราคาบอล VIP", page_icon="⚽", layout="wide")
 
-# CSS สำหรับการ์ดด้านบน (3D Modern & Glassmorphism)
+# ----------------------------------------
+# THEME : Black & Emerald
+# ----------------------------------------
+BG = "#050907"
+SURFACE = "#0c130f"
+LINE = "#1b2a22"
+TEXT = "#e6f2ea"
+MUTED = "#7f9a8b"
+GREEN = "#22c55e"
+GREEN_SOFT = "#86efac"
+AMBER = "#d9a441"
+RED = "#e5484d"
+
 st.markdown("""
 <style>
-    .metric-card {
-        border-radius: 20px;
-        padding: 25px;
-        color: white;
-        text-align: center;
-        box-shadow: 0 10px 20px rgba(0,0,0,0.15), inset 0 2px 2px rgba(255,255,255,0.2);
-        transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.3s;
-        margin-bottom: 20px;
-    }
-    .metric-card:hover {
-        transform: translateY(-8px);
-        box-shadow: 0 15px 30px rgba(0,0,0,0.25), inset 0 2px 2px rgba(255,255,255,0.3);
-    }
-    .bg-blue { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); }
-    .bg-purple { background: linear-gradient(135deg, #8E2DE2 0%, #4A00E0 100%); }
-    .bg-green { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); }
-    
-    .card-title { font-size: 1.1rem; font-weight: 500; opacity: 0.9; margin-bottom: 10px; letter-spacing: 1px; }
-    .card-value { font-size: 3.5rem; font-weight: 900; margin: 0; text-shadow: 2px 4px 6px rgba(0,0,0,0.2); line-height: 1.2; }
-    .card-unit { font-size: 1.2rem; font-weight: 400; opacity: 0.8; }
+@import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap');
+
+html, body, [class*="css"], .stApp, .stMarkdown, button, input, textarea {
+    font-family: 'Prompt', 'Segoe UI', sans-serif !important;
+}
+.stApp { background: #050907; color: #e6f2ea; }
+header[data-testid="stHeader"] { background: transparent; }
+.block-container { padding-top: 2.2rem; max-width: 1280px; }
+
+h1, h2, h3, h4 { color: #e6f2ea !important; letter-spacing: -0.01em; }
+p, label, span { color: inherit; }
+
+/* Tabs */
+.stTabs [data-baseweb="tab-list"] { gap: 6px; border-bottom: 1px solid #1b2a22; }
+.stTabs [data-baseweb="tab"] {
+    background: transparent; color: #7f9a8b; padding: 10px 18px;
+    border-radius: 10px 10px 0 0; font-weight: 500;
+}
+.stTabs [aria-selected="true"] { color: #22c55e !important; background: #0c130f; }
+.stTabs [data-baseweb="tab-highlight"] { background-color: #22c55e; }
+
+/* Buttons */
+.stButton > button[kind="primary"] {
+    background: #22c55e; color: #03140a; border: none; font-weight: 600;
+    border-radius: 10px; padding: 0.55rem 1.4rem;
+}
+.stButton > button[kind="primary"]:hover { background: #4ade80; color: #03140a; }
+
+/* Uploader */
+[data-testid="stFileUploader"] section {
+    background: #0c130f; border: 1px dashed #2a4136; border-radius: 14px;
+}
+
+/* Alerts */
+[data-testid="stAlert"] { background: #0c130f; border: 1px solid #1b2a22; border-radius: 12px; }
+
+/* Page heading */
+.page-title { font-size: 1.9rem; font-weight: 600; margin: 0; color: #e6f2ea; }
+.page-sub { color: #7f9a8b; margin: 4px 0 22px 0; font-size: 0.95rem; }
+
+/* KPI strip */
+.kpi-wrap { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 16px; margin-bottom: 22px; }
+.kpi {
+    background: #0c130f; border: 1px solid #1b2a22; border-radius: 16px; padding: 22px 26px;
+}
+.kpi.hero {
+    background: linear-gradient(160deg, #0f2a1b 0%, #0c130f 70%);
+    border-color: #1f6b3d; box-shadow: 0 0 40px -12px rgba(34,197,94,0.35);
+}
+.kpi-label { color: #7f9a8b; font-size: 0.9rem; margin-bottom: 6px; }
+.kpi-value { font-size: 2.6rem; font-weight: 600; line-height: 1.15; color: #e6f2ea; }
+.kpi.hero .kpi-value { font-size: 3.6rem; color: #4ade80; }
+.kpi-unit { font-size: 1rem; color: #7f9a8b; font-weight: 400; margin-left: 4px; }
+.kpi-bar { height: 6px; background: #17241d; border-radius: 6px; margin-top: 14px; overflow: hidden; }
+.kpi-bar > div { height: 100%; background: linear-gradient(90deg, #16a34a, #4ade80); border-radius: 6px; }
+
+/* Panels */
+.panel-title { font-size: 1.05rem; font-weight: 500; color: #e6f2ea; margin: 0 0 2px 0; }
+.panel-sub { font-size: 0.85rem; color: #7f9a8b; margin: 0 0 6px 0; }
+
+/* Leaderboard */
+.lb { width: 100%; border-collapse: collapse; }
+.lb th {
+    color: #7f9a8b; font-weight: 500; font-size: 0.85rem; text-align: center;
+    padding: 12px 14px; border-bottom: 1px solid #1b2a22; white-space: nowrap;
+}
+.lb td {
+    padding: 14px; text-align: center; color: #cfe3d6; font-size: 0.98rem;
+    border-bottom: 1px solid #111c16; vertical-align: middle;
+}
+.lb th.left, .lb td.left { text-align: left; }
+.lb tbody tr:hover td { background: #0c130f; }
+.lb td.rank { color: #7f9a8b; width: 48px; }
+.lb td.rule { color: #e6f2ea; font-weight: 500; }
+.pill { display: inline-block; padding: 4px 14px; border-radius: 999px; font-weight: 600; font-size: 0.9rem; }
+.pill-g { background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.4); }
+.pill-a { background: rgba(217,164,65,0.14); color: #e8bb62; border: 1px solid rgba(217,164,65,0.4); }
+.pill-r { background: rgba(229,72,77,0.14); color: #f06b70; border: 1px solid rgba(229,72,77,0.4); }
+
+/* Result card (tab 1) */
+.result-card {
+    background: #0c130f; border: 1px solid #1b2a22; border-left: 4px solid #22c55e;
+    border-radius: 14px; padding: 24px 28px;
+}
+.result-card h3 { margin: 0 0 12px 0; color: #e6f2ea; }
+.result-card .vs { color: #7f9a8b; font-weight: 400; padding: 0 6px; }
+.result-row { display: flex; gap: 10px; padding: 8px 0; border-top: 1px solid #111c16; }
+.result-key { color: #7f9a8b; min-width: 170px; }
+.result-val { color: #e6f2ea; font-weight: 500; }
+.result-val.hl { color: #4ade80; }
+
+@media (max-width: 900px) { .kpi-wrap { grid-template-columns: 1fr; } }
 </style>
 """, unsafe_allow_html=True)
 
@@ -58,11 +141,8 @@ def init_gspread():
             creds_dict = dict(st.secrets["gspread"])
             client = gspread.service_account_from_dict(creds_dict)
         else:
-            creds_path = 'credentials.json'
-            client = gspread.service_account(filename=creds_path)
-        
-        workbook = client.open("ข้อมูลราคาบอลสกัดจากภาพ")
-        return workbook
+            client = gspread.service_account(filename='credentials.json')
+        return client.open("ข้อมูลราคาบอลสกัดจากภาพ")
     except Exception as e:
         st.error(f"❌ เชื่อมต่อ Google Sheets ไม่สำเร็จ: {e}")
         return None
@@ -75,7 +155,7 @@ def clean_raw_data(raw_text):
     row_data = []
     for i, item in enumerate(raw_data):
         if i < 2:
-            row_data.append(item) 
+            row_data.append(item)
         else:
             cleaned = re.sub(r'^[oOuU\s]+', '', item)
             try:
@@ -87,21 +167,21 @@ def clean_raw_data(raw_text):
 def get_money_management(rec_text, conf_text):
     if "ข้าม" in str(rec_text):
         return "0 Unit (ข้าม ห้ามลงทุน) 🛑", rec_text
-    
+
     match_pct = re.search(r'(\d+(\.\d+)?)%', str(conf_text))
     match_n = re.search(r'n=(\d+)', str(conf_text))
-    
+
     if match_pct:
         pct_val = float(match_pct.group(1))
         n_val = int(match_n.group(1)) if match_n else 0
-        
+
         if n_val < 5 and "SNIPER" in str(rec_text):
             return "⭐ 0.5 Unit (ช่วงทดสอบโมเดลใหม่ 🧪)", rec_text
-            
+
         if pct_val < 55 and "SNIPER" in str(rec_text):
             modified_rec = f"⏸️ พักชั่วคราว: {rec_text} (สถิติตกเหลือ {pct_val}%)"
             return "0 Unit (รอสถิติฟื้นตัว 🛑)", modified_rec
-            
+
         if pct_val >= 70: return "⭐⭐⭐⭐ 3 Units (Max Bet 🎯)", rec_text
         elif pct_val >= 60: return "⭐⭐⭐ 2 Units (High 🚀)", rec_text
         elif pct_val >= 55: return "⭐⭐ 1 Unit (Normal 👍)", rec_text
@@ -110,41 +190,60 @@ def get_money_management(rec_text, conf_text):
         return "⭐ 0.5 Unit (รอเก็บสถิติ ⏳)", rec_text
 
 # ----------------------------------------
-# หัวข้อหลักของแอป
+# Helper สำหรับกราฟ
 # ----------------------------------------
-st.title("⚽ ระบบวิเคราะห์ราคาบอล VIP")
+def base_layout(fig, height=380):
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="Prompt, sans-serif", color=MUTED, size=13),
+        margin=dict(l=10, r=10, t=10, b=10), height=height,
+        hoverlabel=dict(bgcolor=SURFACE, bordercolor=LINE, font=dict(color=TEXT)),
+    )
+    return fig
 
-tab1, tab2 = st.tabs(["📸 อัปโหลดราคาบอล", "📊 Dashboard แบบ 3 มิติ"])
+def panel_header(title, sub):
+    st.markdown(f"<p class='panel-title'>{title}</p><p class='panel-sub'>{sub}</p>", unsafe_allow_html=True)
 
+# ----------------------------------------
+# หัวข้อหลัก
+# ----------------------------------------
+st.markdown("<h1 class='page-title'>⚽ ระบบวิเคราะห์ราคาบอล VIP</h1>", unsafe_allow_html=True)
+st.markdown("<p class='page-sub'>สกัดราคาจากภาพ วิเคราะห์ และติดตามผลงานในที่เดียว</p>", unsafe_allow_html=True)
+
+tab1, tab2 = st.tabs(["📸 อัปโหลดราคาบอล", "📊 Dashboard"])
+
+# ----------------------------------------
+# TAB 1
+# ----------------------------------------
 with tab1:
     st.subheader("สกัดราคาบอล & วิเคราะห์ VIP")
     st.write("อัปโหลดภาพตารางราคาเพื่อสกัดข้อมูลส่งเข้า Google Sheets อัตโนมัติ")
-    
+
     uploaded_file = st.file_uploader("เลือกไฟล์รูปภาพตารางราคาบอล", type=['png', 'jpg', 'jpeg'])
-    
+
     if uploaded_file is not None:
         st.image(uploaded_file, caption="ภาพที่อัปโหลด", width=600)
-        
+
         if st.button("🚀 อัปโหลดและบันทึกข้อมูล", type="primary"):
             if not workbook:
                 st.error("ไม่สามารถเชื่อมต่อ Google Sheets ได้")
             else:
                 try:
                     ws_data = workbook.sheet1
-                    
+
                     with st.spinner("📸 กำลังประมวลผลรูปภาพ..."):
                         img = Image.open(uploaded_file)
                         if img.mode != 'RGB': img = img.convert('RGB')
                         img.thumbnail((800, 800))
-                        
+
                         img_byte_arr = io.BytesIO()
                         img.save(img_byte_arr, format='JPEG', quality=80)
                         img_bytes = img_byte_arr.getvalue()
-                    
+
                     with st.spinner("🤖 กำลังให้ AI สกัดราคาบอล..."):
                         prompt = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ (ระบุเฉพาะตัวเลข ห้ามมีตัวอักษร o หรือ u นำหน้า),ค่าน้ำสูง,ค่าน้ำต่ำ โดยคั่นแต่ละค่าด้วยลูกน้ำ (,) เท่านั้น ห้ามมีข้อความอื่น"
                         response = model.generate_content([{"mime_type": "image/jpeg", "data": img_bytes}, prompt])
-                    
+
                     gc.collect()
 
                     if not response or not response.text:
@@ -152,15 +251,15 @@ with tab1:
                     else:
                         with st.spinner("📊 กำลังบันทึกและรอ Google Sheets ประมวลผลลัพธ์..."):
                             row_data_to_sheet = clean_raw_data(response.text.strip())
-                            
+
                             col_a_values = ws_data.col_values(1)
-                            col_b_values = ws_data.col_values(2) 
+                            col_b_values = ws_data.col_values(2)
                             last_row = sum(1 for val in col_a_values if str(val).strip() != "")
-                            
+
                             new_home = str(row_data_to_sheet[0]).strip()
                             new_away = str(row_data_to_sheet[1]).strip()
                             target_row = None
-                            
+
                             for i in range(len(col_a_values)):
                                 sheet_home = str(col_a_values[i]).strip()
                                 sheet_away = str(col_b_values[i]).strip() if i < len(col_b_values) else ""
@@ -175,53 +274,45 @@ with tab1:
                                 target_row = last_row + 1
                                 ws_data.update(range_name=f"A{target_row}", values=[row_data_to_sheet])
                                 st.success("✅ บันทึกข้อมูลคู่ใหม่สำเร็จ!")
-                                
+
                             time.sleep(3)
                             updated_row = ws_data.row_values(target_row)
-                            
+
                             rec = updated_row[15] if len(updated_row) > 15 else "กำลังคำนวณ..."
                             confidence = updated_row[17] if len(updated_row) > 17 else "-"
                             radar = updated_row[18] if len(updated_row) > 18 else "-"
 
                             mm_text, rec = get_money_management(rec, confidence)
-                            
-                            st.markdown(f"""
-                            <div style="padding: 25px; background: linear-gradient(to right, #f8fafc, #f1f5f9); border-left: 6px solid #1abc9c; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
-                                <h3 style="color: #0f172a; margin-top: 0;">⚽ {row_data_to_sheet[0]} <span style="color:#94a3b8;">vs</span> {row_data_to_sheet[1]}</h3>
-                                <div style="margin-top: 15px; font-size: 1.1rem; color: #334155;">
-                                    <p style="margin: 5px 0;"><strong>🎯 แนะนำลงทุน:</strong> <span style="color: #e11d48; font-weight: bold;">{rec}</span></p>
-                                    <p style="margin: 5px 0;"><strong>💰 Money Mgt:</strong> <span style="color: #0284c7; font-weight: bold;">{mm_text}</span></p>
-                                    <p style="margin: 5px 0;"><strong>📊 สถิติความเชื่อมั่น:</strong> <span style="color: #047857; font-weight: bold;">{confidence}</span></p>
-                                    <p style="margin: 5px 0;"><strong>🚨 เช็กราคา:</strong> {radar}</p>
-                                </div>
-                            </div>
-                            """, unsafe_allow_html=True)
-                        
+
+                            st.markdown(f"""<div class="result-card">
+<h3>{row_data_to_sheet[0]}<span class="vs">vs</span>{row_data_to_sheet[1]}</h3>
+<div class="result-row"><span class="result-key">🎯 แนะนำลงทุน</span><span class="result-val hl">{rec}</span></div>
+<div class="result-row"><span class="result-key">💰 Money Mgt</span><span class="result-val">{mm_text}</span></div>
+<div class="result-row"><span class="result-key">📊 สถิติความเชื่อมั่น</span><span class="result-val">{confidence}</span></div>
+<div class="result-row"><span class="result-key">🚨 เช็กราคา</span><span class="result-val">{radar}</span></div>
+</div>""", unsafe_allow_html=True)
+
                 except Exception as e:
                     st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
                 finally:
                     gc.collect()
 
 # ----------------------------------------
-# TAB 2 : Dashboard อัปเกรดใหม่ (Clean Chart + SaaS Table)
+# TAB 2 : Dashboard
 # ----------------------------------------
 with tab2:
     if not workbook:
         st.error("ไม่สามารถเชื่อมต่อ Google Sheets ได้")
     else:
         try:
-            # --- ดึงข้อมูลจากชีต DATA เพื่อทำกราฟโดนัท ---
             ws_data = workbook.sheet1
-            data = ws_data.get_all_records()
-            df = pd.DataFrame(data)
-            
-            # --- ดึงข้อมูลจากชีต สรุปสถิติ เพื่อทำกราฟแท่งแนวนอนและตาราง ---
+            df = pd.DataFrame(ws_data.get_all_records())
+
             ws_stats = workbook.worksheet("สรุปสถิติ")
-            data_stats = ws_stats.get_all_records()
-            df_stats = pd.DataFrame(data_stats)
+            df_stats = pd.DataFrame(ws_stats.get_all_records())
             if not df_stats.empty:
                 df_stats.columns = [str(c).strip() for c in df_stats.columns]
-            
+
             if not df.empty and 'ผลเปรียบเทียบ' in df.columns:
                 df_comp = df[df['ผลเปรียบเทียบ'].astype(str).str.contains('ชนะ|แพ้|เจ๊า', na=False)].copy()
                 total = len(df_comp)
@@ -231,166 +322,116 @@ with tab2:
                 draws = len(df_comp[df_comp['ผลเปรียบเทียบ'] == 'เจ๊า'])
                 win_rate = round((total_wins / (total - draws)) * 100, 2) if (total - draws) > 0 else 0
 
-                # --- 1. การ์ด 3D สรุปผล ---
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.markdown(f"""
-                    <div class="metric-card bg-blue">
-                        <div class="card-title">🏟️ แมตช์ทั้งหมด (จบแล้ว)</div>
-                        <p class="card-value">{total} <span class="card-unit">คู่</span></p>
-                    </div>""", unsafe_allow_html=True)
-                with col2:
-                    st.markdown(f"""
-                    <div class="metric-card bg-purple">
-                        <div class="card-title">🔥 คะแนนชนะสะสม (Win Score)</div>
-                        <p class="card-value">{total_wins} <span class="card-unit">แต้ม</span></p>
-                    </div>""", unsafe_allow_html=True)
-                with col3:
-                    st.markdown(f"""
-                    <div class="metric-card bg-green">
-                        <div class="card-title">🏆 Win Rate รวมทั้งหมด</div>
-                        <p class="card-value">{win_rate} <span class="card-unit">%</span></p>
-                    </div>""", unsafe_allow_html=True)
+                # --- 1. KPI ---
+                st.markdown(f"""<div class="kpi-wrap">
+<div class="kpi hero">
+<div class="kpi-label">Win Rate รวมทั้งหมด</div>
+<div class="kpi-value">{win_rate}<span class="kpi-unit">%</span></div>
+<div class="kpi-bar"><div style="width:{min(win_rate, 100)}%"></div></div>
+</div>
+<div class="kpi">
+<div class="kpi-label">แมตช์ที่จบแล้ว</div>
+<div class="kpi-value">{total}<span class="kpi-unit">คู่</span></div>
+</div>
+<div class="kpi">
+<div class="kpi-label">คะแนนชนะสะสม</div>
+<div class="kpi-value">{total_wins:g}<span class="kpi-unit">แต้ม</span></div>
+</div>
+</div>""", unsafe_allow_html=True)
 
-                st.markdown("<br>", unsafe_allow_html=True)
-                col_chart1, col_chart2 = st.columns(2)
+                col_chart1, col_chart2 = st.columns([1, 1.25], gap="large")
 
-                # --- 2. กราฟวงกลมแบบเจาะรู (Donut 3D) ---
+                # --- 2. Donut ---
                 with col_chart1:
-                    st.markdown("<h4 style='text-align: center; color: #334155;'>สัดส่วนผลลัพธ์รวมทั้งหมด</h4>", unsafe_allow_html=True)
-                    pull_array = [0.1 if label == 'ชนะเต็ม' else 0 for label in df_comp['ผลเปรียบเทียบ'].unique()]
-                    
-                    pie_fig = px.pie(df_comp, names='ผลเปรียบเทียบ', color='ผลเปรียบเทียบ', 
-                                     color_discrete_map={
-                                         'ชนะเต็ม': '#10b981', 'ชนะครึ่ง': '#34d399', 
-                                         'แพ้เต็ม': '#f43f5e', 'แพ้ครึ่ง': '#fb7185', 'เจ๊า': '#94a3b8'
-                                     }, hole=0.5)
-                    pie_fig.update_traces(pull=pull_array, textinfo='percent+label', textfont_size=14,
-                                          marker=dict(line=dict(color='#ffffff', width=2)))
-                    pie_fig.update_layout(margin=dict(t=20, b=20, l=20, r=20), autosize=True, showlegend=False)
-                    st.plotly_chart(pie_fig, use_container_width=True)
+                    panel_header("สัดส่วนผลลัพธ์", "ผลของทุกคู่ที่จบแล้ว")
+                    color_map = {
+                        'ชนะเต็ม': GREEN, 'ชนะครึ่ง': GREEN_SOFT,
+                        'เจ๊า': '#4b5f54', 'แพ้ครึ่ง': '#b8575b', 'แพ้เต็ม': RED
+                    }
+                    counts = df_comp['ผลเปรียบเทียบ'].value_counts()
+                    order = [k for k in color_map if k in counts.index]
+                    pie_fig = go.Figure(go.Pie(
+                        labels=order, values=[counts[k] for k in order],
+                        hole=0.72, sort=False, direction='clockwise',
+                        marker=dict(colors=[color_map[k] for k in order], line=dict(color=BG, width=3)),
+                        textinfo='none', hovertemplate='%{label}: %{value} คู่ (%{percent})<extra></extra>'
+                    ))
+                    base_layout(pie_fig, 380)
+                    pie_fig.update_layout(
+                        showlegend=True,
+                        legend=dict(orientation='h', yanchor='top', y=-0.02, xanchor='center', x=0.5,
+                                    font=dict(color=TEXT, size=13)),
+                        annotations=[dict(text=f"<b style='font-size:34px;color:{TEXT}'>{win_rate}%</b><br>Win Rate",
+                                          x=0.5, y=0.5, showarrow=False, font=dict(color=MUTED, size=13))]
+                    )
+                    st.plotly_chart(pie_fig, use_container_width=True, config={'displayModeBar': False})
 
-                # --- 3. กราฟ Win-Rate แยกตามกฎ (Clean & Readability Focus) ---
+                # --- 3. Bar แยกตามกฎ ---
                 with col_chart2:
-                    st.markdown("<h4 style='text-align: center; color: #334155;'>🎯 อัตราชนะแยกตามกฎ (Win Rate %)</h4>", unsafe_allow_html=True)
-                    
+                    panel_header("อัตราชนะแยกตามกฎ", "เขียว ≥ 60%  ·  เหลือง 55-60%  ·  แดง < 55%")
+
                     if not df_stats.empty and 'อัตราชนะ' in df_stats.columns:
                         plot_df = df_stats.copy()
                         rule_col = plot_df.columns[0]
-                        # แปลงเปอร์เซ็นต์เป็นตัวเลข Float
-                        plot_df['WinRate_Val'] = plot_df['อัตราชนะ'].astype(str).str.replace('%', '').apply(lambda x: float(x) if x.replace('.','').isdigit() else 0)
-                        
-                        # เอาเฉพาะกฎที่มีค่าเปอร์เซ็นต์มากกว่า 0 และจัดเรียงจากน้อยไปมาก
+                        plot_df['WinRate_Val'] = pd.to_numeric(
+                            plot_df['อัตราชนะ'].astype(str).str.replace('%', '').str.strip(),
+                            errors='coerce').fillna(0)
                         plot_df = plot_df[plot_df['WinRate_Val'] > 0].sort_values('WinRate_Val', ascending=True)
-                        
-                        # กำหนดสีแท่งกราฟ (เขียว = 60+, ส้ม = 55+, แดง = ต่ำกว่า 55)
-                        colors = ['#10b981' if val >= 60 else '#f59e0b' if val >= 55 else '#ef4444' for val in plot_df['WinRate_Val']]
-                        
+
+                        bar_colors = [GREEN if v >= 60 else AMBER if v >= 55 else RED for v in plot_df['WinRate_Val']]
+
                         fig_bar = go.Figure(go.Bar(
-                            x=plot_df['WinRate_Val'],
-                            y=plot_df[rule_col],
-                            orientation='h',
-                            marker=dict(color=colors),
-                            text=plot_df['อัตราชนะ'],
-                            textposition='inside',
-                            insidetextfont=dict(color='white', size=13, family='Arial Black')
+                            x=plot_df['WinRate_Val'], y=plot_df[rule_col], orientation='h',
+                            marker=dict(color=bar_colors, cornerradius=6),
+                            text=[f"{v:g}%" for v in plot_df['WinRate_Val']], textposition='outside',
+                            textfont=dict(color=TEXT, size=13), cliponaxis=False,
+                            hovertemplate='%{y}: %{x}%<extra></extra>'
                         ))
-                        
+                        base_layout(fig_bar, max(380, 46 * len(plot_df) + 40))
                         fig_bar.update_layout(
-                            xaxis=dict(range=[0, 100], showgrid=False, zeroline=False, visible=False),
-                            yaxis=dict(showgrid=False, title="", tickfont=dict(size=12, color='#475569')),
-                            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                            margin=dict(l=10, r=20, t=10, b=10),
-                            height=400, showlegend=False
+                            xaxis=dict(range=[0, 108], visible=False),
+                            yaxis=dict(showgrid=False, title="", tickfont=dict(size=13, color=TEXT)),
+                            bargap=0.45, showlegend=False,
+                            margin=dict(l=10, r=40, t=10, b=10),
                         )
-                        st.plotly_chart(fig_bar, use_container_width=True)
+                        fig_bar.add_vline(x=55, line=dict(color=LINE, width=1.5, dash='dot'))
+                        st.plotly_chart(fig_bar, use_container_width=True, config={'displayModeBar': False})
                     else:
                         st.info("ยังไม่มีข้อมูลสถิติเพียงพอสำหรับสร้างกราฟ")
-                        
-            # --- 4. ตาราง Leaderboard (SaaS Glassmorphism Style) ---
-            st.markdown("<br><hr>", unsafe_allow_html=True)
-            st.markdown("<h3 style='color: #1e293b; text-align: center; margin-bottom: 20px;'>📋 เจาะลึกสถิติรายกฎ (Leaderboard)</h3>", unsafe_allow_html=True)
-            
+
+            # --- 4. Leaderboard ---
+            st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
+            panel_header("สถิติรายกฎ", "เรียงจากอัตราชนะสูงสุดลงมา")
+
             if not df_stats.empty:
-                # สร้างโค้ด HTML CSS สำหรับตารางสไตล์ Modern Web
-                html_table = """
-                <style>
-                    .modern-table-container { width: 100%; overflow-x: auto; padding-bottom: 20px; }
-                    .modern-table {
-                        width: 100%; border-collapse: separate; border-spacing: 0 12px;
-                        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                    }
-                    .modern-table th {
-                        background-color: transparent; color: #64748b; font-weight: 700;
-                        text-transform: uppercase; letter-spacing: 0.5px; padding: 10px 15px;
-                        text-align: center; border-bottom: 2px solid #e2e8f0; white-space: nowrap;
-                    }
-                    .modern-table th:first-child { text-align: left; }
-                    .modern-table tbody tr {
-                        background-color: #ffffff;
-                        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-                        border-radius: 12px; transition: all 0.3s ease;
-                    }
-                    .modern-table tbody tr:hover {
-                        transform: translateY(-3px) scale(1.005);
-                        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-                    }
-                    .modern-table td {
-                        padding: 18px 15px; color: #334155; text-align: center;
-                        vertical-align: middle; border: none; font-size: 1.05rem;
-                    }
-                    .modern-table td:first-child { 
-                        border-top-left-radius: 12px; border-bottom-left-radius: 12px; 
-                        text-align: left; font-weight: 600; color: #0f172a;
-                    }
-                    .modern-table td:last-child { border-top-right-radius: 12px; border-bottom-right-radius: 12px; }
-                    
-                    /* สร้างป้ายกำกับ Capsule สำหรับเปอร์เซ็นต์ */
-                    .badge-green { background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 6px 16px; border-radius: 20px; font-weight: bold; font-size: 0.9em; box-shadow: 0 4px 6px rgba(16, 185, 129, 0.3);}
-                    .badge-orange { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; padding: 6px 16px; border-radius: 20px; font-weight: bold; font-size: 0.9em; box-shadow: 0 4px 6px rgba(245, 158, 11, 0.3);}
-                    .badge-red { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color: white; padding: 6px 16px; border-radius: 20px; font-weight: bold; font-size: 0.9em; box-shadow: 0 4px 6px rgba(239, 68, 68, 0.3);}
-                </style>
-                <div class="modern-table-container">
-                <table class="modern-table">
-                    <thead><tr>
-                """
-                # สร้างหัวตาราง
-                for col in df_stats.columns:
-                    html_table += f"<th>{col}</th>"
-                html_table += "</tr></thead><tbody>"
-                
-                # นำข้อมูลจาก df_stats มาใส่ในตารางทีละแถว
-                for _, row in df_stats.iterrows():
-                    html_table += "<tr>"
-                    for col in df_stats.columns:
-                        val = row[col]
-                        if col == 'อัตราชนะ':
-                            # จัดการเงื่อนไขสีและการใส่ไอคอน
-                            val_str = str(val).replace('%', '').strip()
-                            try:
-                                v_float = float(val_str)
-                            except:
-                                v_float = 0
-                                
-                            if v_float >= 60: 
-                                badge = "badge-green"
-                                icon = "🎯 "
-                            elif v_float >= 55: 
-                                badge = "badge-orange"
-                                icon = "⚠️️ "
-                            else: 
-                                badge = "badge-red"
-                                icon = "🛑 "
-                                
-                            html_table += f"<td><span class='{badge}'>{icon}{val}</span></td>"
+                tbl = df_stats.copy()
+                if 'อัตราชนะ' in tbl.columns:
+                    tbl['_v'] = pd.to_numeric(
+                        tbl['อัตราชนะ'].astype(str).str.replace('%', '').str.strip(),
+                        errors='coerce').fillna(0)
+                    tbl = tbl.sort_values('_v', ascending=False)
+                cols = [c for c in tbl.columns if c != '_v']
+
+                h = ["<div style='overflow-x:auto'><table class='lb'><thead><tr><th>#</th>"]
+                for i, c in enumerate(cols):
+                    h.append(f"<th class='{'left' if i == 0 else ''}'>{c}</th>")
+                h.append("</tr></thead><tbody>")
+
+                for n, (_, row) in enumerate(tbl.iterrows(), start=1):
+                    h.append(f"<tr><td class='rank'>{n}</td>")
+                    for i, c in enumerate(cols):
+                        val = row[c]
+                        if c == 'อัตราชนะ':
+                            v = row['_v']
+                            cls, icon = ("pill-g", "🎯") if v >= 60 else ("pill-a", "⚠️") if v >= 55 else ("pill-r", "🛑")
+                            h.append(f"<td><span class='pill {cls}'>{icon} {val}</span></td>")
+                        elif i == 0:
+                            h.append(f"<td class='left rule'>{val}</td>")
                         else:
-                            html_table += f"<td>{val}</td>"
-                    html_table += "</tr>"
-                
-                html_table += "</tbody></table></div>"
-                
-                # แสดงผลตาราง HTML ออกทางหน้าจอ
-                st.markdown(html_table, unsafe_allow_html=True)
+                            h.append(f"<td>{val}</td>")
+                    h.append("</tr>")
+                h.append("</tbody></table></div>")
+                st.markdown("".join(h), unsafe_allow_html=True)
             else:
                 st.warning("ไม่พบข้อมูลสถิติในตาราง")
 
