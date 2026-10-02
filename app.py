@@ -149,10 +149,46 @@ def init_gspread():
 workbook = init_gspread()
 model = genai.GenerativeModel('gemini-3.7-flash')
 
+# ----------------------------------------
+# แปลงค่าน้ำเป็นระบบมาเลเซีย (Malay Odds) เสมอ
+# ----------------------------------------
+WATER_IDX = [6, 8, 10, 11]  # ค่าน้ำ HDP เหย้า / HDP เยือน / น้ำสูง / น้ำต่ำ
+FMT_LABELS = {"MY": "มาเลเซีย", "HK": "ฮ่องกง", "ID": "อินโดนีเซีย", "EU": "ยุโรป (Decimal)"}
+FMT_CHOICES = {
+    "อัตโนมัติ (ให้ AI ตรวจจับ)": None,
+    "มาเลเซีย (Malay)": "MY",
+    "ฮ่องกง (HK)": "HK",
+    "อินโดนีเซีย (Indo)": "ID",
+    "ยุโรป (Decimal)": "EU",
+}
+
+def to_malay(x, fmt):
+    """แปลงค่าน้ำจากรูปแบบ fmt เป็น Malay odds (ผ่านค่ากลางแบบ HK)"""
+    x = float(x)
+    if fmt == "MY":
+        return round(x, 2)
+    if fmt == "EU":
+        hk = x - 1
+    elif fmt == "ID":
+        hk = x if x > 0 else (1 / abs(x) if x != 0 else 0)
+    else:  # HK
+        hk = x
+    return round(hk, 2) if hk <= 1 else round(-1 / hk, 2)
+
+def guess_format(nums):
+    """ใช้เมื่อ AI ไม่แน่ใจ: ทุกค่า > 1 = Decimal, มีค่าลบเกิน -1 = Indo, นอกนั้น = Malay"""
+    if nums and all(v > 1 for v in nums):
+        return "EU"
+    if any(v < -1 for v in nums):
+        return "ID"
+    return "MY"
+
 def clean_raw_data(raw_text):
-    raw_data = [item.strip() for item in raw_text.split(',')]
+    raw_data = [item.strip().replace('−', '-') for item in raw_text.split(',')]
+    m = re.search(r'\b(MY|HK|ID|EU)\b', raw_data[12].upper()) if len(raw_data) > 12 else None
+    ai_fmt = m.group(1) if m else "UNK"
     row_data = []
-    for i, item in enumerate(raw_data):
+    for i, item in enumerate(raw_data[:12]):
         if i < 2:
             row_data.append(item)
         else:
@@ -161,7 +197,36 @@ def clean_raw_data(raw_text):
                 row_data.append(float(cleaned) if '.' in cleaned else int(cleaned))
             except:
                 row_data.append(cleaned)
-    return row_data[:12]
+    return row_data, ai_fmt
+
+def convert_water_to_malay(row, user_fmt, ai_fmt):
+    """แปลงค่าน้ำทั้ง 4 ช่องเป็น Malay -> คืน (แถวใหม่, ข้อความแจ้งผล, ข้อความเตือน)"""
+    new_row = list(row)
+    idx = [i for i in WATER_IDX if i < len(new_row) and isinstance(new_row[i], (int, float))]
+    if not idx:
+        return new_row, "ℹ️ ไม่พบค่าน้ำที่เป็นตัวเลข จึงไม่ได้แปลงราคา", "ตรวจสอบค่าน้ำในชีตอีกครั้ง"
+
+    fmt, source = (user_fmt, "คุณเลือกเอง") if user_fmt else (ai_fmt, "AI ตรวจพบ")
+    if fmt not in FMT_LABELS:
+        fmt, source = guess_format([new_row[i] for i in idx]), "ระบบประเมินเอง เพราะ AI ไม่แน่ใจ"
+
+    changes = []
+    for i in idx:
+        old = new_row[i]
+        new_row[i] = to_malay(old, fmt)
+        changes.append(f"{old:g} → {new_row[i]:g}")
+
+    if fmt == "MY":
+        note = f"✅ ค่าน้ำเป็นแบบมาเลเซียอยู่แล้ว ({source})"
+    else:
+        note = f"🔄 แปลงค่าน้ำจาก{FMT_LABELS[fmt]} → มาเลเซีย ({source}): " + "  |  ".join(changes)
+
+    warn = None
+    if any(abs(new_row[i]) > 1 for i in idx):
+        warn = "⚠️ ค่าน้ำหลังแปลงเกิน ±1 ซึ่งผิดปกติสำหรับระบบมาเลเซีย กรุณาเลือกรูปแบบราคาให้ตรงกับภาพแล้วอัปโหลดใหม่"
+    elif source.startswith("ระบบประเมิน"):
+        warn = "⚠️ AI ไม่แน่ใจรูปแบบราคา ระบบจึงเดาให้ ควรเช็กค่าน้ำที่บันทึกอีกครั้ง"
+    return new_row, note, warn
 
 def get_money_management(rec_text, conf_text):
     if "ข้าม" in str(rec_text):
@@ -223,6 +288,10 @@ with tab1:
     if uploaded_file is not None:
         st.image(uploaded_file, caption="ภาพที่อัปโหลด", width=600)
 
+        fmt_choice = st.selectbox(
+            "รูปแบบค่าน้ำในภาพ", list(FMT_CHOICES.keys()),
+            help="ระบบจะแปลงค่าน้ำเป็นแบบมาเลเซียก่อนบันทึกเสมอ เลือก 'อัตโนมัติ' ถ้าไม่แน่ใจ หรือเลือกเองเมื่อรู้ว่าภาพเป็นแบบไหน")
+
         if st.button("🚀 อัปโหลดและบันทึกข้อมูล", type="primary"):
             if not workbook:
                 st.error("ไม่สามารถเชื่อมต่อ Google Sheets ได้")
@@ -240,7 +309,7 @@ with tab1:
                         img_bytes = img_byte_arr.getvalue()
 
                     with st.spinner("🤖 กำลังให้ AI สกัดราคาบอล..."):
-                        prompt = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ (ระบุเฉพาะตัวเลข ห้ามมีตัวอักษร o หรือ u นำหน้า),ค่าน้ำสูง,ค่าน้ำต่ำ โดยคั่นแต่ละค่าด้วยลูกน้ำ (,) เท่านั้น ห้ามมีข้อความอื่น"
+                        prompt = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ (ระบุเฉพาะตัวเลข ห้ามมีตัวอักษร o หรือ u นำหน้า),ค่าน้ำสูง,ค่าน้ำต่ำ,รหัสรูปแบบราคาน้ำ (ตอบรหัสเดียว: MY=มาเลเซีย มีทั้งบวกและลบ, HK=ฮ่องกง, ID=อินโดนีเซีย, EU=Decimal เช่น 1.90, UNK=ไม่แน่ใจ) ค่าน้ำทุกค่าให้คัดลอกตามที่เห็นในภาพทุกประการรวมเครื่องหมายลบ ห้ามแปลงค่าเอง โดยคั่นแต่ละค่าด้วยลูกน้ำ (,) เท่านั้น ห้ามมีข้อความอื่น"
                         response = model.generate_content([{"mime_type": "image/jpeg", "data": img_bytes}, prompt])
 
                     gc.collect()
@@ -249,7 +318,9 @@ with tab1:
                         st.error("❌ AI ไม่สามารถอ่านข้อมูลจากภาพนี้ได้ กรุณาลองอัปโหลดภาพใหม่อีกครั้ง")
                     else:
                         with st.spinner("📊 กำลังบันทึกและรอ Google Sheets ประมวลผลลัพธ์..."):
-                            row_data_to_sheet = clean_raw_data(response.text.strip())
+                            row_data_to_sheet, ai_fmt = clean_raw_data(response.text.strip())
+                            row_data_to_sheet, conv_note, conv_warn = convert_water_to_malay(
+                                row_data_to_sheet, FMT_CHOICES[fmt_choice], ai_fmt)
 
                             col_a_values = ws_data.col_values(1)
                             col_b_values = ws_data.col_values(2)
@@ -282,6 +353,10 @@ with tab1:
                             radar = updated_row[18] if len(updated_row) > 18 else "-"
 
                             mm_text, rec = get_money_management(rec, confidence)
+
+                            st.info(conv_note)
+                            if conv_warn:
+                                st.warning(conv_warn)
 
                             st.markdown(f"""<div class="result-card">
 <h3>{row_data_to_sheet[0]}<span class="vs">vs</span>{row_data_to_sheet[1]}</h3>
