@@ -149,7 +149,16 @@ def init_gspread():
             creds_dict = dict(st.secrets["gspread"])
             client = gspread.service_account_from_dict(creds_dict)
         else:
-            client = gspread.service_account(filename='credentials.json')
+            # ดึง Path เต็มของไฟล์ credentials.json ในโฟลเดอร์สคริปต์
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            creds_path = os.path.join(base_dir, 'credentials.json')
+            
+            if not os.path.exists(creds_path):
+                st.error("❌ ไม่พบไฟล์ credentials.json ในโฟลเดอร์โครงการ และยังไม่ได้ตั้งค่า st.secrets[\"gspread\"]")
+                return None
+                
+            client = gspread.service_account(filename=creds_path)
+            
         return client.open("ข้อมูลราคาบอลสกัดจากภาพ")
     except Exception as e:
         st.error(f"❌ เชื่อมต่อ Google Sheets ไม่สำเร็จ: {e}")
