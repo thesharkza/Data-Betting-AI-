@@ -9,6 +9,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import gc
 import time
+from datetime import datetime, timezone, timedelta
 
 # ----------------------------------------
 # ตั้งค่าหน้าเว็บ
@@ -96,7 +97,15 @@ p, label, span { color: inherit; }
 .rule-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .rule-name { color: #e6f2ea; font-weight: 500; font-size: 1rem; }
 .rule-tag { font-size: 0.78rem; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
-.rule-rate { font-size: 2.4rem; font-weight: 600; line-height: 1.2; margin: 10px 0 8px 0; }
+.rule-rate-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 10px; margin: 10px 0 10px 0; }
+.rule-rate { font-size: 2.4rem; font-weight: 600; line-height: 1.1; }
+.trend-box { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; padding-bottom: 4px; }
+.trend { font-size: 0.9rem; font-weight: 600; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
+.trend.up { color: #4ade80; background: rgba(34,197,94,0.15); }
+.trend.down { color: #f06b70; background: rgba(229,72,77,0.14); }
+.trend.flat { color: #7f9a8b; background: rgba(127,154,139,0.12); font-weight: 500; }
+.trend-prev { font-size: 0.78rem; color: #7f9a8b; white-space: nowrap; }
+.trend-sum { display: flex; flex-wrap: wrap; gap: 8px; margin: 2px 0 14px 0; }
 .rule-bar { height: 6px; background: #17241d; border-radius: 6px; overflow: hidden; }
 .rule-bar > div { height: 100%; border-radius: 6px; }
 .rule-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 14px; }
@@ -264,6 +273,59 @@ def base_layout(fig, height=380):
         hoverlabel=dict(bgcolor=SURFACE, bordercolor=LINE, font=dict(color=TEXT)),
     )
     return fig
+
+# ----------------------------------------
+# ประวัติอัตราชนะรายกฎ (ใช้ทำลูกศรขึ้น/ลง)
+# ----------------------------------------
+HIST_SHEET = "ประวัติสถิติ"
+
+def update_rate_history(workbook, rates):
+    """บันทึกอัตราชนะของแต่ละกฎลงชีต 'ประวัติสถิติ' เมื่อค่าเปลี่ยน
+    คืน ({กฎ: [(เวลา, ค่า), ...]}, ข้อความ error หรือ None)"""
+    stamp = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M")
+    try:
+        try:
+            ws = workbook.worksheet(HIST_SHEET)
+        except gspread.exceptions.WorksheetNotFound:
+            ws = workbook.add_worksheet(title=HIST_SHEET, rows=1000, cols=3)
+            ws.append_row(["เวลาบันทึก", "กฎ", "อัตราชนะ (%)"])
+
+        history = {}
+        for r in ws.get_all_values()[1:]:
+            if len(r) >= 3:
+                try:
+                    history.setdefault(r[1].strip(), []).append((r[0], float(r[2].replace(',', '.'))))
+                except ValueError:
+                    pass
+
+        new_rows = []
+        for rule, v in rates.items():
+            h = history.setdefault(rule, [])
+            if not h or abs(h[-1][1] - v) >= 0.01:
+                h.append((stamp, v))
+                new_rows.append([stamp, rule, v])
+        if new_rows:
+            ws.append_rows(new_rows, value_input_option="USER_ENTERED")
+        return history, None
+    except Exception as e:
+        return {r: [(stamp, v)] for r, v in rates.items()}, str(e)
+
+def trend_delta(h):
+    return h[-1][1] - h[-2][1] if len(h) >= 2 else None
+
+def trend_html(h):
+    """ป้ายลูกศรบนการ์ด: ▲ เพิ่มขึ้น / ▼ ลดลง เทียบกับค่าก่อนหน้า"""
+    if not h:
+        return ""
+    d = trend_delta(h)
+    if d is None:
+        return "<div class='trend-box'><span class='trend flat'>● เริ่มติดตาม</span></div>"
+    stamp, prev = h[-1][0], h[-2][1]
+    cls, icon = ("up", "▲") if d > 0 else ("down", "▼")
+    d_txt = f"{d:+.2f}".rstrip('0').rstrip('.')
+    when = f"{stamp[8:10]}/{stamp[5:7]}"
+    return (f"<div class='trend-box'><span class='trend {cls}'>{icon} {d_txt}</span>"
+            f"<span class='trend-prev'>จาก {prev:g}% · {when}</span></div>")
 
 def panel_header(title, sub):
     st.markdown(f"<p class='panel-title'>{title}</p><p class='panel-sub'>{sub}</p>", unsafe_allow_html=True)
@@ -475,7 +537,7 @@ with tab2:
 
             # --- 4. การ์ดสถิติรายกฎ ---
             st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
-            panel_header("สถิติรายกฎ", "เรียงจากอัตราชนะสูงสุดลงมา")
+            panel_header("สถิติรายกฎ", "เรียงจากอัตราชนะสูงสุด · ลูกศรเทียบกับค่าก่อนหน้าที่ระบบบันทึกไว้")
 
             if not df_stats.empty and 'อัตราชนะ' in df_stats.columns:
                 tbl = df_stats.copy()
@@ -486,17 +548,34 @@ with tab2:
                 rule_col = df_stats.columns[0]
                 extra_cols = [c for c in df_stats.columns if c not in (rule_col, 'อัตราชนะ')]
 
+                rates = {str(r[rule_col]).strip(): round(float(r['_v']), 2)
+                         for _, r in tbl.iterrows() if r['_v'] > 0}
+                history, hist_err = update_rate_history(workbook, rates)
+                if hist_err:
+                    st.warning(f"บันทึกประวัติสถิติไม่สำเร็จ จึงยังแสดงลูกศรไม่ได้: {hist_err}")
+
+                deltas = [trend_delta(history.get(n, [])) for n in rates]
+                n_up = sum(1 for d in deltas if d is not None and d > 0)
+                n_down = sum(1 for d in deltas if d is not None and d < 0)
+                if n_up or n_down:
+                    chips = []
+                    if n_up: chips.append(f"<span class='trend up'>▲ เพิ่มขึ้น {n_up} กฎ</span>")
+                    if n_down: chips.append(f"<span class='trend down'>▼ ลดลง {n_down} กฎ</span>")
+                    st.markdown(f"<div class='trend-sum'>{''.join(chips)}</div>", unsafe_allow_html=True)
+
                 cards = ["<div class='rule-grid'>"]
                 for _, row in tbl.iterrows():
                     v = row['_v']
+                    name = str(row[rule_col]).strip()
                     k, tag = ("g", "แนะนำ") if v >= 60 else ("a", "ระวัง") if v >= 55 else ("r", "หลีกเลี่ยง")
                     meta = "".join(f"<span>{c}<b>{row[c]}</b></span>" for c in extra_cols
                                    if str(row[c]).strip() != "")
                     cards.append(
                         f"<div class='rule-card'>"
-                        f"<div class='rule-top'><span class='rule-name'>{row[rule_col]}</span>"
+                        f"<div class='rule-top'><span class='rule-name'>{name}</span>"
                         f"<span class='rule-tag tag-{k}'>{tag}</span></div>"
-                        f"<div class='rule-rate t-{k}'>{row['อัตราชนะ']}</div>"
+                        f"<div class='rule-rate-row'><div class='rule-rate t-{k}'>{row['อัตราชนะ']}</div>"
+                        f"{trend_html(history.get(name, []))}</div>"
                         f"<div class='rule-bar'><div class='b-{k}' style='width:{min(v, 100)}%'></div></div>"
                         f"<div class='rule-meta'>{meta}</div>"
                         f"</div>")
