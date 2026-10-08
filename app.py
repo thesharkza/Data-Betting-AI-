@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 import gc
 import time
 from datetime import datetime, timezone, timedelta
+from html import escape as esc
 
 # ----------------------------------------
 # ตั้งค่าหน้าเว็บ
@@ -117,6 +118,12 @@ p, label, span { color: inherit; }
 .tag-a { background: rgba(217,164,65,0.14); color: #e8bb62; }
 .tag-r { background: rgba(229,72,77,0.14); color: #f06b70; }
 
+/* Secondary buttons */
+.stButton > button:not([kind="primary"]) {
+    background: #0c130f; color: #cfe3d6; border: 1px solid #1b2a22; border-radius: 10px;
+}
+.stButton > button:not([kind="primary"]):hover { border-color: #22c55e; color: #4ade80; }
+
 /* Result card (tab 1) */
 .result-card {
     background: #0c130f; border: 1px solid #1b2a22; border-left: 4px solid #22c55e;
@@ -142,29 +149,31 @@ if GEMINI_API_KEY:
 else:
     st.error("❌ ไม่พบ GEMINI_API_KEY กรุณาตั้งค่าใน Streamlit Secrets")
 
+def _has_gspread_secret():
+    try:
+        return "gspread" in st.secrets
+    except Exception:
+        return False
+
 @st.cache_resource
 def init_gspread():
-    try:
-        if "gspread" in st.secrets:
-            creds_dict = dict(st.secrets["gspread"])
-            client = gspread.service_account_from_dict(creds_dict)
-        else:
-            # ดึง Path เต็มของไฟล์ credentials.json ในโฟลเดอร์สคริปต์
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            creds_path = os.path.join(base_dir, 'credentials.json')
-            
-            if not os.path.exists(creds_path):
-                st.error("❌ ไม่พบไฟล์ credentials.json ในโฟลเดอร์โครงการ และยังไม่ได้ตั้งค่า st.secrets[\"gspread\"]")
-                return None
-                
-            client = gspread.service_account(filename=creds_path)
-            
-        return client.open("ข้อมูลราคาบอลสกัดจากภาพ")
-    except Exception as e:
-        st.error(f"❌ เชื่อมต่อ Google Sheets ไม่สำเร็จ: {e}")
-        return None
+    """ถ้าล้มเหลวให้ปล่อย exception เพื่อไม่ให้ Streamlit แคชผลลัพธ์ที่ผิดพลาดไว้"""
+    if _has_gspread_secret():
+        client = gspread.service_account_from_dict(dict(st.secrets["gspread"]))
+    else:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        creds_path = os.path.join(base_dir, 'credentials.json')
+        if not os.path.exists(creds_path):
+            raise FileNotFoundError('ไม่พบไฟล์ credentials.json ในโฟลเดอร์โครงการ และยังไม่ได้ตั้งค่า st.secrets["gspread"]')
+        client = gspread.service_account(filename=creds_path)
+    return client.open("ข้อมูลราคาบอลสกัดจากภาพ")
 
-workbook = init_gspread()
+try:
+    workbook = init_gspread()
+except Exception as e:
+    st.error(f"❌ เชื่อมต่อ Google Sheets ไม่สำเร็จ: {e}")
+    workbook = None
+
 model = genai.GenerativeModel('gemini-3.7-flash')
 
 # ----------------------------------------
@@ -201,20 +210,27 @@ def guess_format(nums):
         return "ID"
     return "MY"
 
+FIELD_LABELS = ["ทีมเหย้า", "ทีมเยือน", "1X2 เหย้า", "1X2 เสมอ", "1X2 เยือน",
+                "แฮนดิแคปเหย้า", "น้ำ HDP เหย้า", "แฮนดิแคปเยือน", "น้ำ HDP เยือน",
+                "โกลสูงต่ำ", "น้ำสูง", "น้ำต่ำ"]
+
+def parse_cell(v):
+    """แปลงข้อความเป็นตัวเลข (ตัด o/u นำหน้า) ถ้าแปลงไม่ได้คืนเป็นข้อความเดิม"""
+    cleaned = re.sub(r'^[oOuU\s]+', '', str(v).strip().replace('−', '-'))
+    try:
+        return float(cleaned) if '.' in cleaned else int(cleaned)
+    except Exception:
+        return cleaned
+
 def clean_raw_data(raw_text):
-    raw_data = [item.strip().replace('−', '-') for item in raw_text.split(',')]
+    text = raw_text.replace('`', '').replace('\n', ' ').strip()
+    raw_data = [item.strip().replace('−', '-') for item in text.split(',')]
+    if not 12 <= len(raw_data) <= 13:
+        raise ValueError(f"AI คืนค่ามา {len(raw_data)} ช่อง (ต้องเป็น 12-13 ช่อง) "
+                         "อาจมีเครื่องหมายจุลภาคปนในชื่อทีม กรุณาอ่านภาพใหม่อีกครั้ง")
     m = re.search(r'\b(MY|HK|ID|EU)\b', raw_data[12].upper()) if len(raw_data) > 12 else None
     ai_fmt = m.group(1) if m else "UNK"
-    row_data = []
-    for i, item in enumerate(raw_data[:12]):
-        if i < 2:
-            row_data.append(item)
-        else:
-            cleaned = re.sub(r'^[oOuU\s]+', '', item)
-            try:
-                row_data.append(float(cleaned) if '.' in cleaned else int(cleaned))
-            except:
-                row_data.append(cleaned)
+    row_data = raw_data[:2] + [parse_cell(x) for x in raw_data[2:12]]
     return row_data, ai_fmt
 
 def convert_water_to_malay(row, user_fmt, ai_fmt):
@@ -240,11 +256,58 @@ def convert_water_to_malay(row, user_fmt, ai_fmt):
         note = f"🔄 แปลงค่าน้ำจาก{FMT_LABELS[fmt]} → มาเลเซีย ({source}): " + "  |  ".join(changes)
 
     warn = None
-    if any(abs(new_row[i]) > 1 for i in idx):
+    if fmt == "EU" and any(row[i] <= 1 for i in idx):
+        warn = "⚠️ ระบุเป็นรูปแบบยุโรป (Decimal) แต่มีค่าน้ำ ≤ 1 ซึ่งไม่เข้าเงื่อนไข ควรเลือกรูปแบบราคาให้ตรงกับภาพ"
+    elif any(abs(new_row[i]) > 1 for i in idx):
         warn = "⚠️ ค่าน้ำหลังแปลงเกิน ±1 ซึ่งผิดปกติสำหรับระบบมาเลเซีย กรุณาเลือกรูปแบบราคาให้ตรงกับภาพแล้วอัปโหลดใหม่"
     elif source.startswith("ระบบประเมิน"):
         warn = "⚠️ AI ไม่แน่ใจรูปแบบราคา ระบบจึงเดาให้ ควรเช็กค่าน้ำที่บันทึกอีกครั้ง"
     return new_row, note, warn
+
+def save_row_to_sheet(ws, row):
+    """เขียนแถวลงชีต (ทับคู่เดิมถ้ามี) -> คืน (เลขแถว, ทับของเดิมหรือไม่)"""
+    col_a = ws.col_values(1)
+    col_b = ws.col_values(2)
+    last_row = max((i + 1 for i, v in enumerate(col_a) if str(v).strip()), default=0)
+
+    new_home, new_away = str(row[0]).strip(), str(row[1]).strip()
+    target_row = None
+    for i in range(len(col_a)):
+        away = str(col_b[i]).strip() if i < len(col_b) else ""
+        if str(col_a[i]).strip() == new_home and away == new_away:
+            target_row = i + 1
+            break
+
+    overwritten = target_row is not None
+    if not overwritten:
+        target_row = last_row + 1
+    ws.update(range_name=f"A{target_row}", values=[row])
+    return target_row, overwritten
+
+def wait_for_result(ws, target_row, tries=10):
+    """รอให้ชีตคำนวณคำแนะนำ (คอลัมน์ P) เสร็จ แทนการ sleep ตายตัว"""
+    time.sleep(2)
+    for _ in range(tries):
+        r = ws.row_values(target_row)
+        if len(r) > 15 and str(r[15]).strip():
+            return r
+        time.sleep(1)
+    return ws.row_values(target_row)
+
+# "current" = สูตรเดิม: ชนะครึ่งนับ 0.5 แต้ม แต่ยังนับเป็น 1 เกมในตัวหาร (ไม่นับเจ๊า)
+# "symmetric" = ครึ่งชนะ/ครึ่งแพ้ นับ 0.5 เท่ากันทั้งสองฝั่ง: ชนะ / (ชนะ + แพ้)
+WIN_RATE_MODE = "current"
+
+def calc_win_stats(df_comp):
+    c = df_comp['ผลเปรียบเทียบ'].value_counts()
+    wf, wh = int(c.get('ชนะเต็ม', 0)), int(c.get('ชนะครึ่ง', 0))
+    lf, lh = int(c.get('แพ้เต็ม', 0)), int(c.get('แพ้ครึ่ง', 0))
+    draws = int(c.get('เจ๊า', 0))
+    total = len(df_comp)
+    total_wins = wf + wh * 0.5
+    denom = (total_wins + lf + lh * 0.5) if WIN_RATE_MODE == "symmetric" else (total - draws)
+    win_rate = round(total_wins / denom * 100, 2) if denom > 0 else 0
+    return total, total_wins, win_rate
 
 def get_money_management(rec_text, conf_text):
     if "ข้าม" in str(rec_text):
@@ -319,6 +382,16 @@ def update_rate_history(workbook, rates):
     except Exception as e:
         return {r: [(stamp, v)] for r, v in rates.items()}, str(e)
 
+@st.cache_data(ttl=60, show_spinner=False)
+def cached_rate_history(_workbook, rates):
+    return update_rate_history(_workbook, rates)
+
+@st.cache_data(ttl=60, show_spinner=False)
+def load_dashboard_data(_workbook):
+    df = pd.DataFrame(_workbook.sheet1.get_all_records())
+    df_stats = pd.DataFrame(_workbook.worksheet("สรุปสถิติ").get_all_records())
+    return df, df_stats
+
 def trend_delta(h):
     return h[-1][1] - h[-2][1] if len(h) >= 2 else None
 
@@ -352,7 +425,7 @@ tab1, tab2 = st.tabs(["📸 อัปโหลดราคาบอล", "📊 D
 # ----------------------------------------
 with tab1:
     st.subheader("สกัดราคาบอล & วิเคราะห์ VIP")
-    st.write("อัปโหลดภาพตารางราคาเพื่อสกัดข้อมูลส่งเข้า Google Sheets อัตโนมัติ")
+    st.write("อัปโหลดภาพตารางราคา ตรวจค่าที่ AI อ่านได้ แล้วจึงยืนยันบันทึกลง Google Sheets")
 
     uploaded_file = st.file_uploader("เลือกไฟล์รูปภาพตารางราคาบอล", type=['png', 'jpg', 'jpeg'])
 
@@ -363,84 +436,95 @@ with tab1:
             "รูปแบบค่าน้ำในภาพ", list(FMT_CHOICES.keys()),
             help="ระบบจะแปลงค่าน้ำเป็นแบบมาเลเซียก่อนบันทึกเสมอ เลือก 'อัตโนมัติ' ถ้าไม่แน่ใจ หรือเลือกเองเมื่อรู้ว่าภาพเป็นแบบไหน")
 
-        if st.button("🚀 อัปโหลดและบันทึกข้อมูล", type="primary"):
-            if not workbook:
-                st.error("ไม่สามารถเชื่อมต่อ Google Sheets ได้")
-            else:
-                try:
-                    ws_data = workbook.sheet1
+        file_key = f"{uploaded_file.name}-{uploaded_file.size}-{fmt_choice}"
+        if st.session_state.get("pending_key") != file_key:
+            st.session_state.pop("pending", None)  # เปลี่ยนไฟล์/รูปแบบราคา ต้องอ่านใหม่
 
-                    with st.spinner("📸 กำลังประมวลผลรูปภาพ..."):
-                        img = Image.open(uploaded_file)
-                        if img.mode != 'RGB': img = img.convert('RGB')
-                        img.thumbnail((800, 800))
+        # ขั้นที่ 1: ให้ AI อ่านภาพ (ยังไม่บันทึก)
+        if st.button("🔍 อ่านราคาจากภาพ", type="primary"):
+            try:
+                with st.spinner("📸 กำลังประมวลผลรูปภาพ..."):
+                    img = Image.open(uploaded_file)
+                    if img.mode != 'RGB': img = img.convert('RGB')
+                    img.thumbnail((1600, 1600))
+                    img_byte_arr = io.BytesIO()
+                    img.save(img_byte_arr, format='JPEG', quality=85)
+                    img_bytes = img_byte_arr.getvalue()
 
-                        img_byte_arr = io.BytesIO()
-                        img.save(img_byte_arr, format='JPEG', quality=80)
-                        img_bytes = img_byte_arr.getvalue()
+                with st.spinner("🤖 กำลังให้ AI สกัดราคาบอล..."):
+                    prompt = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ (ระบุเฉพาะตัวเลข ห้ามมีตัวอักษร o หรือ u นำหน้า),ค่าน้ำสูง,ค่าน้ำต่ำ,รหัสรูปแบบราคาน้ำ (ตอบรหัสเดียว: MY=มาเลเซีย มีทั้งบวกและลบ, HK=ฮ่องกง, ID=อินโดนีเซีย, EU=Decimal เช่น 1.90, UNK=ไม่แน่ใจ) ค่าน้ำทุกค่าให้คัดลอกตามที่เห็นในภาพทุกประการรวมเครื่องหมายลบ ห้ามแปลงค่าเอง โดยคั่นแต่ละค่าด้วยลูกน้ำ (,) เท่านั้น ห้ามมีข้อความอื่น"
+                    response = model.generate_content([{"mime_type": "image/jpeg", "data": img_bytes}, prompt])
 
-                    with st.spinner("🤖 กำลังให้ AI สกัดราคาบอล..."):
-                        prompt = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ (ระบุเฉพาะตัวเลข ห้ามมีตัวอักษร o หรือ u นำหน้า),ค่าน้ำสูง,ค่าน้ำต่ำ,รหัสรูปแบบราคาน้ำ (ตอบรหัสเดียว: MY=มาเลเซีย มีทั้งบวกและลบ, HK=ฮ่องกง, ID=อินโดนีเซีย, EU=Decimal เช่น 1.90, UNK=ไม่แน่ใจ) ค่าน้ำทุกค่าให้คัดลอกตามที่เห็นในภาพทุกประการรวมเครื่องหมายลบ ห้ามแปลงค่าเอง โดยคั่นแต่ละค่าด้วยลูกน้ำ (,) เท่านั้น ห้ามมีข้อความอื่น"
-                        response = model.generate_content([{"mime_type": "image/jpeg", "data": img_bytes}, prompt])
+                if not response or not response.text:
+                    st.error("❌ AI ไม่สามารถอ่านข้อมูลจากภาพนี้ได้ กรุณาลองอัปโหลดภาพใหม่อีกครั้ง")
+                else:
+                    row, ai_fmt = clean_raw_data(response.text.strip())
+                    row, note, warn = convert_water_to_malay(row, FMT_CHOICES[fmt_choice], ai_fmt)
+                    st.session_state["pending"] = {"row": row, "note": note, "warn": warn}
+                    st.session_state["pending_key"] = file_key
+            except Exception as e:
+                st.error(f"❌ อ่านภาพไม่สำเร็จ: {str(e)}")
+            finally:
+                gc.collect()
 
-                    gc.collect()
+        # ขั้นที่ 2: ตรวจ/แก้ไขค่า แล้วยืนยันบันทึก
+        pending = st.session_state.get("pending")
+        if pending:
+            panel_header("ตรวจสอบก่อนบันทึก",
+                         "ดับเบิลคลิกเพื่อแก้ช่องที่ AI อ่านผิด · ค่าน้ำถูกแปลงเป็นมาเลเซียให้แล้ว ค่าที่แก้เองจะบันทึกตามที่พิมพ์")
+            st.info(pending["note"])
+            if pending["warn"]:
+                st.warning(pending["warn"])
 
-                    if not response or not response.text:
-                        st.error("❌ AI ไม่สามารถอ่านข้อมูลจากภาพนี้ได้ กรุณาลองอัปโหลดภาพใหม่อีกครั้ง")
-                    else:
-                        with st.spinner("📊 กำลังบันทึกและรอ Google Sheets ประมวลผลลัพธ์..."):
-                            row_data_to_sheet, ai_fmt = clean_raw_data(response.text.strip())
-                            row_data_to_sheet, conv_note, conv_warn = convert_water_to_malay(
-                                row_data_to_sheet, FMT_CHOICES[fmt_choice], ai_fmt)
+            edit_df = pd.DataFrame([["" if v is None else str(v) for v in pending["row"]]], columns=FIELD_LABELS)
+            edited = st.data_editor(edit_df, hide_index=True, use_container_width=True, key=f"editor-{file_key}")
 
-                            col_a_values = ws_data.col_values(1)
-                            col_b_values = ws_data.col_values(2)
-                            last_row = sum(1 for val in col_a_values if str(val).strip() != "")
+            if st.button("💾 ยืนยันและบันทึก", type="primary"):
+                if not workbook:
+                    st.error("ไม่สามารถเชื่อมต่อ Google Sheets ได้")
+                else:
+                    try:
+                        cells = edited.iloc[0].tolist()
+                        row = [str(cells[0]).strip(), str(cells[1]).strip()] + [parse_cell(c) for c in cells[2:12]]
 
-                            new_home = str(row_data_to_sheet[0]).strip()
-                            new_away = str(row_data_to_sheet[1]).strip()
-                            target_row = None
+                        if not row[0] or not row[1]:
+                            st.error("❌ ชื่อทีมว่างอยู่ กรุณากรอกชื่อทีมเหย้าและทีมเยือนก่อนบันทึก")
+                        else:
+                            ws_data = workbook.sheet1
+                            with st.spinner("📊 กำลังบันทึกและรอ Google Sheets ประมวลผลลัพธ์..."):
+                                target_row, overwritten = save_row_to_sheet(ws_data, row)
+                                updated_row = wait_for_result(ws_data, target_row)
 
-                            for i in range(len(col_a_values)):
-                                sheet_home = str(col_a_values[i]).strip()
-                                sheet_away = str(col_b_values[i]).strip() if i < len(col_b_values) else ""
-                                if sheet_home == new_home and sheet_away == new_away:
-                                    target_row = i + 1
-                                    break
+                            st.cache_data.clear()
+                            st.session_state.pop("pending", None)
+                            st.session_state.pop("pending_key", None)
 
-                            if target_row is not None:
-                                ws_data.update(range_name=f"A{target_row}", values=[row_data_to_sheet])
-                                st.warning(f"🔄 พบข้อมูลคู่ {new_home} vs {new_away} ในระบบ ทำการ **บันทึกทับ** ที่แถว {target_row} เรียบร้อยแล้ว")
+                            if overwritten:
+                                st.warning(f"🔄 พบข้อมูลคู่ {row[0]} vs {row[1]} ในระบบ ทำการ **บันทึกทับ** ที่แถว {target_row} เรียบร้อยแล้ว")
                             else:
-                                target_row = last_row + 1
-                                ws_data.update(range_name=f"A{target_row}", values=[row_data_to_sheet])
-                                st.success("✅ บันทึกข้อมูลคู่ใหม่สำเร็จ!")
+                                st.success(f"✅ บันทึกข้อมูลคู่ใหม่สำเร็จ! (แถว {target_row})")
 
-                            time.sleep(3)
-                            updated_row = ws_data.row_values(target_row)
+                            water = [row[i] for i in WATER_IDX if isinstance(row[i], (int, float))]
+                            if any(abs(v) > 1 for v in water):
+                                st.warning("⚠️ ค่าน้ำที่บันทึกมีค่าเกิน ±1 ซึ่งผิดปกติสำหรับระบบมาเลเซีย ควรตรวจสอบแถวนี้ในชีต")
 
-                            rec = updated_row[15] if len(updated_row) > 15 else "กำลังคำนวณ..."
+                            rec = updated_row[15] if len(updated_row) > 15 and str(updated_row[15]).strip() else "กำลังคำนวณ..."
                             confidence = updated_row[17] if len(updated_row) > 17 else "-"
                             radar = updated_row[18] if len(updated_row) > 18 else "-"
-
                             mm_text, rec = get_money_management(rec, confidence)
 
-                            st.info(conv_note)
-                            if conv_warn:
-                                st.warning(conv_warn)
-
                             st.markdown(f"""<div class="result-card">
-<h3>{row_data_to_sheet[0]}<span class="vs">vs</span>{row_data_to_sheet[1]}</h3>
-<div class="result-row"><span class="result-key">🎯 แนะนำลงทุน</span><span class="result-val hl">{rec}</span></div>
-<div class="result-row"><span class="result-key">💰 Money Mgt</span><span class="result-val">{mm_text}</span></div>
-<div class="result-row"><span class="result-key">📊 สถิติความเชื่อมั่น</span><span class="result-val">{confidence}</span></div>
-<div class="result-row"><span class="result-key">🚨 เช็กราคา</span><span class="result-val">{radar}</span></div>
+<h3>{esc(row[0])}<span class="vs">vs</span>{esc(row[1])}</h3>
+<div class="result-row"><span class="result-key">🎯 แนะนำลงทุน</span><span class="result-val hl">{esc(str(rec))}</span></div>
+<div class="result-row"><span class="result-key">💰 Money Mgt</span><span class="result-val">{esc(mm_text)}</span></div>
+<div class="result-row"><span class="result-key">📊 สถิติความเชื่อมั่น</span><span class="result-val">{esc(str(confidence))}</span></div>
+<div class="result-row"><span class="result-key">🚨 เช็กราคา</span><span class="result-val">{esc(str(radar))}</span></div>
 </div>""", unsafe_allow_html=True)
 
-                except Exception as e:
-                    st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
-                finally:
-                    gc.collect()
+                    except Exception as e:
+                        st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
+                    finally:
+                        gc.collect()
 
 # ----------------------------------------
 # TAB 2 : Dashboard
@@ -450,22 +534,18 @@ with tab2:
         st.error("ไม่สามารถเชื่อมต่อ Google Sheets ได้")
     else:
         try:
-            ws_data = workbook.sheet1
-            df = pd.DataFrame(ws_data.get_all_records())
+            if st.button("🔄 รีเฟรชข้อมูล"):
+                st.cache_data.clear()
+                st.rerun()
 
-            ws_stats = workbook.worksheet("สรุปสถิติ")
-            df_stats = pd.DataFrame(ws_stats.get_all_records())
+            df, df_stats = load_dashboard_data(workbook)
+            df_stats = df_stats.copy()
             if not df_stats.empty:
                 df_stats.columns = [str(c).strip() for c in df_stats.columns]
 
             if not df.empty and 'ผลเปรียบเทียบ' in df.columns:
                 df_comp = df[df['ผลเปรียบเทียบ'].astype(str).str.contains('ชนะ|แพ้|เจ๊า', na=False)].copy()
-                total = len(df_comp)
-                wins_full = len(df_comp[df_comp['ผลเปรียบเทียบ'] == 'ชนะเต็ม'])
-                wins_half = len(df_comp[df_comp['ผลเปรียบเทียบ'] == 'ชนะครึ่ง'])
-                total_wins = wins_full + (wins_half * 0.5)
-                draws = len(df_comp[df_comp['ผลเปรียบเทียบ'] == 'เจ๊า'])
-                win_rate = round((total_wins / (total - draws)) * 100, 2) if (total - draws) > 0 else 0
+                total, total_wins, win_rate = calc_win_stats(df_comp)
 
                 # --- 1. KPI ---
                 st.markdown(f"""<div class="kpi-wrap">
@@ -506,8 +586,12 @@ with tab2:
                         showlegend=True,
                         legend=dict(orientation='h', yanchor='top', y=-0.02, xanchor='center', x=0.5,
                                     font=dict(color=TEXT, size=13)),
-                        annotations=[dict(text=f"<b style='font-size:34px;color:{TEXT}'>{win_rate}%</b><br>Win Rate",
-                                          x=0.5, y=0.5, showarrow=False, font=dict(color=MUTED, size=13))]
+                        annotations=[
+                            dict(text=f"<b>{win_rate}%</b>", x=0.5, y=0.55, showarrow=False,
+                                 font=dict(size=34, color=TEXT)),
+                            dict(text="Win Rate", x=0.5, y=0.43, showarrow=False,
+                                 font=dict(size=13, color=MUTED)),
+                        ]
                     )
                     st.plotly_chart(pie_fig, use_container_width=True, config={'displayModeBar': False})
 
@@ -559,7 +643,7 @@ with tab2:
 
                 rates = {str(r[rule_col]).strip(): round(float(r['_v']), 2)
                          for _, r in tbl.iterrows() if r['_v'] > 0}
-                history, hist_err = update_rate_history(workbook, rates)
+                history, hist_err = cached_rate_history(workbook, rates)
                 if hist_err:
                     st.warning(f"บันทึกประวัติสถิติไม่สำเร็จ จึงยังแสดงลูกศรไม่ได้: {hist_err}")
 
@@ -577,13 +661,13 @@ with tab2:
                     v = row['_v']
                     name = str(row[rule_col]).strip()
                     k, tag = ("g", "แนะนำ") if v >= 60 else ("a", "ระวัง") if v >= 55 else ("r", "หลีกเลี่ยง")
-                    meta = "".join(f"<span>{c}<b>{row[c]}</b></span>" for c in extra_cols
+                    meta = "".join(f"<span>{esc(str(c))}<b>{esc(str(row[c]))}</b></span>" for c in extra_cols
                                    if str(row[c]).strip() != "")
                     cards.append(
                         f"<div class='rule-card'>"
-                        f"<div class='rule-top'><span class='rule-name'>{name}</span>"
+                        f"<div class='rule-top'><span class='rule-name'>{esc(name)}</span>"
                         f"<span class='rule-tag tag-{k}'>{tag}</span></div>"
-                        f"<div class='rule-rate-row'><div class='rule-rate t-{k}'>{row['อัตราชนะ']}</div>"
+                        f"<div class='rule-rate-row'><div class='rule-rate t-{k}'>{esc(str(row['อัตราชนะ']))}</div>"
                         f"{trend_html(history.get(name, []))}</div>"
                         f"<div class='rule-bar'><div class='b-{k}' style='width:{min(v, 100)}%'></div></div>"
                         f"<div class='rule-meta'>{meta}</div>"
