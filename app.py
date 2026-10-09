@@ -9,6 +9,9 @@ import pandas as pd
 import plotly.graph_objects as go
 import gc
 import time
+import threading
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 from html import escape as esc
 
@@ -118,6 +121,21 @@ p, label, span { color: inherit; }
 .tag-a { background: rgba(217,164,65,0.14); color: #e8bb62; }
 .tag-r { background: rgba(229,72,77,0.14); color: #f06b70; }
 
+/* Background jobs */
+.job-card { background: #0c130f; border: 1px solid #1b2a22; border-left: 4px solid #1b2a22; border-radius: 14px; padding: 16px 20px; margin-bottom: 10px; }
+.job-card.ok { border-left-color: #22c55e; }
+.job-card.err { border-left-color: #e5484d; }
+.job-card.run { border-left-color: #d9a441; }
+.job-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.job-name { color: #7f9a8b; font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-pill { font-size: 0.78rem; padding: 3px 10px; border-radius: 999px; white-space: nowrap; font-weight: 500; }
+.job-pill.ok { color: #4ade80; background: rgba(34,197,94,0.15); }
+.job-pill.err { color: #f06b70; background: rgba(229,72,77,0.14); }
+.job-pill.run { color: #e8bb62; background: rgba(217,164,65,0.14); }
+.job-title { color: #e6f2ea; font-size: 1.1rem; font-weight: 600; margin: 8px 0 4px 0; }
+.job-msg { color: #a7c4b5; font-size: 0.9rem; }
+.job-note { color: #7f9a8b; font-size: 0.8rem; margin-top: 8px; }
+
 /* Secondary buttons */
 .stButton > button:not([kind="primary"]) {
     background: #0c130f; color: #cfe3d6; border: 1px solid #1b2a22; border-radius: 10px;
@@ -209,10 +227,6 @@ def guess_format(nums):
     if any(v < -1 for v in nums):
         return "ID"
     return "MY"
-
-FIELD_LABELS = ["ทีมเหย้า", "ทีมเยือน", "1X2 เหย้า", "1X2 เสมอ", "1X2 เยือน",
-                "แฮนดิแคปเหย้า", "น้ำ HDP เหย้า", "แฮนดิแคปเยือน", "น้ำ HDP เยือน",
-                "โกลสูงต่ำ", "น้ำสูง", "น้ำต่ำ"]
 
 def parse_cell(v):
     """แปลงข้อความเป็นตัวเลข (ตัด o/u นำหน้า) ถ้าแปลงไม่ได้คืนเป็นข้อความเดิม"""
@@ -335,6 +349,191 @@ def get_money_management(rec_text, conf_text):
         return "⭐ 0.5 Unit (รอเก็บสถิติ ⏳)", rec_text
 
 # ----------------------------------------
+# ระบบงานเบื้องหลัง: อ่านภาพ + บันทึกชีตบนเซิร์ฟเวอร์ ไม่ผูกกับหน้าเว็บ
+# ----------------------------------------
+EXTRACT_PROMPT = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ (ระบุเฉพาะตัวเลข ห้ามมีตัวอักษร o หรือ u นำหน้า),ค่าน้ำสูง,ค่าน้ำต่ำ,รหัสรูปแบบราคาน้ำ (ตอบรหัสเดียว: MY=มาเลเซีย มีทั้งบวกและลบ, HK=ฮ่องกง, ID=อินโดนีเซีย, EU=Decimal เช่น 1.90, UNK=ไม่แน่ใจ) ค่าน้ำทุกค่าให้คัดลอกตามที่เห็นในภาพทุกประการรวมเครื่องหมายลบ ห้ามแปลงค่าเอง โดยคั่นแต่ละค่าด้วยลูกน้ำ (,) เท่านั้น ห้ามมีข้อความอื่น"
+
+class JobManager:
+    """เก็บสถานะงานไว้บนเซิร์ฟเวอร์ (แชร์ข้ามทุก session) เพื่อให้งานเดินต่อแม้ปิดหน้า/สลับแอป"""
+    def __init__(self):
+        self.jobs = {}
+        self.lock = threading.Lock()        # ป้องกันการแก้ dict พร้อมกัน
+        self.sheet_lock = threading.Lock()  # บันทึกชีตทีละงาน กันแย่งแถวเดียวกัน
+        self.pool = ThreadPoolExecutor(max_workers=3)
+        self.data_version = 0
+
+    def create(self, name, img_bytes, user_fmt):
+        job_id = uuid.uuid4().hex[:8]
+        with self.lock:
+            self.jobs[job_id] = {"id": job_id, "name": name, "status": "queued", "msg": "รอคิว...",
+                                 "created": time.time(), "finished": None, "img": img_bytes,
+                                 "user_fmt": user_fmt, "result": None, "note": None, "warn": None}
+            if len(self.jobs) > 40:  # ลบงานที่จบแล้วเก่าสุด
+                done = sorted((j for j in self.jobs.values() if j["status"] in ("done", "error")),
+                              key=lambda j: j["created"])
+                for j in done[:len(self.jobs) - 40]:
+                    self.jobs.pop(j["id"], None)
+        return job_id
+
+    def get(self, job_id):
+        with self.lock:
+            j = self.jobs.get(job_id)
+            return dict(j) if j else None
+
+    def update(self, job_id, **kw):
+        with self.lock:
+            if job_id in self.jobs:
+                self.jobs[job_id].update(kw)
+
+    def bump_version(self):
+        with self.lock:
+            self.data_version += 1
+
+    def snapshot(self):
+        with self.lock:
+            return sorted((dict(j) for j in self.jobs.values()), key=lambda j: j["created"], reverse=True)
+
+    def clear_finished(self):
+        with self.lock:
+            for k in [k for k, j in self.jobs.items() if j["status"] in ("done", "error")]:
+                self.jobs.pop(k)
+
+@st.cache_resource
+def get_job_manager():
+    return JobManager()
+
+JOBS = get_job_manager()
+
+def validate_row(row):
+    """ตรวจเฉพาะข้อผิดพลาดร้ายแรงที่ทำให้สถิติเพี้ยน -> คืนเหตุผล หรือ None ถ้าบันทึกได้"""
+    if len(row) < 12:
+        return "ข้อมูลไม่ครบ 12 ช่อง"
+    if not str(row[0]).strip() or not str(row[1]).strip():
+        return "อ่านชื่อทีมไม่ได้"
+    water = [row[i] for i in WATER_IDX if isinstance(row[i], (int, float))]
+    if not water:
+        return "อ่านค่าน้ำไม่ได้เลย"
+    bad = [v for v in water if abs(v) > 1]
+    if bad:
+        return f"ค่าน้ำ {bad[0]:g} เกิน ±1 หลังแปลงเป็นมาเลเซีย (น่าจะรูปแบบราคาผิด)"
+    return None
+
+def extract_row(img_bytes, user_fmt, model):
+    img = Image.open(io.BytesIO(img_bytes))
+    if img.mode != 'RGB':
+        img = img.convert('RGB')
+    img.thumbnail((1600, 1600))
+    buf = io.BytesIO()
+    img.save(buf, format='JPEG', quality=85)
+    data = buf.getvalue()
+
+    last_err = None
+    for attempt in range(3):  # AI อาจตอบเพี้ยนบางครั้ง ลองใหม่อัตโนมัติ
+        try:
+            resp = model.generate_content([{"mime_type": "image/jpeg", "data": data}, EXTRACT_PROMPT])
+            row, ai_fmt = clean_raw_data(resp.text.strip())
+            return convert_water_to_malay(row, user_fmt, ai_fmt)
+        except Exception as e:
+            last_err = e
+            time.sleep(2 * (attempt + 1))
+    raise RuntimeError(f"อ่านภาพไม่สำเร็จหลังลอง 3 ครั้ง: {last_err}")
+
+def process_job(job_id, workbook, model):
+    """รันใน thread เบื้องหลัง: ห้ามเรียกคำสั่ง st.* ในฟังก์ชันนี้"""
+    try:
+        job = JOBS.get(job_id)
+        if not workbook:
+            raise RuntimeError("ไม่สามารถเชื่อมต่อ Google Sheets ได้")
+
+        JOBS.update(job_id, status="reading", msg="🤖 AI กำลังอ่านราคาจากภาพ...")
+        row, note, warn = extract_row(job["img"], job["user_fmt"], model)
+
+        problem = validate_row(row)
+        if problem:
+            JOBS.update(job_id, status="error", msg=f"ไม่บันทึก: {problem}", note=note, finished=time.time())
+            return
+        if any(not isinstance(row[i], (int, float)) for i in WATER_IDX):
+            warn = ((warn + " ") if warn else "") + "⚠️ มีค่าน้ำที่อ่านไม่ได้บางช่อง ควรเช็กแถวนี้ในชีต"
+
+        JOBS.update(job_id, status="saving", msg="📊 กำลังบันทึกลง Google Sheets...", note=note, warn=warn)
+        ws = workbook.sheet1
+        with JOBS.sheet_lock:
+            target_row, overwritten = save_row_to_sheet(ws, row)
+        updated = wait_for_result(ws, target_row)
+
+        rec = updated[15] if len(updated) > 15 and str(updated[15]).strip() else "กำลังคำนวณ..."
+        confidence = updated[17] if len(updated) > 17 else "-"
+        radar = updated[18] if len(updated) > 18 else "-"
+        mm_text, rec = get_money_management(rec, confidence)
+
+        JOBS.bump_version()
+        JOBS.update(job_id, status="done", msg="", img=None, finished=time.time(),
+                    result={"home": str(row[0]), "away": str(row[1]), "rec": rec, "mm": mm_text,
+                            "confidence": confidence, "radar": radar,
+                            "row": target_row, "overwritten": overwritten})
+    except Exception as e:
+        JOBS.update(job_id, status="error", msg=f"{e}", finished=time.time())
+    finally:
+        gc.collect()
+
+def submit_job(name, img_bytes, user_fmt):
+    job_id = JOBS.create(name, img_bytes, user_fmt)
+    JOBS.pool.submit(process_job, job_id, workbook, model)
+
+def retry_job(job_id):
+    j = JOBS.get(job_id)
+    if j and j["status"] == "error" and j["img"]:
+        JOBS.update(job_id, status="queued", msg="รอคิว (ลองใหม่)", result=None, finished=None)
+        JOBS.pool.submit(process_job, job_id, workbook, model)
+
+STATUS_UI = {"queued": ("รอคิว", "run"), "reading": ("กำลังอ่านภาพ", "run"),
+             "saving": ("กำลังบันทึก", "run"), "done": ("บันทึกแล้ว", "ok"), "error": ("ไม่สำเร็จ", "err")}
+
+def render_jobs():
+    jobs = JOBS.snapshot()
+    if not jobs:
+        st.caption("ยังไม่มีงาน — ลากรูปมาวางด้านบนได้เลย ระบบจะอ่านและบันทึกให้อัตโนมัติ")
+        return
+
+    active = sum(1 for j in jobs if j["status"] in ("queued", "reading", "saving"))
+    c1, c2 = st.columns([4, 1])
+    with c1:
+        panel_header("งานล่าสุด", f"กำลังทำ {active} งาน · ปิดหน้านี้หรือสลับแอปได้ งานจะทำต่อบนเซิร์ฟเวอร์")
+    with c2:
+        st.button("🧹 ล้างรายการที่จบแล้ว", on_click=JOBS.clear_finished, key="clear_jobs")
+
+    for j in jobs[:15]:
+        label, cls = STATUS_UI[j["status"]]
+        head = (f"<div class='job-head'><span class='job-name'>{esc(j['name'])}</span>"
+                f"<span class='job-pill {cls}'>{label}</span></div>")
+        if j["status"] == "done":
+            r = j["result"]
+            where = "บันทึกทับแถวเดิม" if r["overwritten"] else "คู่ใหม่"
+            body = (f"<div class='job-title'>{esc(r['home'])}<span class='vs'> vs </span>{esc(r['away'])}"
+                    f"<span class='job-msg'> · แถว {r['row']} ({where})</span></div>"
+                    f"<div class='result-row'><span class='result-key'>🎯 แนะนำลงทุน</span><span class='result-val hl'>{esc(str(r['rec']))}</span></div>"
+                    f"<div class='result-row'><span class='result-key'>💰 Money Mgt</span><span class='result-val'>{esc(r['mm'])}</span></div>"
+                    f"<div class='result-row'><span class='result-key'>📊 สถิติความเชื่อมั่น</span><span class='result-val'>{esc(str(r['confidence']))}</span></div>"
+                    f"<div class='result-row'><span class='result-key'>🚨 เช็กราคา</span><span class='result-val'>{esc(str(r['radar']))}</span></div>")
+        else:
+            body = f"<div class='job-msg' style='margin-top:8px'>{esc(j['msg'])}</div>"
+        extra = ""
+        if j.get("note"):
+            extra += f"<div class='job-note'>{esc(j['note'])}</div>"
+        if j.get("warn"):
+            extra += f"<div class='job-note' style='color:#e8bb62'>{esc(j['warn'])}</div>"
+        st.markdown(f"<div class='job-card {cls}'>{head}{body}{extra}</div>", unsafe_allow_html=True)
+        if j["status"] == "error" and j.get("img"):
+            st.button("🔁 ลองใหม่", key=f"retry_{j['id']}", on_click=retry_job, args=(j["id"],))
+
+if hasattr(st, "fragment"):
+    render_jobs_live = st.fragment(run_every=2)(render_jobs)  # รีเฟรชสถานะเองทุก 2 วินาที
+else:
+    def render_jobs_live():
+        st.button("🔄 อัปเดตสถานะ", key="refresh_jobs")
+        render_jobs()
+
+# ----------------------------------------
 # Helper สำหรับกราฟ
 # ----------------------------------------
 def base_layout(fig, height=380):
@@ -387,7 +586,7 @@ def cached_rate_history(_workbook, rates):
     return update_rate_history(_workbook, rates)
 
 @st.cache_data(ttl=60, show_spinner=False)
-def load_dashboard_data(_workbook):
+def load_dashboard_data(_workbook, version=0):
     df = pd.DataFrame(_workbook.sheet1.get_all_records())
     df_stats = pd.DataFrame(_workbook.worksheet("สรุปสถิติ").get_all_records())
     return df, df_stats
@@ -425,106 +624,25 @@ tab1, tab2 = st.tabs(["📸 อัปโหลดราคาบอล", "📊 D
 # ----------------------------------------
 with tab1:
     st.subheader("สกัดราคาบอล & วิเคราะห์ VIP")
-    st.write("อัปโหลดภาพตารางราคา ตรวจค่าที่ AI อ่านได้ แล้วจึงยืนยันบันทึกลง Google Sheets")
+    st.write("ลากรูปมาวางได้เลย (เลือกได้หลายรูป) ระบบจะอ่านราคา แปลงค่าน้ำเป็นมาเลเซีย และบันทึกลง Google Sheets ให้อัตโนมัติ")
 
-    uploaded_file = st.file_uploader("เลือกไฟล์รูปภาพตารางราคาบอล", type=['png', 'jpg', 'jpeg'])
+    fmt_choice = st.selectbox(
+        "รูปแบบค่าน้ำในภาพ", list(FMT_CHOICES.keys()),
+        help="ใช้กับรูปที่อัปโหลดต่อจากนี้ ระบบจะแปลงค่าน้ำเป็นแบบมาเลเซียก่อนบันทึกเสมอ เลือก 'อัตโนมัติ' ถ้าไม่แน่ใจ")
 
-    if uploaded_file is not None:
-        st.image(uploaded_file, caption="ภาพที่อัปโหลด", width=600)
+    up_n = st.session_state.get("up_n", 0)
+    uploaded_files = st.file_uploader("เลือกไฟล์รูปภาพตารางราคาบอล", type=['png', 'jpg', 'jpeg'],
+                                      accept_multiple_files=True, key=f"uploader_{up_n}")
+    if uploaded_files:
+        if not workbook:
+            st.error("ไม่สามารถเชื่อมต่อ Google Sheets ได้")
+        else:
+            for f in uploaded_files:
+                submit_job(f.name, f.getvalue(), FMT_CHOICES[fmt_choice])
+            st.session_state["up_n"] = up_n + 1  # เคลียร์ช่องอัปโหลดให้พร้อมรับรูปถัดไป
+            st.rerun()
 
-        fmt_choice = st.selectbox(
-            "รูปแบบค่าน้ำในภาพ", list(FMT_CHOICES.keys()),
-            help="ระบบจะแปลงค่าน้ำเป็นแบบมาเลเซียก่อนบันทึกเสมอ เลือก 'อัตโนมัติ' ถ้าไม่แน่ใจ หรือเลือกเองเมื่อรู้ว่าภาพเป็นแบบไหน")
-
-        file_key = f"{uploaded_file.name}-{uploaded_file.size}-{fmt_choice}"
-        if st.session_state.get("pending_key") != file_key:
-            st.session_state.pop("pending", None)  # เปลี่ยนไฟล์/รูปแบบราคา ต้องอ่านใหม่
-
-        # ขั้นที่ 1: ให้ AI อ่านภาพ (ยังไม่บันทึก)
-        if st.button("🔍 อ่านราคาจากภาพ", type="primary"):
-            try:
-                with st.spinner("📸 กำลังประมวลผลรูปภาพ..."):
-                    img = Image.open(uploaded_file)
-                    if img.mode != 'RGB': img = img.convert('RGB')
-                    img.thumbnail((1600, 1600))
-                    img_byte_arr = io.BytesIO()
-                    img.save(img_byte_arr, format='JPEG', quality=85)
-                    img_bytes = img_byte_arr.getvalue()
-
-                with st.spinner("🤖 กำลังให้ AI สกัดราคาบอล..."):
-                    prompt = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ (ระบุเฉพาะตัวเลข ห้ามมีตัวอักษร o หรือ u นำหน้า),ค่าน้ำสูง,ค่าน้ำต่ำ,รหัสรูปแบบราคาน้ำ (ตอบรหัสเดียว: MY=มาเลเซีย มีทั้งบวกและลบ, HK=ฮ่องกง, ID=อินโดนีเซีย, EU=Decimal เช่น 1.90, UNK=ไม่แน่ใจ) ค่าน้ำทุกค่าให้คัดลอกตามที่เห็นในภาพทุกประการรวมเครื่องหมายลบ ห้ามแปลงค่าเอง โดยคั่นแต่ละค่าด้วยลูกน้ำ (,) เท่านั้น ห้ามมีข้อความอื่น"
-                    response = model.generate_content([{"mime_type": "image/jpeg", "data": img_bytes}, prompt])
-
-                if not response or not response.text:
-                    st.error("❌ AI ไม่สามารถอ่านข้อมูลจากภาพนี้ได้ กรุณาลองอัปโหลดภาพใหม่อีกครั้ง")
-                else:
-                    row, ai_fmt = clean_raw_data(response.text.strip())
-                    row, note, warn = convert_water_to_malay(row, FMT_CHOICES[fmt_choice], ai_fmt)
-                    st.session_state["pending"] = {"row": row, "note": note, "warn": warn}
-                    st.session_state["pending_key"] = file_key
-            except Exception as e:
-                st.error(f"❌ อ่านภาพไม่สำเร็จ: {str(e)}")
-            finally:
-                gc.collect()
-
-        # ขั้นที่ 2: ตรวจ/แก้ไขค่า แล้วยืนยันบันทึก
-        pending = st.session_state.get("pending")
-        if pending:
-            panel_header("ตรวจสอบก่อนบันทึก",
-                         "ดับเบิลคลิกเพื่อแก้ช่องที่ AI อ่านผิด · ค่าน้ำถูกแปลงเป็นมาเลเซียให้แล้ว ค่าที่แก้เองจะบันทึกตามที่พิมพ์")
-            st.info(pending["note"])
-            if pending["warn"]:
-                st.warning(pending["warn"])
-
-            edit_df = pd.DataFrame([["" if v is None else str(v) for v in pending["row"]]], columns=FIELD_LABELS)
-            edited = st.data_editor(edit_df, hide_index=True, use_container_width=True, key=f"editor-{file_key}")
-
-            if st.button("💾 ยืนยันและบันทึก", type="primary"):
-                if not workbook:
-                    st.error("ไม่สามารถเชื่อมต่อ Google Sheets ได้")
-                else:
-                    try:
-                        cells = edited.iloc[0].tolist()
-                        row = [str(cells[0]).strip(), str(cells[1]).strip()] + [parse_cell(c) for c in cells[2:12]]
-
-                        if not row[0] or not row[1]:
-                            st.error("❌ ชื่อทีมว่างอยู่ กรุณากรอกชื่อทีมเหย้าและทีมเยือนก่อนบันทึก")
-                        else:
-                            ws_data = workbook.sheet1
-                            with st.spinner("📊 กำลังบันทึกและรอ Google Sheets ประมวลผลลัพธ์..."):
-                                target_row, overwritten = save_row_to_sheet(ws_data, row)
-                                updated_row = wait_for_result(ws_data, target_row)
-
-                            st.cache_data.clear()
-                            st.session_state.pop("pending", None)
-                            st.session_state.pop("pending_key", None)
-
-                            if overwritten:
-                                st.warning(f"🔄 พบข้อมูลคู่ {row[0]} vs {row[1]} ในระบบ ทำการ **บันทึกทับ** ที่แถว {target_row} เรียบร้อยแล้ว")
-                            else:
-                                st.success(f"✅ บันทึกข้อมูลคู่ใหม่สำเร็จ! (แถว {target_row})")
-
-                            water = [row[i] for i in WATER_IDX if isinstance(row[i], (int, float))]
-                            if any(abs(v) > 1 for v in water):
-                                st.warning("⚠️ ค่าน้ำที่บันทึกมีค่าเกิน ±1 ซึ่งผิดปกติสำหรับระบบมาเลเซีย ควรตรวจสอบแถวนี้ในชีต")
-
-                            rec = updated_row[15] if len(updated_row) > 15 and str(updated_row[15]).strip() else "กำลังคำนวณ..."
-                            confidence = updated_row[17] if len(updated_row) > 17 else "-"
-                            radar = updated_row[18] if len(updated_row) > 18 else "-"
-                            mm_text, rec = get_money_management(rec, confidence)
-
-                            st.markdown(f"""<div class="result-card">
-<h3>{esc(row[0])}<span class="vs">vs</span>{esc(row[1])}</h3>
-<div class="result-row"><span class="result-key">🎯 แนะนำลงทุน</span><span class="result-val hl">{esc(str(rec))}</span></div>
-<div class="result-row"><span class="result-key">💰 Money Mgt</span><span class="result-val">{esc(mm_text)}</span></div>
-<div class="result-row"><span class="result-key">📊 สถิติความเชื่อมั่น</span><span class="result-val">{esc(str(confidence))}</span></div>
-<div class="result-row"><span class="result-key">🚨 เช็กราคา</span><span class="result-val">{esc(str(radar))}</span></div>
-</div>""", unsafe_allow_html=True)
-
-                    except Exception as e:
-                        st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
-                    finally:
-                        gc.collect()
+    render_jobs_live()
 
 # ----------------------------------------
 # TAB 2 : Dashboard
@@ -538,7 +656,7 @@ with tab2:
                 st.cache_data.clear()
                 st.rerun()
 
-            df, df_stats = load_dashboard_data(workbook)
+            df, df_stats = load_dashboard_data(workbook, JOBS.data_version)
             df_stats = df_stats.copy()
             if not df_stats.empty:
                 df_stats.columns = [str(c).strip() for c in df_stats.columns]
