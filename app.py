@@ -1,96 +1,33 @@
-"""Six-field last-five input: see README.md. Price extraction and Dashboard retained."""
-import streamlit as st
-import gspread
-from google import genai
-from google.genai import types
+# P2_FORM5_SPLIT_V2 - short entrypoint; CSS is in style.css.
 from pathlib import Path
-import logging
-from form_data import (
-    BASE_HEADERS, FORM_HEADERS, TeamForm, ValidationError,
-    validate_quote, prepare_headers, save_match,
-)
+import ast
+import hashlib
+import runpy
+import sys
+import streamlit as st
 
-logger = logging.getLogger(__name__)
-from PIL import Image
-import io
-import os
-import re
-import pandas as pd
-import plotly.graph_objects as go
-import gc
-import time
-import threading
-import uuid
-from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone, timedelta
-from html import escape as esc
-
-# ----------------------------------------
-# ตั้งค่าหน้าเว็บ
-# ----------------------------------------
-st.set_page_config(page_title="ระบบวิเคราะห์ราคาบอล VIP", page_icon="⚽", layout="wide")
-
-# ----------------------------------------
-# THEME : Black & Emerald
-# ----------------------------------------
-BG = "#050907"
-SURFACE = "#0c130f"
-LINE = "#1b2a22"
-TEXT = "#e6f2ea"
-MUTED = "#7f9a8b"
-GREEN = "#22c55e"
-GREEN_SOFT = "#86efac"
-AMBER = "#d9a441"
-RED = "#e5484d"
-
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap');
-
-html, body, [class*="css"], .stApp, .stMarkdown, button, input, textarea {
-    font-family: 'Prompt', 'Segoe UI', sans-serif !important;
-}
-.stApp { background: #050907; color: #e6f2ea; }
-header[data-testid="stHeader"] { background: transparent; }
-.block-container { padding-top: 2.2rem; max-width: 1280px; }
-
-h1, h2, h3, h4 { color: #e6f2ea !important; letter-spacing: -0.01em; }
-p, label, span { color: inherit; }
-
-/* Tabs */
-.stTabs [data-baseweb="tab-list"] { gap: 6px; border-bottom: 1px solid #1b2a22; }
-.stTabs [data-baseweb="tab"] {
-    background: transparent; color: #7f9a8b; padding: 10px 18px;
-    border-radius: 10px 10px 0 0; font-weight: 500;
-}
-.stTabs [aria-selected="true"] { color: #22c55e !important; background: #0c130f; }
-.stTabs [data-baseweb="tab-highlight"] { background-color: #22c55e; }
-
-/* Buttons */
-.stButton > button[kind="primary"] {
-    background: #22c55e; color: #03140a; border: none; font-weight: 600;
-    border-radius: 10px; padding: 0.55rem 1.4rem;
-}
-.stButton > button[kind="primary"]:hover { background: #4ade80; color: #03140a; }
-
-/* Uploader */
-[data-testid="stFileUploader"] section {
-    background: #0c130f; border: 1px dashed #2a4136; border-radius: 14px;
-}
-
-/* Alerts */
-[data-testid="stAlert"] { background: #0c130f; border: 1px solid #1b2a22; border-radius: 12px; }
-
-/* Page heading */
-.page-title { font-size: 1.9rem; font-weight: 600; margin: 0; color: #e6f2ea; }
-.page-sub { color: #7f9a8b; margin: 4px 0 22px 0; font-size: 0.95rem; }
-
-/* KPI strip */
-.kpi-wrap { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 16px; margin-bottom: 22px; }
-.kpi {
-    background: #0c130f; border: 1px solid #1b2a22; border-radius: 16px; padding: 22px 26px;
-}
-.kpi.hero {
-    background: linear-gradient(160deg, #0f2a1b 0%, #0c130f 70%);
-    border-color: #1f6b3d; box-shadow: 0 0 40px -12px rgba(34,197,94,0.35);
-}
+ROOT = Path(__file__).resolve().parent
+BUILD_ID = "P2_FORM5_SPLIT_V2"
+EXPECTED = {'p2_app.py': '2152b8c245fc76062e5dbb8c2d6bc2042fc6ccd5b7b4e64fe4e9352293a95f3a', 'form_data.py': '26e82e7f1bff0971d16a59999ae7fed4b9fc7873c119507e6fe626bc00aa9d60', 'style.css': '80ba38de41118b2bc4fb49d97b1f286bf434eabb48ed054419cf7f0fe0fe45bb'}
+st.set_page_config(page_title='ระบบวิเคราะห์ราคาบอล VIP', page_icon='⚽', layout='wide')
+st.caption("Build: " + BUILD_ID)
+print("Starting " + BUILD_ID + " from " + str(ROOT / "app.py"), flush=True)
+for name, expected in EXPECTED.items():
+    path = ROOT / name
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+        if hashlib.sha256(text.encode("utf-8")).hexdigest() != expected:
+            raise ValueError("File is incomplete or differs from this release. Upload the full file from the ZIP.")
+        if path.suffix == ".py":
+            ast.parse(text, filename=str(path))
+    except (OSError, UnicodeError, ValueError, SyntaxError) as exc:
+        st.error(BUILD_ID + " | " + name + ": " + str(exc))
+        st.info("Upload ALL files from P2_Form5_SplitFix.zip into the same folder as app.py, then commit to the deployed branch.")
+        st.stop()
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+try:
+    runpy.run_path(str(ROOT / "p2_app.py"), run_name="__main__")
+except ModuleNotFoundError as exc:
+    st.error("Missing dependency: " + str(exc.name) + ". Install this release's requirements.txt.")
+    st.stop()
