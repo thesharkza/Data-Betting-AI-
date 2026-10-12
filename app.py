@@ -94,3 +94,7 @@ def _integer(value: Any, name: str, minimum: int = 0, maximum: int | None = None
     except (TypeError, ValueError) as exc:
         raise ValidationError(f"{name}: must be an integer.") from exc
     if not isfinite(num) or not num.is_integer() or num < minimum:
+        raise ValidationError(f"{name}: must be an integer >= {minimum}.")
+    if maximum is not None and num > maximum:
+        raise ValidationError(f"{name}: maximum is {maximum}.")
+    return int(num)
