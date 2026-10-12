@@ -1,6 +1,18 @@
+"""Form5 input upgrade. See README_TH.md for schema, installation and limitations."""
 import streamlit as st
 import gspread
-import google.generativeai as genai
+from google import genai
+from google.genai import types
+from pathlib import Path
+from zoneinfo import ZoneInfo
+import json
+import logging
+from form_data import (
+    BASE_HEADERS, FORM_HEADERS, FORM_SCOPES, ENTRY_MODES, TeamForm, MatchMeta,
+    ValidationError, SchemaConflict, DuplicateFixture, validate_quote,
+    parse_local_datetime, prepare_headers, save_match,
+)
+logger = logging.getLogger(__name__)
 from PIL import Image
 import io
 import os
@@ -161,42 +173,47 @@ p, label, span { color: inherit; }
 # ----------------------------------------
 # การตั้งค่า API และ Google Sheets
 # ----------------------------------------
-GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-else:
-    st.error("❌ ไม่พบ GEMINI_API_KEY กรุณาตั้งค่าใน Streamlit Secrets")
-
-def _has_gspread_secret():
+def setting(name, default=None):
+    """Settings read in the main thread; secrets are never written to a file."""
     try:
-        return "gspread" in st.secrets
+        value = st.secrets.get(name)
     except Exception:
-        return False
+        value = None
+    return value if value is not None else os.environ.get(name, default)
+
+GEMINI_API_KEY = setting("GEMINI_API_KEY")
+# Original model identifier retained as a default, not claimed to be valid for every account.
+GEMINI_MODEL = setting("GEMINI_MODEL", "gemini-3.7-flash")
+DATA_WORKSHEET = setting("DATA_WORKSHEET", "DATA")
+DATA_TIMEZONE = setting("DATA_TIMEZONE", "Asia/Bangkok")
+FORMULA_MAX_ROW_CONFIG = int(setting("FORMULA_MAX_ROW", "2000"))
+OWNER = st.session_state.setdefault("draft_owner", uuid.uuid4().hex)
 
 @st.cache_resource
 def init_gspread():
-    """ถ้าล้มเหลวให้ปล่อย exception เพื่อไม่ให้ Streamlit แคชผลลัพธ์ที่ผิดพลาดไว้"""
-    if _has_gspread_secret():
-        client = gspread.service_account_from_dict(dict(st.secrets["gspread"]))
+    try:
+        secret = dict(st.secrets["gspread"]) if "gspread" in st.secrets else None
+    except Exception:
+        secret = None
+    if secret:
+        client = gspread.service_account_from_dict(secret)
     else:
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        creds_path = os.path.join(base_dir, 'credentials.json')
-        if not os.path.exists(creds_path):
-            raise FileNotFoundError('ไม่พบไฟล์ credentials.json ในโฟลเดอร์โครงการ และยังไม่ได้ตั้งค่า st.secrets["gspread"]')
-        client = gspread.service_account(filename=creds_path)
-    return client.open("ข้อมูลราคาบอลสกัดจากภาพ")
+        credentials = Path(setting("GOOGLE_APPLICATION_CREDENTIALS", str(Path(__file__).with_name("credentials.json"))))
+        if not credentials.exists():
+            raise FileNotFoundError('ตั้งค่า st.secrets["gspread"] หรือ credentials.json ก่อนบันทึกจริง')
+        client = gspread.service_account(filename=str(credentials))
+    sheet_id = setting("GOOGLE_SHEET_ID")
+    return client.open_by_key(sheet_id) if sheet_id else client.open(setting("GOOGLE_SHEET_TITLE", "ข้อมูลราคาบอลสกัดจากภาพ"))
 
 try:
     workbook = init_gspread()
-except Exception as e:
-    st.error(f"❌ เชื่อมต่อ Google Sheets ไม่สำเร็จ: {e}")
+    sheet_connection_error = None
+except Exception as exc:
     workbook = None
+    sheet_connection_error = str(exc)
 
-model = genai.GenerativeModel('gemini-3.7-flash')
+model = GEMINI_MODEL
 
-# ----------------------------------------
-# แปลงค่าน้ำเป็นระบบมาเลเซีย (Malay Odds) เสมอ
-# ----------------------------------------
 WATER_IDX = [6, 8, 10, 11]  # ค่าน้ำ HDP เหย้า / HDP เยือน / น้ำสูง / น้ำต่ำ
 FMT_LABELS = {"MY": "มาเลเซีย", "HK": "ฮ่องกง", "ID": "อินโดนีเซีย", "EU": "ยุโรป (Decimal)"}
 FMT_CHOICES = {
@@ -278,25 +295,8 @@ def convert_water_to_malay(row, user_fmt, ai_fmt):
         warn = "⚠️ AI ไม่แน่ใจรูปแบบราคา ระบบจึงเดาให้ ควรเช็กค่าน้ำที่บันทึกอีกครั้ง"
     return new_row, note, warn
 
-def save_row_to_sheet(ws, row):
-    """เขียนแถวลงชีต (ทับคู่เดิมถ้ามี) -> คืน (เลขแถว, ทับของเดิมหรือไม่)"""
-    col_a = ws.col_values(1)
-    col_b = ws.col_values(2)
-    last_row = max((i + 1 for i, v in enumerate(col_a) if str(v).strip()), default=0)
+# Replaced by form_data.save_match(): no contiguous A:BE writes.
 
-    new_home, new_away = str(row[0]).strip(), str(row[1]).strip()
-    target_row = None
-    for i in range(len(col_a)):
-        away = str(col_b[i]).strip() if i < len(col_b) else ""
-        if str(col_a[i]).strip() == new_home and away == new_away:
-            target_row = i + 1
-            break
-
-    overwritten = target_row is not None
-    if not overwritten:
-        target_row = last_row + 1
-    ws.update(range_name=f"A{target_row}", values=[row])
-    return target_row, overwritten
 
 def wait_for_result(ws, target_row, tries=10):
     """รอให้ชีตคำนวณคำแนะนำ (คอลัมน์ P) เสร็จ แทนการ sleep ตายตัว"""
@@ -323,80 +323,61 @@ def calc_win_stats(df_comp):
     win_rate = round(total_wins / denom * 100, 2) if denom > 0 else 0
     return total, total_wins, win_rate
 
-def get_money_management(rec_text, conf_text):
-    if "ข้าม" in str(rec_text):
-        return "0 Unit (ข้าม ห้ามลงทุน) 🛑", rec_text
+# Money management is read from existing column T; never infer stake from a percentage in R.
 
-    match_pct = re.search(r'(\d+(\.\d+)?)%', str(conf_text))
-    match_n = re.search(r'n=(\d+)', str(conf_text))
-
-    if match_pct:
-        pct_val = float(match_pct.group(1))
-        n_val = int(match_n.group(1)) if match_n else 0
-
-        if n_val < 5 and "SNIPER" in str(rec_text):
-            return "⭐ 0.5 Unit (ช่วงทดสอบโมเดลใหม่ 🧪)", rec_text
-
-        if pct_val < 55 and "SNIPER" in str(rec_text):
-            modified_rec = f"⏸️ พักชั่วคราว: {rec_text} (สถิติตกเหลือ {pct_val}%)"
-            return "0 Unit (รอสถิติฟื้นตัว 🛑)", modified_rec
-
-        if pct_val >= 70: return "⭐⭐⭐⭐ 3 Units (Max Bet 🎯)", rec_text
-        elif pct_val >= 60: return "⭐⭐⭐ 2 Units (High 🚀)", rec_text
-        elif pct_val >= 55: return "⭐⭐ 1 Unit (Normal 👍)", rec_text
-        else: return "⭐ 0.5 Unit (Low / Test 🧪)", rec_text
-    else:
-        return "⭐ 0.5 Unit (รอเก็บสถิติ ⏳)", rec_text
 
 # ----------------------------------------
-# ระบบงานเบื้องหลัง: อ่านภาพ + บันทึกชีตบนเซิร์ฟเวอร์ ไม่ผูกกับหน้าเว็บ
+# คิวอ่านภาพ: ยังไม่เขียน Google Sheets จนกว่าผู้ใช้ยืนยันในฟอร์ม
 # ----------------------------------------
 EXTRACT_PROMPT = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ (ระบุเฉพาะตัวเลข ห้ามมีตัวอักษร o หรือ u นำหน้า),ค่าน้ำสูง,ค่าน้ำต่ำ,รหัสรูปแบบราคาน้ำ (ตอบรหัสเดียว: MY=มาเลเซีย มีทั้งบวกและลบ, HK=ฮ่องกง, ID=อินโดนีเซีย, EU=Decimal เช่น 1.90, UNK=ไม่แน่ใจ) ค่าน้ำทุกค่าให้คัดลอกตามที่เห็นในภาพทุกประการรวมเครื่องหมายลบ ห้ามแปลงค่าเอง โดยคั่นแต่ละค่าด้วยลูกน้ำ (,) เท่านั้น ห้ามมีข้อความอื่น"
 
 class JobManager:
-    """เก็บสถานะงานไว้บนเซิร์ฟเวอร์ (แชร์ข้ามทุก session) เพื่อให้งานเดินต่อแม้ปิดหน้า/สลับแอป"""
+    """Drafts live in server memory, isolated by browser session. Not a durable queue."""
     def __init__(self):
         self.jobs = {}
-        self.lock = threading.Lock()        # ป้องกันการแก้ dict พร้อมกัน
-        self.sheet_lock = threading.Lock()  # บันทึกชีตทีละงาน กันแย่งแถวเดียวกัน
+        self.lock = threading.Lock()
+        self.sheet_lock = threading.Lock()
         self.pool = ThreadPoolExecutor(max_workers=3)
         self.data_version = 0
 
-    def create(self, name, img_bytes, user_fmt):
-        job_id = uuid.uuid4().hex[:8]
+    def create(self, name, img_bytes, user_fmt, owner):
+        job_id = uuid.uuid4().hex
         with self.lock:
-            self.jobs[job_id] = {"id": job_id, "name": name, "status": "queued", "msg": "รอคิว...",
-                                 "created": time.time(), "finished": None, "img": img_bytes,
-                                 "user_fmt": user_fmt, "result": None, "note": None, "warn": None}
-            if len(self.jobs) > 40:  # ลบงานที่จบแล้วเก่าสุด
-                done = sorted((j for j in self.jobs.values() if j["status"] in ("done", "error")),
-                              key=lambda j: j["created"])
-                for j in done[:len(self.jobs) - 40]:
-                    self.jobs.pop(j["id"], None)
+            self.jobs[job_id] = {
+                "id": job_id, "owner": owner, "name": name,
+                "status": "queued" if img_bytes else "needs_input",
+                "msg": "รออ่านภาพ" if img_bytes else "กรอกราคาและฟอร์มก่อนบันทึก",
+                "created": time.time(), "finished": None, "img": img_bytes,
+                "user_fmt": user_fmt, "result": None, "note": None, "warn": None,
+                "row_data": None if img_bytes else ["", ""] + [None] * 10,
+            }
         return job_id
 
-    def get(self, job_id):
+    def get(self, job_id, owner):
         with self.lock:
-            j = self.jobs.get(job_id)
-            return dict(j) if j else None
+            job = self.jobs.get(job_id)
+            return dict(job) if job and job["owner"] == owner else None
 
-    def update(self, job_id, **kw):
+    def update(self, job_id, owner, **kwargs):
         with self.lock:
-            if job_id in self.jobs:
-                self.jobs[job_id].update(kw)
+            if job_id in self.jobs and self.jobs[job_id]["owner"] == owner:
+                self.jobs[job_id].update(kwargs)
 
     def bump_version(self):
         with self.lock:
             self.data_version += 1
 
-    def snapshot(self):
+    def snapshot(self, owner):
         with self.lock:
-            return sorted((dict(j) for j in self.jobs.values()), key=lambda j: j["created"], reverse=True)
+            return sorted((dict(j) for j in self.jobs.values() if j["owner"] == owner),
+                          key=lambda j: j["created"], reverse=True)
 
-    def clear_finished(self):
+    def clear_finished(self, owner):
         with self.lock:
-            for k in [k for k, j in self.jobs.items() if j["status"] in ("done", "error")]:
-                self.jobs.pop(k)
+            for key in [key for key, job in self.jobs.items()
+                        if job["owner"] == owner and job["status"] in ("done", "error")]:
+                self.jobs.pop(key)
+
 
 @st.cache_resource
 def get_job_manager():
@@ -405,126 +386,119 @@ def get_job_manager():
 JOBS = get_job_manager()
 
 def validate_row(row):
-    """ตรวจเฉพาะข้อผิดพลาดร้ายแรงที่ทำให้สถิติเพี้ยน -> คืนเหตุผล หรือ None ถ้าบันทึกได้"""
-    if len(row) < 12:
-        return "ข้อมูลไม่ครบ 12 ช่อง"
-    if not str(row[0]).strip() or not str(row[1]).strip():
-        return "อ่านชื่อทีมไม่ได้"
-    water = [row[i] for i in WATER_IDX if isinstance(row[i], (int, float))]
-    if not water:
-        return "อ่านค่าน้ำไม่ได้เลย"
-    bad = [v for v in water if abs(v) > 1]
-    if bad:
-        return f"ค่าน้ำ {bad[0]:g} เกิน ±1 หลังแปลงเป็นมาเลเซีย (น่าจะรูปแบบราคาผิด)"
-    return None
-
-def extract_row(img_bytes, user_fmt, model):
-    img = Image.open(io.BytesIO(img_bytes))
-    if img.mode != 'RGB':
-        img = img.convert('RGB')
-    img.thumbnail((1600, 1600))
-    buf = io.BytesIO()
-    img.save(buf, format='JPEG', quality=85)
-    data = buf.getvalue()
-
-    last_err = None
-    for attempt in range(3):  # AI อาจตอบเพี้ยนบางครั้ง ลองใหม่อัตโนมัติ
-        try:
-            resp = model.generate_content([{"mime_type": "image/jpeg", "data": data}, EXTRACT_PROMPT])
-            row, ai_fmt = clean_raw_data(resp.text.strip())
-            return convert_water_to_malay(row, user_fmt, ai_fmt)
-        except Exception as e:
-            last_err = e
-            time.sleep(2 * (attempt + 1))
-    raise RuntimeError(f"อ่านภาพไม่สำเร็จหลังลอง 3 ครั้ง: {last_err}")
-
-def process_job(job_id, workbook, model):
-    """รันใน thread เบื้องหลัง: ห้ามเรียกคำสั่ง st.* ในฟังก์ชันนี้"""
     try:
-        job = JOBS.get(job_id)
-        if not workbook:
-            raise RuntimeError("ไม่สามารถเชื่อมต่อ Google Sheets ได้")
+        validate_quote(row)
+        return None
+    except ValidationError as exc:
+        return str(exc)
 
-        JOBS.update(job_id, status="reading", msg="🤖 AI กำลังอ่านราคาจากภาพ...")
-        row, note, warn = extract_row(job["img"], job["user_fmt"], model)
 
+def extract_row(img_bytes, user_fmt, model_name):
+    """Only image price extraction. No form statistics are guessed or generated."""
+    if not GEMINI_API_KEY or not model_name:
+        raise RuntimeError("กรุณาตั้งค่า GEMINI_API_KEY และ GEMINI_MODEL หรือใช้การกรอกเอง")
+    with Image.open(io.BytesIO(img_bytes)) as original:
+        img = original.convert('RGB')
+        img.thumbnail((1600, 1600))
+        with io.BytesIO() as buf:
+            img.save(buf, format='JPEG', quality=85)
+            data = buf.getvalue()
+    last_err = None
+    for attempt in range(3):
+        try:
+            with genai.Client(api_key=GEMINI_API_KEY) as client:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=[types.Part.from_bytes(data=data, mime_type="image/jpeg"), EXTRACT_PROMPT],
+                )
+            if not response.text:
+                raise ValueError("AI ไม่คืนข้อความราคา")
+            row, ai_fmt = clean_raw_data(response.text.strip())
+            return convert_water_to_malay(row, user_fmt, ai_fmt)
+        except Exception as exc:
+            last_err = exc
+            if attempt < 2:
+                time.sleep(2 * (attempt + 1))
+    raise RuntimeError(f"อ่านภาพไม่สำเร็จ: {last_err}")
+
+
+def process_job(job_id, owner, model_name):
+    """Worker reads the image only. No Sheets calls and no st.* calls here."""
+    try:
+        job = JOBS.get(job_id, owner)
+        if not job:
+            return
+        JOBS.update(job_id, owner, status="reading", msg="AI กำลังอ่านราคาเท่านั้น ยังไม่บันทึก")
+        row, note, warn = extract_row(job["img"], job["user_fmt"], model_name)
         problem = validate_row(row)
         if problem:
-            JOBS.update(job_id, status="error", msg=f"ไม่บันทึก: {problem}", note=note, finished=time.time())
-            return
-        if any(not isinstance(row[i], (int, float)) for i in WATER_IDX):
-            warn = ((warn + " ") if warn else "") + "⚠️ มีค่าน้ำที่อ่านไม่ได้บางช่อง ควรเช็กแถวนี้ในชีต"
-
-        JOBS.update(job_id, status="saving", msg="📊 กำลังบันทึกลง Google Sheets...", note=note, warn=warn)
-        ws = workbook.sheet1
-        with JOBS.sheet_lock:
-            target_row, overwritten = save_row_to_sheet(ws, row)
-        updated = wait_for_result(ws, target_row)
-
-        rec = updated[15] if len(updated) > 15 and str(updated[15]).strip() else "กำลังคำนวณ..."
-        confidence = updated[17] if len(updated) > 17 else "-"
-        radar = updated[18] if len(updated) > 18 else "-"
-        mm_text, rec = get_money_management(rec, confidence)
-
-        JOBS.bump_version()
-        JOBS.update(job_id, status="done", msg="", img=None, finished=time.time(),
-                    result={"home": str(row[0]), "away": str(row[1]), "rec": rec, "mm": mm_text,
-                            "confidence": confidence, "radar": radar,
-                            "row": target_row, "overwritten": overwritten})
-    except Exception as e:
-        JOBS.update(job_id, status="error", msg=f"{e}", finished=time.time())
+            warn = ((warn + " | ") if warn else "") + "โปรดแก้ราคาก่อนบันทึก: " + problem
+        JOBS.update(job_id, owner, status="needs_input", row_data=row, note=note, warn=warn,
+                    msg="อ่านแล้ว กรุณาตรวจราคาและกรอกฟอร์ม 5 นัด จากนั้นกดยืนยันบันทึก")
+    except Exception as exc:
+        logger.exception("Image extraction failed for draft %s", job_id)
+        JOBS.update(job_id, owner, status="error", msg=str(exc), finished=time.time())
     finally:
         gc.collect()
 
+
 def submit_job(name, img_bytes, user_fmt):
-    job_id = JOBS.create(name, img_bytes, user_fmt)
-    JOBS.pool.submit(process_job, job_id, workbook, model)
+    job_id = JOBS.create(name, img_bytes, user_fmt, OWNER)
+    JOBS.pool.submit(process_job, job_id, OWNER, model)
+    return job_id
+
 
 def retry_job(job_id):
-    j = JOBS.get(job_id)
-    if j and j["status"] == "error" and j["img"]:
-        JOBS.update(job_id, status="queued", msg="รอคิว (ลองใหม่)", result=None, finished=None)
-        JOBS.pool.submit(process_job, job_id, workbook, model)
+    job = JOBS.get(job_id, OWNER)
+    if job and job["status"] == "error" and job.get("img"):
+        JOBS.update(job_id, OWNER, status="queued", msg="รออ่านภาพใหม่", result=None, finished=None)
+        JOBS.pool.submit(process_job, job_id, OWNER, model)
 
-STATUS_UI = {"queued": ("รอคิว", "run"), "reading": ("กำลังอ่านภาพ", "run"),
+
+STATUS_UI = {"needs_input": ("รอตรวจและกรอกฟอร์ม", "run"), "queued": ("รอคิว", "run"), "reading": ("กำลังอ่านภาพ", "run"),
              "saving": ("กำลังบันทึก", "run"), "done": ("บันทึกแล้ว", "ok"), "error": ("ไม่สำเร็จ", "err")}
 
 def render_jobs():
-    jobs = JOBS.snapshot()
+    jobs = JOBS.snapshot(OWNER)
     if not jobs:
-        st.caption("ยังไม่มีงาน — ลากรูปมาวางด้านบนได้เลย ระบบจะอ่านและบันทึกให้อัตโนมัติ")
+        st.caption("ยังไม่มีรายการ อัปโหลดภาพหรือกดกรอกราคาเองเพื่อเริ่มต้น")
         return
-
-    active = sum(1 for j in jobs if j["status"] in ("queued", "reading", "saving"))
+    active = sum(j["status"] in ("queued", "reading", "saving") for j in jobs)
     c1, c2 = st.columns([4, 1])
     with c1:
-        panel_header("งานล่าสุด", f"กำลังทำ {active} งาน · ปิดหน้านี้หรือสลับแอปได้ งานจะทำต่อบนเซิร์ฟเวอร์")
+        panel_header("รายการของคุณ", f"กำลังประมวลผล {active} รายการ · รายการรอกรอกยังไม่บันทึกลงชีต")
     with c2:
-        st.button("🧹 ล้างรายการที่จบแล้ว", on_click=JOBS.clear_finished, key="clear_jobs")
-
-    for j in jobs[:15]:
-        label, cls = STATUS_UI[j["status"]]
-        head = (f"<div class='job-head'><span class='job-name'>{esc(j['name'])}</span>"
-                f"<span class='job-pill {cls}'>{label}</span></div>")
-        if j["status"] == "done":
-            r = j["result"]
-            where = "บันทึกทับแถวเดิม" if r["overwritten"] else "คู่ใหม่"
-            body = (f"<div class='job-title'>{esc(r['home'])}<span class='vs'> vs </span>{esc(r['away'])}"
-                    f"<span class='job-msg'> · แถว {r['row']} ({where})</span></div>"
-                    f"<div class='result-row'><span class='result-key'>🎯 แนะนำลงทุน</span><span class='result-val hl'>{esc(str(r['rec']))}</span></div>"
-                    f"<div class='result-row'><span class='result-key'>💰 Money Mgt</span><span class='result-val'>{esc(r['mm'])}</span></div>"
-                    f"<div class='result-row'><span class='result-key'>📊 สถิติความเชื่อมั่น</span><span class='result-val'>{esc(str(r['confidence']))}</span></div>"
-                    f"<div class='result-row'><span class='result-key'>🚨 เช็กราคา</span><span class='result-val'>{esc(str(r['radar']))}</span></div>")
+        st.button("ล้างรายการที่จบแล้ว", on_click=JOBS.clear_finished, args=(OWNER,), key="clear_jobs")
+    for job in jobs[:20]:
+        label, css = STATUS_UI.get(job["status"], (job["status"], "run"))
+        head = (f"<div class='job-head'><span class='job-name'>{esc(job['name'])}</span>"
+                f"<span class='job-pill {css}'>{label}</span></div>")
+        if job["status"] == "done":
+            result = job["result"]
+            action = "พบรายการเดิมที่บันทึกสำเร็จแล้ว" if result.get("already_saved") else (
+                "แก้ไขนัดเดิมที่ยืนยัน" if result["overwritten"] else "รายการใหม่")
+            body = (f"<div class='job-title'>{esc(result['home'])} vs {esc(result['away'])}</div>"
+                    f"<div class='job-msg'>แถว {result['row']} · {action}</div>"
+                    f"<div class='result-row'><span class='result-key'>P — สูตรเดิม</span>"
+                    f"<span class='result-val'>{esc(str(result['rec']))}</span></div>"
+                    f"<div class='result-row'><span class='result-key'>T — ขนาดจำลอง</span>"
+                    f"<span class='result-val'>{esc(str(result['mm']))}</span></div>"
+                    f"<div class='result-row'><span class='result-key'>R — สถิติกลุ่มกฎเดิม</span>"
+                    f"<span class='result-val'>{esc(str(result['confidence']))}</span></div>")
         else:
-            body = f"<div class='job-msg' style='margin-top:8px'>{esc(j['msg'])}</div>"
-        extra = ""
-        if j.get("note"):
-            extra += f"<div class='job-note'>{esc(j['note'])}</div>"
-        if j.get("warn"):
-            extra += f"<div class='job-note' style='color:#e8bb62'>{esc(j['warn'])}</div>"
-        st.markdown(f"<div class='job-card {cls}'>{head}{body}{extra}</div>", unsafe_allow_html=True)
-        if j["status"] == "error" and j.get("img"):
-            st.button("🔁 ลองใหม่", key=f"retry_{j['id']}", on_click=retry_job, args=(j["id"],))
+            row = job.get("row_data") or []
+            names = f"{esc(str(row[0]))} vs {esc(str(row[1]))}" if len(row) >= 2 else ""
+            body = f"<div class='job-title'>{names}</div><div class='job-msg'>{esc(job['msg'])}</div>"
+        notes = "".join(f"<div class='job-note'>{esc(str(job[k]))}</div>"
+                        for k in ("note", "warn") if job.get(k))
+        st.markdown(f"<div class='job-card {css}'>{head}{body}{notes}</div>", unsafe_allow_html=True)
+        if job["status"] == "needs_input":
+            if st.button("เปิดฟอร์มตรวจสอบและกรอกข้อมูล", key=f"review_{job['id']}"):
+                st.session_state["selected_draft"] = job["id"]
+                st.rerun()
+        if job["status"] == "error" and job.get("img"):
+            st.button("อ่านภาพใหม่", key=f"retry_{job['id']}", on_click=retry_job, args=(job["id"],))
+
 
 if hasattr(st, "fragment"):
     render_jobs_live = st.fragment(run_every=2)(render_jobs)  # รีเฟรชสถานะเองทุก 2 วินาที
@@ -587,9 +561,21 @@ def cached_rate_history(_workbook, rates):
 
 @st.cache_data(ttl=60, show_spinner=False)
 def load_dashboard_data(_workbook, version=0):
-    df = pd.DataFrame(_workbook.sheet1.get_all_records())
-    df_stats = pd.DataFrame(_workbook.worksheet("สรุปสถิติ").get_all_records())
+    # Dashboard intentionally retains original A:W definitions, not team-form win rates.
+    ws = _workbook.worksheet(DATA_WORKSHEET)
+    records = ws.get("A:W")
+    if records:
+        headers = list(records[0]) + list(BASE_HEADERS[len(records[0]):])
+        rows = [(list(r) + [""] * 23)[:23] for r in records[1:] if any(str(v).strip() for v in r)]
+        df = pd.DataFrame(rows, columns=headers[:23])
+    else:
+        df = pd.DataFrame(columns=BASE_HEADERS)
+    try:
+        df_stats = pd.DataFrame(_workbook.worksheet("สรุปสถิติ").get_all_records())
+    except gspread.exceptions.WorksheetNotFound:
+        df_stats = pd.DataFrame()
     return df, df_stats
+
 
 def trend_delta(h):
     return h[-1][1] - h[-2][1] if len(h) >= 2 else None
@@ -614,8 +600,160 @@ def panel_header(title, sub):
 # ----------------------------------------
 # หัวข้อหลัก
 # ----------------------------------------
+
+def render_team_form(prefix, label):
+    st.markdown(f"#### {label}")
+    st.caption("ใช้ผล 90 นาทีรวมทดเจ็บ ไม่รวมต่อเวลาหรือดวลจุดโทษ; ถ้ามีไม่ครบ 5 นัดให้ระบุจำนวนจริง")
+    matches = st.number_input("จำนวนเกมที่มีข้อมูล", min_value=1, max_value=5, value=5, step=1, key=prefix+"n")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        wins = st.number_input("ชนะ", min_value=0, max_value=5, value=None, step=1, key=prefix+"w")
+    with c2:
+        draws = st.number_input("เสมอ", min_value=0, max_value=5, value=None, step=1, key=prefix+"d")
+    with c3:
+        losses = st.number_input("แพ้", min_value=0, max_value=5, value=None, step=1, key=prefix+"l")
+    goals_for = st.number_input("ประตูได้รวมในชุดย้อนหลัง", min_value=0, value=None, step=1, key=prefix+"gf")
+    goals_against = st.number_input("ประตูเสียรวมในชุดย้อนหลัง", min_value=0, value=None, step=1, key=prefix+"ga")
+    st.caption("Win rate = ชนะ ÷ จำนวนเกม ระบบคำนวณให้หลังตรวจข้อมูล ไม่ต้องกรอกเปอร์เซ็นต์ซ้ำ")
+    return dict(matches=matches, wins=wins, draws=draws, losses=losses,
+                goals_for=goals_for, goals_against=goals_against, label=label)
+
+
+def render_review(job_id):
+    job = JOBS.get(job_id, OWNER)
+    if not job or job["status"] != "needs_input":
+        return
+    st.markdown("### ตรวจราคาและกรอกข้อมูลก่อนบันทึก")
+    st.info("ข้อมูลฟอร์มชุดนี้ใช้เตรียมพัฒนาโมเดล ยังไม่เปลี่ยนสูตร P2 หรือเพิ่มความแม่นยำให้อัตโนมัติ")
+    if job.get("warn"):
+        st.warning(job["warn"])
+    if job.get("img"):
+        with st.expander("ดูภาพราคาต้นฉบับ"):
+            st.image(job["img"], width=700)
+    prefix = "draft_" + job_id + "_"
+    row = job.get("row_data") or ["", ""] + [None] * 10
+    with st.form(prefix+"form", clear_on_submit=False, enter_to_submit=False):
+        cols = st.columns(2)
+        with cols[0]:
+            home_name = st.text_input(BASE_HEADERS[0], value=str(row[0] or ""), key=prefix+"home")
+        with cols[1]:
+            away_name = st.text_input(BASE_HEADERS[1], value=str(row[1] or ""), key=prefix+"away")
+        with st.expander("ตรวจสอบ/แก้ไขราคาที่อ่านได้ — ค่าน้ำทั้ง 4 ช่องเป็นมาเลย์", expanded=not bool(job.get("img"))):
+            quote_numbers = []
+            price_cols = st.columns(3)
+            for index in range(2, 12):
+                with price_cols[(index-2) % 3]:
+                    value = row[index]
+                    if not isinstance(value, (int, float)):
+                        value = None
+                    value = float(value) if value is not None else None
+                    quote_numbers.append(st.number_input(BASE_HEADERS[index], value=value,
+                                         step=0.01, format="%.2f", key=prefix+f"price{index}"))
+        st.markdown("#### ขอบเขตและเวลาของข้อมูล")
+        st.caption("วันเวลาใช้ ค.ศ. รูปแบบ YYYY-MM-DD HH:MM (24 ชั่วโมง) และเขตเวลาที่เลือกด้านล่าง")
+        zones = ["Asia/Bangkok", "Asia/Singapore", "UTC"]
+        if DATA_TIMEZONE not in zones:
+            zones.append(DATA_TIMEZONE)
+        zone = st.selectbox("เขตเวลา", zones, index=zones.index(DATA_TIMEZONE), key=prefix+"zone")
+        c1, c2 = st.columns(2)
+        with c1:
+            competition = st.text_input("ลีก / รายการแข่งขัน", key=prefix+"competition")
+            kickoff = st.text_input("เวลาเริ่มแข่งขัน", placeholder="YYYY-MM-DD HH:MM", key=prefix+"kickoff")
+            odds_at = st.text_input("เวลาที่เก็บราคาในภาพ", placeholder="YYYY-MM-DD HH:MM", key=prefix+"odds_at")
+        with c2:
+            form_at = st.text_input("ข้อมูลฟอร์มเป็นข้อมูล ณ เวลาใด", placeholder="YYYY-MM-DD HH:MM", key=prefix+"form_at")
+            scope_labels = {
+                "ALL_COMPETITIONS": "รวมเหย้า/เยือน — ทุกรายการ",
+                "LEAGUE_ONLY": "รวมเหย้า/เยือน — เฉพาะลีก",
+                "VENUE_ALL_COMPETITIONS": "เจ้าบ้านใช้เกมเหย้า / ทีมเยือนใช้เกมเยือน — ทุกรายการ",
+                "VENUE_LEAGUE_ONLY": "เจ้าบ้านใช้เกมเหย้า / ทีมเยือนใช้เกมเยือน — เฉพาะลีก",
+            }
+            scope = st.selectbox("ขอบเขต 5 นัดของทั้งสองทีม", list(FORM_SCOPES),
+                                 format_func=lambda x: scope_labels[x], key=prefix+"scope")
+            entry_mode = st.selectbox("ประเภทการบันทึก", list(ENTRY_MODES),
+                                     format_func=lambda x: "ก่อนแข่ง (PREMATCH)" if x == "PREMATCH" else "ย้อนหลังจากหลักฐานก่อนแข่ง (HISTORICAL)",
+                                     key=prefix+"entry_mode")
+        form_source = st.text_input("แหล่งข้อมูลฟอร์ม / URL / ชื่อหลักฐาน (ระบุทั้งสองทีมถ้าคนละแหล่ง)", key=prefix+"source")
+        st.caption("Form_AsOf ต้องไม่เกินเวลาเก็บราคา และราคา/ฟอร์มต้องอยู่ก่อนเวลาเริ่มแข่ง ไม่ใช้ผลของคู่นี้")
+        hcol, acol = st.columns(2)
+        with hcol:
+            home_inputs = render_team_form(prefix+"h_", "เจ้าบ้าน")
+        with acol:
+            away_inputs = render_team_form(prefix+"a_", "ทีมเยือน")
+        confirmed = st.checkbox("ยืนยันว่าตรวจราคาแล้ว และฟอร์มเป็นข้อมูลก่อนแข่งจริง ไม่รวมผลคู่นี้", key=prefix+"confirmed")
+        allow_update = st.checkbox("อนุญาตแก้ไขเฉพาะนัดเดิมที่วันเวลา/ลีกตรงกัน และยังไม่มีผลสกอร์ (ไม่ใช่แค่ชื่อทีมตรง)", key=prefix+"allow_update")
+        b1, b2 = st.columns(2)
+        with b1:
+            preview_pressed = st.form_submit_button("ตรวจข้อมูล / ดู Win rate ที่คำนวณ", use_container_width=True)
+        with b2:
+            save_pressed = st.form_submit_button("ยืนยันบันทึกลง Google Sheets", type="primary",
+                                                 disabled=workbook is None, use_container_width=True)
+    if not (preview_pressed or save_pressed):
+        return
+    try:
+        clean_row = validate_quote([home_name, away_name] + quote_numbers)
+        home_form = TeamForm.from_inputs(**home_inputs)
+        away_form = TeamForm.from_inputs(**away_inputs)
+        meta = MatchMeta(
+            kickoff=parse_local_datetime(kickoff, zone, "Kickoff"),
+            odds_at=parse_local_datetime(odds_at, zone, "Odds capture"),
+            form_asof=parse_local_datetime(form_at, zone, "Form as-of"),
+            competition=competition, scope=scope, source=form_source,
+            entry_mode=entry_mode, image_name=job["name"],
+        )
+        meta.validate(datetime.now(timezone.utc))
+        st.success("ข้อมูลผ่านการตรวจสอบรูปแบบและความสอดคล้อง — ยังไม่ได้ตรวจยืนยันแหล่งข้อมูลภายนอก")
+        st.dataframe(pd.DataFrame([home_form.summary(), away_form.summary()],
+                     index=["เจ้าบ้าน", "ทีมเยือน"]), use_container_width=True)
+        if home_form.matches < 5 or away_form.matches < 5:
+            st.warning("อย่างน้อยหนึ่งทีมมีข้อมูลไม่ครบ 5 นัด ระบบเก็บจำนวนจริง ไม่เติมข้อมูลที่ขาดเป็นศูนย์")
+        if not save_pressed:
+            st.caption("นี่คือตัวอย่างก่อนบันทึก ยังไม่มีการเขียนข้อมูลการแข่งขันลง Google Sheets")
+            return
+        if not confirmed:
+            st.error("กรุณายืนยันว่าตรวจราคาและใช้ข้อมูลฟอร์มก่อนแข่งก่อนบันทึก")
+            return
+        if workbook is None:
+            st.error("ยังไม่เชื่อมต่อ Google Sheets")
+            return
+        JOBS.update(job_id, OWNER, status="saving", msg="กำลังบันทึกข้อมูลที่ยืนยันแล้ว")
+        with st.spinner("บันทึก A:L และ X:BE โดยไม่เขียนทับ M:W..."):
+            with JOBS.sheet_lock:
+                ws = workbook.worksheet(DATA_WORKSHEET)
+                saved = save_match(ws, clean_row, home_form, away_form, meta, job_id,
+                                   allow_update=allow_update, max_formula_row=FORMULA_MAX_ROW_CONFIG)
+        # Persist receipt in memory before polling formulas; a polling error is not a save error.
+        result = {"home": clean_row[0], "away": clean_row[1], "row": saved.row,
+                  "overwritten": saved.overwritten, "already_saved": saved.already_saved,
+                  "rec": "บันทึกแล้ว / รอสูตรชีตเดิม", "mm": "ดูคอลัมน์ T",
+                  "confidence": "ดูคอลัมน์ R", "radar": "ดูคอลัมน์ S"}
+        JOBS.update(job_id, OWNER, status="done", result=result, img=None, finished=time.time(),
+                    msg="บันทึกสำเร็จ", warn=("พบชื่อทีมเดียวกันในแถวเก่าที่ไม่มีวันแข่ง จึงไม่เขียนทับแถวเก่า" if saved.legacy_same_names else None))
+        JOBS.bump_version()
+        try:
+            updated = wait_for_result(ws, saved.row, tries=4)
+            get = lambda index, default: updated[index] if len(updated) > index and str(updated[index]).strip() else default
+            result.update(rec=get(15, "รอสูตร P2"), confidence=get(17, "-"),
+                          radar=get(18, "-"), mm=get(19, "ยังไม่มีค่าจาก T"))
+            JOBS.update(job_id, OWNER, result=result)
+        except Exception:
+            logger.exception("Row saved, but reading formula output failed")
+            JOBS.update(job_id, OWNER, warn="ข้อมูลบันทึกสำเร็จ แต่ยังอ่านผลสูตรไม่ได้ โปรดตรวจในชีต ไม่ต้องบันทึกซ้ำ")
+        st.rerun()
+    except DuplicateFixture as exc:
+        JOBS.update(job_id, OWNER, status="needs_input")
+        st.warning(f"พบข้อมูลนัดเดียวกันที่แถว {exc.row} ยังไม่เขียนทับ หากต้องการแก้ไขให้ตรวจและติ๊กยืนยันแก้ไขนัดเดิม")
+    except ValidationError as exc:
+        JOBS.update(job_id, OWNER, status="needs_input")
+        st.error(f"ยังไม่บันทึก: {exc}")
+    except Exception as exc:
+        JOBS.update(job_id, OWNER, status="needs_input")
+        logger.exception("Save failed or response was not received")
+        st.error(f"ยังยืนยันผลบันทึกไม่ได้: {exc} — ตรวจชีตก่อน แล้วกดบันทึกซ้ำในรายการเดิมเพื่อให้ระบบตรวจ Record_ID")
+
+
 st.markdown("<h1 class='page-title'>⚽ ระบบวิเคราะห์ราคาบอล VIP</h1>", unsafe_allow_html=True)
-st.markdown("<p class='page-sub'>สกัดราคาจากภาพ วิเคราะห์ และติดตามผลงานในที่เดียว</p>", unsafe_allow_html=True)
+st.markdown("<p class='page-sub'>อ่านราคา → ตรวจสอบและกรอกฟอร์ม 5 นัด → ยืนยันบันทึก | สูตร P2 เดิมยังไม่ใช้ฟอร์มใหม่</p>", unsafe_allow_html=True)
 
 tab1, tab2 = st.tabs(["📸 อัปโหลดราคาบอล", "📊 Dashboard"])
 
@@ -623,30 +761,58 @@ tab1, tab2 = st.tabs(["📸 อัปโหลดราคาบอล", "📊 D
 # TAB 1
 # ----------------------------------------
 with tab1:
-    st.subheader("สกัดราคาบอล & วิเคราะห์ VIP")
-    st.write("ลากรูปมาวางได้เลย (เลือกได้หลายรูป) ระบบจะอ่านราคา แปลงค่าน้ำเป็นมาเลเซีย และบันทึกลง Google Sheets ให้อัตโนมัติ")
-
-    fmt_choice = st.selectbox(
-        "รูปแบบค่าน้ำในภาพ", list(FMT_CHOICES.keys()),
-        help="ใช้กับรูปที่อัปโหลดต่อจากนี้ ระบบจะแปลงค่าน้ำเป็นแบบมาเลเซียก่อนบันทึกเสมอ เลือก 'อัตโนมัติ' ถ้าไม่แน่ใจ")
-
+    st.subheader("อ่านราคา และกรอกฟอร์มก่อนบันทึก")
+    st.write("อัปโหลดได้หลายรูป AI อ่านเฉพาะราคา จากนั้นเปิดแต่ละรายการเพื่อกรอกข้อมูลและกดยืนยัน")
+    st.caption("รายการรอกรอกอยู่ในหน่วยความจำของ session ไม่ใช่ข้อมูลที่บันทึกแล้ว การรีสตาร์ตเซิร์ฟเวอร์หรือเปิด session ใหม่อาจทำให้รายการรอกรอกหาย")
+    if workbook is None:
+        st.warning(f"ยังไม่เชื่อมต่อ Google Sheets: {sheet_connection_error} — ทดลองกรอกและตรวจข้อมูลได้ แต่ปุ่มบันทึกถูกปิด")
+    if not GEMINI_API_KEY:
+        st.info("ยังไม่มี GEMINI_API_KEY ใช้ปุ่มกรอกราคาเองได้ หรือกำหนด Secrets เพื่ออ่านภาพ")
+    with st.expander("เตรียมคอลัมน์ใหม่ X:BE (สำหรับชีต DATA เดิม A:W เท่านั้น)"):
+        st.write("เพิ่มต่อท้าย W ไม่แทรกกลางตาราง และไม่ใช้กับชีต DATA_V2 ที่มีคอลัมน์ช่วยอยู่แล้ว")
+        st.caption("คำสั่งนี้ตรวจหัวตารางเดิมและจะหยุดถ้า X:BE มีข้อมูลหรือสูตรอื่น ไม่ลบข้อมูลเดิม")
+        backup_confirm = st.checkbox("สำรอง Google Sheets แล้ว และตรวจว่าชีตปลายทางถูกต้อง", key="schema_backup")
+        d1, d2 = st.columns(2)
+        with d1:
+            inspect_schema = st.button("ตรวจโครงสร้างเท่านั้น", disabled=workbook is None)
+        with d2:
+            setup_schema = st.button("เพิ่ม / ตรวจหัวคอลัมน์ X:BE", disabled=workbook is None or not backup_confirm)
+        if inspect_schema or setup_schema:
+            try:
+                with JOBS.sheet_lock:
+                    plan = prepare_headers(workbook.worksheet(DATA_WORKSHEET), dry_run=not setup_schema)
+                st.success("ตรวจผ่าน (ยังไม่เขียน)" if not setup_schema else "เตรียมหัวคอลัมน์สำเร็จ โดยไม่เปลี่ยน A:W")
+                st.caption(f"ปลายทาง {DATA_WORKSHEET}!X1:BE1 · จำนวนคำสั่ง {len(plan['requests'])}")
+            except Exception as exc:
+                st.error(f"หยุดโดยไม่ทับข้อมูลเดิม: {exc}")
+    fmt_choice = st.selectbox("รูปแบบค่าน้ำในภาพ", list(FMT_CHOICES.keys()),
+                             help="ราคาที่ตรวจในฟอร์มจะเป็นมาเลย์หลังแปลง ควรตรวจภาพต้นฉบับทุกครั้ง")
+    if st.button("กรอกราคาเอง / ไม่ใช้ภาพ", key="manual_draft"):
+        draft_id = JOBS.create("กรอกเอง", None, "MY", OWNER)
+        st.session_state["selected_draft"] = draft_id
+        st.rerun()
     up_n = st.session_state.get("up_n", 0)
-    uploaded_files = st.file_uploader("เลือกไฟล์รูปภาพตารางราคาบอล", type=['png', 'jpg', 'jpeg'],
-                                      accept_multiple_files=True, key=f"uploader_{up_n}")
+    uploaded_files = st.file_uploader("เลือกภาพราคาบอล", type=['png', 'jpg', 'jpeg'],
+                                      accept_multiple_files=True, key=f"uploader_{up_n}", disabled=not bool(GEMINI_API_KEY))
     if uploaded_files:
-        if not workbook:
-            st.error("ไม่สามารถเชื่อมต่อ Google Sheets ได้")
-        else:
-            for f in uploaded_files:
-                submit_job(f.name, f.getvalue(), FMT_CHOICES[fmt_choice])
-            st.session_state["up_n"] = up_n + 1  # เคลียร์ช่องอัปโหลดให้พร้อมรับรูปถัดไป
-            st.rerun()
-
+        for uploaded in uploaded_files:
+            submit_job(uploaded.name, uploaded.getvalue(), FMT_CHOICES[fmt_choice])
+        st.session_state["up_n"] = up_n + 1
+        st.rerun()
     render_jobs_live()
+    ready = [j for j in JOBS.snapshot(OWNER) if j["status"] == "needs_input"]
+    if ready:
+        ready_ids = [j["id"] for j in ready]
+        preferred = st.session_state.get("selected_draft")
+        if preferred not in ready_ids:
+            preferred = ready_ids[0]
+        labels = {j["id"]: f"{j['name']} | {(j.get('row_data') or [''])[0]} | {j['id'][:6]}" for j in ready}
+        selected = st.selectbox("เลือกคู่ที่จะกรอก", ready_ids, index=ready_ids.index(preferred),
+                                format_func=lambda value: labels[value], key="review_selection_" + preferred)
+        render_review(selected)
+    st.caption("Win rate ทีมย้อนหลังใน X/AA เป็นคนละค่ากับ Win rate ผลกลุ่มกฎบน Dashboard เดิม")
 
-# ----------------------------------------
-# TAB 2 : Dashboard
-# ----------------------------------------
+# Original Dashboard preserved; it continues to use the original A:W and rule summaries.
 with tab2:
     if not workbook:
         st.error("ไม่สามารถเชื่อมต่อ Google Sheets ได้")
