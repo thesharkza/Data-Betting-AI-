@@ -1,91 +1,96 @@
-# P2_FORM5_STARTUP_V3 - replaces only the Split V2 launcher.
-# No exact-text checksum gate. Checks below are NOT a security/integrity audit.
-from pathlib import Path
-import ast
-import runpy
-import sys
+# P2_FORM5_SINGLE_V1 - standalone app.py; no local Python or CSS imports.
+# Run: python -m streamlit run app.py
+# Requires the existing installed packages and Streamlit Secrets.
+from __future__ import annotations
 
-import streamlit as st
+from dataclasses import dataclass
+from hashlib import sha256
+from math import isfinite
+from typing import Any, Sequence
+import json
+import re
+import unicodedata
 
-ROOT = Path(__file__).resolve().parent
-BUILD_ID = "P2_FORM5_STARTUP_V3"
-REQUIRED = {
-    "p2_app.py": {"JobManager", "render_team_form", "render_review", "load_dashboard_data"},
-    "form_data.py": {"TeamForm", "ValidationError", "validate_quote", "prepare_headers", "save_match"},
-}
+SCHEMA_VERSION = "FORM5_SIMPLE_V2"
+FORM_START = 24
+FORM_END = 29
+FORMULA_MAX_ROW = 2000
+LAST_N = 5
+BASE_HEADERS: tuple[str, ...] = ('ทีมเหย้า', 'ทีมเยือน', '1X2 เหย้า', '1X2 เสมอ', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 'แฮนดิแคป (เยือน)', 'ค่าน้ำ HDP (เยือน)', 'โกลสูง/ต่ำ', 'ค่าน้ำ (สูง)', 'ค่าน้ำ (ต่ำ)', 'ผลสกอร์', 'ผล HDP', 'ผลสูง/ต่ำ', 'แนะนำลงทุน', 'ผลเปรียบเทียบ', 'ความเชื่อมั่น (สถิติย้อนหลัง)', 'วัดความเบี่ยงเบนผิดปกติ', 'Money Management', 'เลือก', 'กำไร/ขาดทุนจำลองต่อ 1 Unit', 'เพิ่มรหัสกลุ่มกฎสำหรับรวมสถิติ')
+FORM_HEADERS = (
+    "H_WinRate_Last5", "H_GoalsFor_Last5", "H_GoalsAgainst_Last5",
+    "A_WinRate_Last5", "A_GoalsFor_Last5", "A_GoalsAgainst_Last5",
+)
+RECEIPT_PREFIX = "P2_FORM5_SIMPLE_RECEIPT:"
 
+class ValidationError(ValueError):
+    'Input is incomplete or inconsistent; nothing should be written.'
 
-def validate_python(path: Path, required: set[str]) -> int:
-    # Read only: do not import the module, execute it, or contact any API here.
-    source = path.read_text(encoding="utf-8-sig")
-    if not source.strip():
-        raise ValueError("File is empty. Replace this file with its complete copy.")
-    tree = ast.parse(source, filename=str(path))
-    compile(tree, str(path), "exec")  # Also catches e.g. a return outside a function.
-    definitions = {
-        node.name for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-    }
-    missing = sorted(required - definitions)
-    if missing:
-        raise ValueError(
-            "Required definitions missing: " + ", ".join(missing)
-            + f". This copy has {len(source.splitlines())} lines; it may be partial or a different version."
-        )
-    if path.name == "p2_app.py":
-        # Detect common partial pastes that still have valid Python syntax.
-        # This is a compatibility check, not a proof that all behavior is correct.
-        tabs = {
-            item.context_expr.id: node
-            for node in tree.body if isinstance(node, ast.With)
-            for item in node.items if isinstance(item.context_expr, ast.Name)
-        }
-        for tab, call_name in (("tab1", "render_review"), ("tab2", "cached_rate_history")):
-            section = tabs.get(tab)
-            has_call = section is not None and any(
-                isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-                and node.func.id == call_name for node in ast.walk(section)
-            )
-            if not has_call:
-                raise ValueError(
-                    f"Required UI section missing: {tab}/{call_name}. "
-                    f"This copy has {len(source.splitlines())} lines; replace p2_app.py with its complete copy."
-                )
-    return len(source.splitlines())
+class SchemaConflict(ValidationError):
+    'A:W or X:AC conflicts with the supported DATA layout.'
 
+def column_letter(number: int) -> str:
+    if number < 1:
+        raise ValueError("Column numbers start at 1")
+    result = ""
+    while number:
+        number, rem = divmod(number - 1, 26)
+        result = chr(65 + rem) + result
+    return result
 
-def main() -> None:
-    st.set_page_config(page_title='ระบบวิเคราะห์ราคาบอล VIP', page_icon='⚽', layout='wide')
-    st.caption("Build: " + BUILD_ID)
-    for name, required in REQUIRED.items():
+def _integer(value: Any, name: str, minimum: int = 0, maximum: int | None = None) -> int:
+    if value is None or value == "" or isinstance(value, bool):
+        raise ValidationError(f"{name}: please enter an integer; missing is not zero.")
+    try:
+        num = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(f"{name}: must be an integer.") from exc
+    if not isfinite(num) or not num.is_integer() or num < minimum:
+        raise ValidationError(f"{name}: must be an integer >= {minimum}.")
+    if maximum is not None and num > maximum:
+        raise ValidationError(f"{name}: maximum is {maximum}.")
+    return int(num)
+
+def cell_text(value: Any) -> str:
+    return "" if value is None else str(value).strip()
+
+def normalized(text: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", text).strip().casefold().split())
+
+def validate_quote(row: Sequence[Any]) -> list[Any]:
+    if len(row) != 12:
+        raise ValidationError("A:L requires exactly 12 values.")
+    if not str(row[0] or "").strip() or not str(row[1] or "").strip():
+        raise ValidationError("Both team names are required.")
+    if normalized(str(row[0])) == normalized(str(row[1])):
+        raise ValidationError("Home and away team cannot have the same name.")
+    clean: list[Any] = [str(row[0]).strip(), str(row[1]).strip()]
+    for index, value in enumerate(row[2:], start=2):
+        if value is None or value == "" or isinstance(value, bool):
+            raise ValidationError(f"Column {column_letter(index + 1)}: a number is required.")
         try:
-            validate_python(ROOT / name, required)
-        except SyntaxError as exc:
-            st.error(f"{BUILD_ID} | {name}: SyntaxError at line {exc.lineno}, column {exc.offset}: {exc.msg}")
-            st.info("Repair the named file or replace it with the complete copy. No application code was started.")
-            st.stop()
-            return
-        except (OSError, UnicodeError, ValueError) as exc:
-            st.error(f"{BUILD_ID} | {name}: {exc}")
-            st.info("Keep app.py, p2_app.py, form_data.py and style.css together. This check does not compare file hashes.")
-            st.stop()
-            return
-    try:
-        css = (ROOT / "style.css").read_text(encoding="utf-8-sig")
-        if not css.strip():
-            raise ValueError("style.css is empty; restore the stylesheet.")
-    except (OSError, UnicodeError, ValueError) as exc:
-        st.error(f"{BUILD_ID} | style.css: {exc}")
-        st.stop()
-        return
-    if str(ROOT) not in sys.path:
-        sys.path.insert(0, str(ROOT))
-    try:
-        runpy.run_path(str(ROOT / "p2_app.py"), run_name="__main__")
-    except ModuleNotFoundError as exc:
-        st.error(f"{BUILD_ID} | Missing module: {exc.name}. Check requirements.txt and the deployment logs.")
-        st.stop()
+            number = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError(f"Column {column_letter(index + 1)}: invalid number.") from exc
+        if not isfinite(number):
+            raise ValidationError("Prices must be finite numbers.")
+        clean.append(number)
+    if min(clean[2:5]) <= 1:
+        raise ValidationError("All 1X2 decimal odds must be > 1.")
+    for i in (6, 8, 10, 11):
+        if clean[i] == 0 or abs(clean[i]) > 1:
+            raise ValidationError(f"Column {column_letter(i+1)}: Malay odds must be nonzero and within [-1, 1].")
+    if clean[9] <= 0:
+        raise ValidationError("Over/under line must be > 0.")
+    for i in (5, 7, 9):
+        if abs(clean[i] * 4 - round(clean[i] * 4)) > 1e-6:
+            raise ValidationError(f"Column {column_letter(i+1)}: line must use increments of 0.25.")
+    if abs(clean[5] + clean[7]) > 1e-6:
+        raise ValidationError("Home and away handicap lines must be opposites.")
+    return clean
 
-
-if __name__ == "__main__":
-    main()
+@dataclass(frozen=True)
+class TeamForm:
+    'Win percentage is entered in UI units (60 means 60%, not 0.60).'
+    win_rate_pct: float
+    goals_for: int
