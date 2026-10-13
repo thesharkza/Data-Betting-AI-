@@ -746,97 +746,259 @@ def panel_header(title, sub):
     st.markdown(f"<p class='panel-title'>{title}</p><p class='panel-sub'>{sub}</p>", unsafe_allow_html=True)
 
 # ----------------------------------------
-# ฟังก์ชันส่วนเสริม: AI Machine Learning Predictions (ทายทั้งแฮนดิแคป และ สกอร์สูง-ต่ำ)
+# AI Machine Learning Predictions (ดีไซน์ใหม่: การ์ด + แถบความน่าจะเป็นแบบ 2 ฝั่ง)
 # ----------------------------------------
+ML_CSS = """
+<style>
+.ml-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 14px 0; }
+.ml-chip { font-size: 0.85rem; padding: 5px 14px; border-radius: 999px; background: #0c130f;
+    border: 1px solid #1b2a22; color: #a7c4b5; white-space: nowrap; }
+.ml-chip b { color: #e6f2ea; font-weight: 600; margin-left: 4px; }
+.ml-chip.g { color: #4ade80; border-color: #1f6b3d; background: rgba(34,197,94,0.10); }
+.ml-chip.g b { color: #4ade80; }
+
+.ml-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; margin-top: 6px; }
+.ml-card { background: #0c130f; border: 1px solid #1b2a22; border-left: 4px solid #1b2a22;
+    border-radius: 16px; padding: 18px 22px 8px 22px; }
+.ml-card.strong { border-left-color: #22c55e; box-shadow: 0 0 34px -16px rgba(34,197,94,0.45); }
+.ml-card.mild { border-left-color: #1f6b3d; }
+.ml-teams { color: #e6f2ea; font-weight: 600; font-size: 1.05rem; line-height: 1.35; margin-bottom: 4px; }
+.ml-teams .vs { color: #7f9a8b; font-weight: 400; padding: 0 6px; }
+
+.ml-row { padding: 12px 0 14px 0; border-top: 1px solid #111c16; }
+.ml-row:first-of-type { border-top: none; }
+.ml-row-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
+.ml-mkt { color: #7f9a8b; font-size: 0.85rem; }
+.ml-mkt b { color: #cfe3d6; font-weight: 500; margin-left: 4px; }
+.ml-pill { font-size: 0.78rem; padding: 3px 11px; border-radius: 999px; white-space: nowrap; font-weight: 500; }
+.ml-pill.r { color: #4ade80; background: rgba(34,197,94,0.15); }
+.ml-pill.l { color: #7cc4f2; background: rgba(96,165,250,0.14); }
+.ml-pill.skip { color: #7f9a8b; background: rgba(127,154,139,0.12); }
+.ml-pill.strong { font-weight: 600; box-shadow: inset 0 0 0 1px currentColor; }
+
+.dv { display: grid; grid-template-columns: 84px 1fr 84px; align-items: center; gap: 12px; }
+.dv-lbl { font-size: 0.82rem; color: #7f9a8b; white-space: nowrap; }
+.dv-lbl.l { text-align: right; }
+.dv-lbl b { font-size: 1.05rem; font-weight: 600; margin-left: 4px; }
+.dv-lbl.lead.r b { color: #4ade80; }
+.dv-lbl.lead.l b { color: #7cc4f2; }
+.dv-lbl:not(.lead) b { color: #a7c4b5; }
+.dv-track { position: relative; height: 10px; background: #17241d; border-radius: 6px; overflow: hidden; }
+.dv-band { position: absolute; top: 0; bottom: 0; left: 44%; width: 12%; background: #0b110e; }
+.dv-mid { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; margin-left: -1px; background: #3a5446; z-index: 2; }
+.dv-fill { position: absolute; top: 0; bottom: 0; z-index: 1; }
+.dv-fill.r { background: linear-gradient(90deg, #16a34a, #4ade80); border-radius: 0 6px 6px 0; }
+.dv-fill.l { background: linear-gradient(270deg, #2f7fbf, #7cc4f2); border-radius: 6px 0 0 6px; }
+
+@media (max-width: 480px) {
+    .ml-grid { grid-template-columns: 1fr; }
+    .dv { grid-template-columns: 70px 1fr 70px; gap: 8px; }
+}
+</style>
+"""
+
+
+def _fmt_line(v, signed=False):
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return "-"
+    if v != v:  # NaN
+        return "-"
+    if signed:
+        return "0" if v == 0 else f"{v:+g}"
+    return f"{v:g}"
+
+
+def _p1(model, X):
+    """ความน่าจะเป็นของคลาส 1 (ป้องกันกรณีข้อมูลเทรนมีคลาสเดียว)"""
+    if 1 in list(model.classes_):
+        return model.predict_proba(X)[:, list(model.classes_).index(1)] * 100
+    return np.zeros(len(X))
+
+
+def hdp_decision(prob):
+    """คืนค่า (ข้อความ, ระดับ, ฝั่ง)  ฝั่ง r = เหย้า, l = เยือน"""
+    if prob >= 58:   return "⭐⭐⭐ ไม้หนัก (แทงเหย้า)", "strong", "r"
+    elif prob >= 53: return "⭐⭐ ลงทุนเหย้า", "mild", "r"
+    elif prob <= 42: return "⭐⭐⭐ ไม้หนัก (แทงเยือน)", "strong", "l"
+    elif prob <= 47: return "⭐⭐ ลงทุนเยือน", "mild", "l"
+    return "ข้าม", "skip", "r"
+
+
+def ou_decision(prob):
+    if prob >= 58:   return "🔥 สูง มั่นใจสูง", "strong", "r"
+    elif prob >= 53: return "📈 น่าแทงสูง", "mild", "r"
+    elif prob <= 42: return "🛡️ ต่ำ มั่นใจสูง", "strong", "l"
+    elif prob <= 47: return "📉 น่าแทงต่ำ", "mild", "l"
+    return "ข้าม", "skip", "r"
+
+
+def _diverging_row(market, line_txt, prob, decision, left_name, right_name):
+    text, level, side = decision
+    p_right = round(prob, 1)
+    p_left = round(100 - prob, 1)
+    w = min(abs(prob - 50) * 2, 50)           # เต็มครึ่งแถบ = เอนเอียง 25 จุด
+    if prob >= 50:
+        fill = f"<span class='dv-fill r' style='left:50%;width:{w:.1f}%'></span>"
+    else:
+        fill = f"<span class='dv-fill l' style='left:{50 - w:.1f}%;width:{w:.1f}%'></span>"
+    lead_l = "lead" if prob < 50 else ""
+    lead_r = "lead" if prob >= 50 else ""
+    pill_cls = "skip" if level == "skip" else f"{side} {level}"
+    return (
+        "<div class='ml-row'>"
+        f"<div class='ml-row-top'><span class='ml-mkt'>{esc(market)}<b>{esc(line_txt)}</b></span>"
+        f"<span class='ml-pill {pill_cls}'>{esc(text)}</span></div>"
+        "<div class='dv'>"
+        f"<div class='dv-lbl l {lead_l}'>{esc(left_name)}<b>{p_left:g}%</b></div>"
+        f"<div class='dv-track'><span class='dv-band'></span>{fill}<span class='dv-mid'></span></div>"
+        f"<div class='dv-lbl r {lead_r}'><b>{p_right:g}%</b>{esc(right_name)}</div>"
+        "</div></div>"
+    )
+
+
+def _oob_text(model):
+    try:
+        v = float(model.oob_score_)
+        return f"{v * 100:.0f}%" if isfinite(v) else "-"
+    except Exception:
+        return "-"
+
+
 def render_ai_prediction_section(df):
     st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
-    panel_header("🤖 AI Machine Learning Predictions (แฮนดิแคป & สกอร์สูง-ต่ำ)", "ระบบวิเคราะห์ความน่าจะเป็นและฟันธงผลการแข่งขันเฉพาะแมตช์ที่ยังไม่ลงผลสกอร์")
-    
-    # 1. แปลงคอลัมน์ตัวเลขให้พร้อมใช้งาน
-    numeric_cols = ['1X2 เหย้า', '1X2 เสมอ', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 'โกลสูง/ต่ำ', 'ค่าน้ำ (สูง)', 'ค่าน้ำ (ต่ำ)']
+    panel_header("🤖 AI Machine Learning Predictions (แฮนดิแคป & สกอร์สูง-ต่ำ)",
+                 "วิเคราะห์ความน่าจะเป็นเฉพาะแมตช์ที่ยังไม่ลงผลสกอร์")
+    st.markdown(ML_CSS, unsafe_allow_html=True)
+
+    df = df.copy()
+    numeric_cols = ['1X2 เหย้า', '1X2 เสมอ', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)',
+                    'โกลสูง/ต่ำ', 'ค่าน้ำ (สูง)', 'ค่าน้ำ (ต่ำ)']
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
-            
-    if 'ผล HDP' in df.columns and 'ผลสูง/ต่ำ' in df.columns:
-        
-        # Mapping ผล HDP (เจ้าบ้านชนะ HDP หรือไม่)
-        def map_hdp_result(res):
-            res = str(res).strip()
-            if res == "" or res.lower() == "nan": return np.nan
-            if 'เจ้าบ้านได้เต็ม' in res or 'เจ้าบ้านได้ครึ่ง' in res: return 1
-            if 'เจ้าบ้านเสียเต็ม' in res or 'เจ้าบ้านเสียครึ่ง' in res: return 0
-            return np.nan 
 
-        # Mapping ผล สูง-ต่ำ (ออกสูงหรือไม่)
-        def map_ou_result(res):
-            res = str(res).strip()
-            if res == "" or res.lower() == "nan": return np.nan
-            if 'สูงได้เต็ม' in res or 'สูงได้ครึ่ง' in res: return 1
-            if 'ต่ำได้เต็ม' in res or 'ต่ำได้ครึ่ง' in res: return 0
-            return np.nan 
-
-        df['Target_HDP'] = df['ผล HDP'].apply(map_hdp_result)
-        df['Target_OU'] = df['ผลสูง/ต่ำ'].apply(map_ou_result)
-        
-        # ข้อมูลสำหรับ "ให้ AI ทำนาย" (เฉพาะแถวที่ยังไม่ลงผลสกอร์)
-        if 'ผลสกอร์' in df.columns:
-            df_predict = df[df['ผลสกอร์'].astype(str).str.strip().isin(["", "nan", "None"]) & df['ผล HDP'].astype(str).str.strip().isin(["", "nan", "None"])].copy()
-        else:
-            df_predict = df[df['ผล HDP'].astype(str).str.strip().isin(["", "nan", "None"])].copy()
-
-        df_train = df.dropna(subset=['1X2 เหย้า', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 'โกลสูง/ต่ำ', 'Target_HDP', 'Target_OU']).copy()
-
-        if len(df_train) > 5 and len(df_predict) > 0:
-            features = ['1X2 เหย้า', '1X2 เสมอ', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 'โกลสูง/ต่ำ', 'ค่าน้ำ (สูง)', 'ค่าน้ำ (ต่ำ)']
-            X_train = df_train[features].fillna(0)
-            
-            # --- 1. โมเดลทำนาย แฮนดิแคป ---
-            model_hdp = RandomForestClassifier(n_estimators=100, max_depth=6, random_state=42)
-            model_hdp.fit(X_train, df_train['Target_HDP'])
-            
-            # --- 2. โมเดลทำนาย สูง-ต่ำ ---
-            model_ou = RandomForestClassifier(n_estimators=100, max_depth=6, random_state=42)
-            model_ou.fit(X_train, df_train['Target_OU'])
-            
-            # ทำนายผลเฉพาะคู่ที่ยังไม่แข่ง
-            X_pred = df_predict[features].fillna(0)
-            
-            # คำนวณ % โอกาส
-            df_predict['AI_โอกาสเหย้าชนะHDP(%)'] = (model_hdp.predict_proba(X_pred)[:, 1] * 100).round(1)
-            df_predict['AI_โอกาสออกสูง(%)'] = (model_ou.predict_proba(X_pred)[:, 1] * 100).round(1)
-            
-            # ฟันธง HDP
-            def hdp_decision(prob):
-                if prob >= 58: return "⭐⭐⭐ ไม้หนัก (แทงเหย้า)"
-                elif prob >= 53: return "⭐⭐ ลงทุนเหย้า"
-                elif prob <= 42: return "❌ รองทีมเยือน VIP"
-                elif prob <= 47: return "🔻 รองทีมเยือน"
-                else: return "⚠️ ข้าม (HDP)"
-                
-            # ฟันธง สูง-ต่ำ
-            def ou_decision(prob):
-                if prob >= 58: return "🔥 สูง (Over) มั่นใจสูง"
-                elif prob >= 53: return "📈 น่าแทงสูง"
-                elif prob <= 42: return "🛡️ ต่ำ (Under) มั่นใจสูง"
-                elif prob <= 47: return "📉 น่าแทงต่ำ"
-                else: return "⚠️ ข้าม (O/U)"
-
-            df_predict['AI_ฟันธง_HDP'] = df_predict['AI_โอกาสเหย้าชนะHDP(%)'].apply(hdp_decision)
-            df_predict['AI_ฟันธง_สูงต่ำ'] = df_predict['AI_โอกาสออกสูง(%)'].apply(ou_decision)
-            
-            # เลือกคอลัมน์ที่จะแสดงบนตาราง
-            display_cols = [c for c in ['ทีมเหย้า', 'ทีมเยือน', 'แฮนดิแคป (เหย้า)', 'AI_โอกาสเหย้าชนะHDP(%)', 'AI_ฟันธง_HDP', 'โกลสูง/ต่ำ', 'AI_โอกาสออกสูง(%)', 'AI_ฟันธง_สูงต่ำ'] if c in df_predict.columns]
-            
-            st.markdown(f"พบแมตช์ที่ยังไม่ลงผลสกอร์ทั้งหมด **{len(df_predict)} คู่**:")
-            st.dataframe(df_predict[display_cols], use_container_width=True)
-            
-        elif len(df_train) <= 5:
-            st.info("ℹ️ ต้องการข้อมูลที่มีผลการแข่งขันในอดีต (ทั้ง HDP และ สูง-ต่ำ) อย่างน้อย 5 แถวขึ้นไป เพื่อให้ AI เริ่มประมวลผล")
-        else:
-            st.success("🎉 ไม่มีคู่ค้างที่ยังไม่ลงผลสกอร์ ทุกคู่ใน Google Sheets บันทึกผลครบถ้วนแล้ว!")
-    else:
+    if 'ผล HDP' not in df.columns or 'ผลสูง/ต่ำ' not in df.columns:
         st.warning("⚠️ ไม่พบคอลัมน์ 'ผล HDP' หรือ 'ผลสูง/ต่ำ' ใน Google Sheets สำหรับเทรน AI")
+        return
+
+    def map_hdp_result(res):
+        res = str(res).strip()
+        if res == "" or res.lower() == "nan": return np.nan
+        if 'เจ้าบ้านได้เต็ม' in res or 'เจ้าบ้านได้ครึ่ง' in res: return 1
+        if 'เจ้าบ้านเสียเต็ม' in res or 'เจ้าบ้านเสียครึ่ง' in res: return 0
+        return np.nan
+
+    def map_ou_result(res):
+        res = str(res).strip()
+        if res == "" or res.lower() == "nan": return np.nan
+        if 'สูงได้เต็ม' in res or 'สูงได้ครึ่ง' in res: return 1
+        if 'ต่ำได้เต็ม' in res or 'ต่ำได้ครึ่ง' in res: return 0
+        return np.nan
+
+    df['Target_HDP'] = df['ผล HDP'].apply(map_hdp_result)
+    df['Target_OU'] = df['ผลสูง/ต่ำ'].apply(map_ou_result)
+
+    empty = ["", "nan", "None"]
+    if 'ผลสกอร์' in df.columns:
+        df_predict = df[df['ผลสกอร์'].astype(str).str.strip().isin(empty)
+                        & df['ผล HDP'].astype(str).str.strip().isin(empty)].copy()
+    else:
+        df_predict = df[df['ผล HDP'].astype(str).str.strip().isin(empty)].copy()
+
+    df_train = df.dropna(subset=['1X2 เหย้า', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)',
+                                 'โกลสูง/ต่ำ', 'Target_HDP', 'Target_OU']).copy()
+
+    if len(df_train) <= 5:
+        st.info("ℹ️ ต้องการข้อมูลที่มีผลการแข่งขันในอดีต (ทั้ง HDP และ สูง-ต่ำ) อย่างน้อย 6 แถวขึ้นไป เพื่อให้ AI เริ่มประมวลผล")
+        return
+    if len(df_predict) == 0:
+        st.success("🎉 ไม่มีคู่ค้างที่ยังไม่ลงผลสกอร์ ทุกคู่ใน Google Sheets บันทึกผลครบถ้วนแล้ว!")
+        return
+
+    features = ['1X2 เหย้า', '1X2 เสมอ', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)',
+                'โกลสูง/ต่ำ', 'ค่าน้ำ (สูง)', 'ค่าน้ำ (ต่ำ)']
+    X_train = df_train[features].fillna(0)
+    X_pred = df_predict[features].fillna(0)
+
+    kw = dict(n_estimators=300, max_depth=6, oob_score=True, random_state=42)
+    model_hdp = RandomForestClassifier(**kw).fit(X_train, df_train['Target_HDP'])
+    model_ou = RandomForestClassifier(**kw).fit(X_train, df_train['Target_OU'])
+
+    df_predict['p_hdp'] = _p1(model_hdp, X_pred)
+    df_predict['p_ou'] = _p1(model_ou, X_pred)
+
+    # ---------- เตรียมข้อมูลการ์ด ----------
+    records = []
+    for pos, (_, r) in enumerate(df_predict.iterrows()):
+        d_hdp, d_ou = hdp_decision(r['p_hdp']), ou_decision(r['p_ou'])
+        levels = (d_hdp[1], d_ou[1])
+        tier = "strong" if "strong" in levels else "mild" if "mild" in levels else "skip"
+        records.append({
+            "pos": pos, "tier": tier,
+            "edge": max(abs(r['p_hdp'] - 50), abs(r['p_ou'] - 50)),
+            "home": str(r.get('ทีมเหย้า', '-')), "away": str(r.get('ทีมเยือน', '-')),
+            "hdp_line": _fmt_line(r.get('แฮนดิแคป (เหย้า)'), signed=True),
+            "ou_line": _fmt_line(r.get('โกลสูง/ต่ำ')),
+            "p_hdp": float(r['p_hdp']), "p_ou": float(r['p_ou']),
+            "d_hdp": d_hdp, "d_ou": d_ou,
+        })
+
+    n_strong = sum(1 for x in records if x["tier"] == "strong")
+    n_pick = sum(1 for x in records if x["tier"] != "skip")
+    n_skip = len(records) - n_pick
+
+    st.markdown(
+        "<div class='ml-chips'>"
+        f"<span class='ml-chip'>คู่ที่ยังไม่ลงผล<b>{len(records)}</b></span>"
+        f"<span class='ml-chip g'>มั่นใจสูง<b>{n_strong}</b></span>"
+        f"<span class='ml-chip'>น่าลงทุน<b>{n_pick}</b></span>"
+        f"<span class='ml-chip'>ข้ามทั้งคู่<b>{n_skip}</b></span>"
+        f"<span class='ml-chip'>เทรนจาก<b>{len(df_train)} คู่</b></span>"
+        f"<span class='ml-chip'>ความแม่นยำ HDP<b>{_oob_text(model_hdp)}</b></span>"
+        f"<span class='ml-chip'>ความแม่นยำ สูง-ต่ำ<b>{_oob_text(model_ou)}</b></span>"
+        "</div>", unsafe_allow_html=True)
+
+    # ---------- ตัวกรอง ----------
+    c1, c2 = st.columns([3, 2])
+    with c1:
+        view = st.radio("แสดง", ["ทั้งหมด", "น่าลงทุน (ไม่รวมข้าม)", "มั่นใจสูงเท่านั้น"],
+                        horizontal=True, key="ml_view")
+    with c2:
+        sort_by = st.selectbox("เรียงตาม", ["ความมั่นใจสูงสุดก่อน", "ลำดับในชีต"], key="ml_sort")
+
+    shown = records
+    if view.startswith("น่าลงทุน"):
+        shown = [x for x in shown if x["tier"] != "skip"]
+    elif view.startswith("มั่นใจสูง"):
+        shown = [x for x in shown if x["tier"] == "strong"]
+    shown = sorted(shown, key=lambda x: -x["edge"]) if sort_by.startswith("ความมั่นใจ") else shown
+
+    if not shown:
+        st.info("ไม่มีคู่ที่ตรงกับตัวกรองนี้")
+        return
+
+    LIMIT = 12
+    show_all = True
+    if len(shown) > LIMIT:
+        show_all = st.toggle(f"แสดงทั้งหมด {len(shown)} คู่ (ตอนนี้แสดง {LIMIT} คู่แรก)", key="ml_show_all")
+    visible = shown if show_all else shown[:LIMIT]
+
+    # ---------- การ์ด ----------
+    cards = ["<div class='ml-grid'>"]
+    for x in visible:
+        cards.append(
+            f"<div class='ml-card {x['tier']}'>"
+            f"<div class='ml-teams'>{esc(x['home'])}<span class='vs'> vs </span>{esc(x['away'])}</div>"
+            + _diverging_row("แฮนดิแคป เหย้า ", x["hdp_line"], x["p_hdp"], x["d_hdp"], "เยือน ", " เหย้า")
+            + _diverging_row("สูง-ต่ำ ", x["ou_line"], x["p_ou"], x["d_ou"], "ต่ำ ", " สูง")
+            + "</div>")
+    cards.append("</div>")
+    st.markdown("".join(cards), unsafe_allow_html=True)
+    st.caption("แถบเริ่มจากกึ่งกลาง (50%) ยิ่งยาวยิ่งเอนเอียงไปทางนั้น · แถบมืดตรงกลางคือโซนข้าม (47-53%) · "
+               "ความแม่นยำคำนวณจาก out-of-bag ของข้อมูลที่เทรน ถ้าข้อมูลน้อยค่านี้จะแกว่งมาก")
+
 # ----------------------------------------
 # หัวข้อหลัก
 # ----------------------------------------
@@ -1022,7 +1184,7 @@ with tab2:
             else:
                 st.warning("ไม่พบข้อมูลสถิติในตาราง")
 
-            # --- 5. เพิ่มการเรียกใช้งาน AI Machine Learning Predictions ตรงนี้ ---
+            # --- 5. AI Machine Learning Predictions ---
             render_ai_prediction_section(df)
 
         except Exception as e:
