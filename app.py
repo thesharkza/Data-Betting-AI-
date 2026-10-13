@@ -746,73 +746,97 @@ def panel_header(title, sub):
     st.markdown(f"<p class='panel-title'>{title}</p><p class='panel-sub'>{sub}</p>", unsafe_allow_html=True)
 
 # ----------------------------------------
-# ฟังก์ชันส่วนเสริม: AI Machine Learning Predictions (เฉพาะคู่ที่ยังไม่ลงผล)
+# ฟังก์ชันส่วนเสริม: AI Machine Learning Predictions (ทายทั้งแฮนดิแคป และ สกอร์สูง-ต่ำ)
 # ----------------------------------------
 def render_ai_prediction_section(df):
     st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
-    panel_header("🤖 AI Machine Learning Predictions (คู่ที่ยังไม่แข่ง / รอผล)", "ระบบวิเคราะห์ความน่าจะเป็นและฟันธงเฉพาะแมตช์ที่ยังไม่มีผลสกอร์ใน Google Sheets")
+    panel_header("🤖 AI Machine Learning Predictions (แฮนดิแคป & สกอร์สูง-ต่ำ)", "ระบบวิเคราะห์ความน่าจะเป็นและฟันธงผลการแข่งขันเฉพาะแมตช์ที่ยังไม่ลงผลสกอร์")
     
     # 1. แปลงคอลัมน์ตัวเลขให้พร้อมใช้งาน
-    numeric_cols = ['1X2 เหย้า', '1X2 เสมอ', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 'โกลสูง/ต่ำ']
+    numeric_cols = ['1X2 เหย้า', '1X2 เสมอ', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 'โกลสูง/ต่ำ', 'ค่าน้ำ (สูง)', 'ค่าน้ำ (ต่ำ)']
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
             
-    if 'ผล HDP' in df.columns:
-        # ฟังก์ชันแปลงผลเพื่อใช้สอน AI (จากข้อมูลในอดีตที่แข่งจบแล้ว)
-        def map_result(res):
+    if 'ผล HDP' in df.columns and 'ผลสูง/ต่ำ' in df.columns:
+        
+        # Mapping ผล HDP (เจ้าบ้านชนะ HDP หรือไม่)
+        def map_hdp_result(res):
             res = str(res).strip()
             if res == "" or res.lower() == "nan": return np.nan
             if 'เจ้าบ้านได้เต็ม' in res or 'เจ้าบ้านได้ครึ่ง' in res: return 1
             if 'เจ้าบ้านเสียเต็ม' in res or 'เจ้าบ้านเสียครึ่ง' in res: return 0
             return np.nan 
 
-        df['Target_Home_Win'] = df['ผล HDP'].apply(map_result)
+        # Mapping ผล สูง-ต่ำ (ออกสูงหรือไม่)
+        def map_ou_result(res):
+            res = str(res).strip()
+            if res == "" or res.lower() == "nan": return np.nan
+            if 'สูงได้เต็ม' in res or 'สูงได้ครึ่ง' in res: return 1
+            if 'ต่ำได้เต็ม' in res or 'ต่ำได้ครึ่ง' in res: return 0
+            return np.nan 
+
+        df['Target_HDP'] = df['ผล HDP'].apply(map_hdp_result)
+        df['Target_OU'] = df['ผลสูง/ต่ำ'].apply(map_ou_result)
         
-        # ข้อมูลสำหรับ "สอน AI" (เฉพาะแถวที่มีผล HDP แล้ว)
-        df_train = df.dropna(subset=['1X2 เหย้า', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 'โกลสูง/ต่ำ', 'Target_Home_Win']).copy()
-        
-        # ข้อมูลสำหรับ "ให้ AI ทำนาย" (เฉพาะแถวที่ 'ผล HDP' หรือ 'ผลสกอร์' ว่างเปล่า ยังไม่ลงผล)
-        # ตรวจสอบว่ามีคอลัมน์ 'ผลสกอร์' หรือไม่ ถ้าไม่มีให้เช็กจาก 'ผล HDP' อย่างเดียว
+        # ข้อมูลสำหรับ "ให้ AI ทำนาย" (เฉพาะแถวที่ยังไม่ลงผลสกอร์)
         if 'ผลสกอร์' in df.columns:
             df_predict = df[df['ผลสกอร์'].astype(str).str.strip().isin(["", "nan", "None"]) & df['ผล HDP'].astype(str).str.strip().isin(["", "nan", "None"])].copy()
         else:
             df_predict = df[df['ผล HDP'].astype(str).str.strip().isin(["", "nan", "None"])].copy()
 
+        df_train = df.dropna(subset=['1X2 เหย้า', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 'โกลสูง/ต่ำ', 'Target_HDP', 'Target_OU']).copy()
+
         if len(df_train) > 5 and len(df_predict) > 0:
-            features = ['1X2 เหย้า', '1X2 เสมอ', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 'โกลสูง/ต่ำ']
+            features = ['1X2 เหย้า', '1X2 เสมอ', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 'โกลสูง/ต่ำ', 'ค่าน้ำ (สูง)', 'ค่าน้ำ (ต่ำ)']
             X_train = df_train[features].fillna(0)
-            y_train = df_train['Target_Home_Win']
             
-            # เทรนโมเดล AI จากข้อมูลอดีต
-            model_ai = RandomForestClassifier(n_estimators=100, max_depth=6, random_state=42)
-            model_ai.fit(X_train, y_train)
+            # --- 1. โมเดลทำนาย แฮนดิแคป ---
+            model_hdp = RandomForestClassifier(n_estimators=100, max_depth=6, random_state=42)
+            model_hdp.fit(X_train, df_train['Target_HDP'])
+            
+            # --- 2. โมเดลทำนาย สูง-ต่ำ ---
+            model_ou = RandomForestClassifier(n_estimators=100, max_depth=6, random_state=42)
+            model_ou.fit(X_train, df_train['Target_OU'])
             
             # ทำนายผลเฉพาะคู่ที่ยังไม่แข่ง
             X_pred = df_predict[features].fillna(0)
-            df_predict['AI_โอกาสเหย้าชนะ(%)'] = (model_ai.predict_proba(X_pred)[:, 1] * 100).round(1)
             
-            def ai_decision(prob):
+            # คำนวณ % โอกาส
+            df_predict['AI_โอกาสเหย้าชนะHDP(%)'] = (model_hdp.predict_proba(X_pred)[:, 1] * 100).round(1)
+            df_predict['AI_โอกาสออกสูง(%)'] = (model_ou.predict_proba(X_pred)[:, 1] * 100).round(1)
+            
+            # ฟันธง HDP
+            def hdp_decision(prob):
                 if prob >= 58: return "⭐⭐⭐ ไม้หนัก (แทงเหย้า)"
                 elif prob >= 53: return "⭐⭐ ลงทุนเหย้า"
                 elif prob <= 42: return "❌ รองทีมเยือน VIP"
                 elif prob <= 47: return "🔻 รองทีมเยือน"
-                else: return "⚠️ ข้าม (50/50)"
+                else: return "⚠️ ข้าม (HDP)"
                 
-            df_predict['AI_ฟันธง'] = df_predict['AI_โอกาสเหย้าชนะ(%)'].apply(ai_decision)
+            # ฟันธง สูง-ต่ำ
+            def ou_decision(prob):
+                if prob >= 58: return "🔥 สูง (Over) มั่นใจสูง"
+                elif prob >= 53: return "📈 น่าแทงสูง"
+                elif prob <= 42: return "🛡️ ต่ำ (Under) มั่นใจสูง"
+                elif prob <= 47: return "📉 น่าแทงต่ำ"
+                else: return "⚠️ ข้าม (O/U)"
+
+            df_predict['AI_ฟันธง_HDP'] = df_predict['AI_โอกาสเหย้าชนะHDP(%)'].apply(hdp_decision)
+            df_predict['AI_ฟันธง_สูงต่ำ'] = df_predict['AI_โอกาสออกสูง(%)'].apply(ou_decision)
             
-            # แสดงเฉพาะคอลัมน์ที่ต้องการ
-            display_cols = [c for c in ['ทีมเหย้า', 'ทีมเยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 'AI_โอกาสเหย้าชนะ(%)', 'AI_ฟันธง'] if c in df_predict.columns]
+            # เลือกคอลัมน์ที่จะแสดงบนตาราง
+            display_cols = [c for c in ['ทีมเหย้า', 'ทีมเยือน', 'แฮนดิแคป (เหย้า)', 'AI_โอกาสเหย้าชนะHDP(%)', 'AI_ฟันธง_HDP', 'โกลสูง/ต่ำ', 'AI_โอกาสออกสูง(%)', 'AI_ฟันธง_สูงต่ำ'] if c in df_predict.columns]
             
             st.markdown(f"พบแมตช์ที่ยังไม่ลงผลสกอร์ทั้งหมด **{len(df_predict)} คู่**:")
             st.dataframe(df_predict[display_cols], use_container_width=True)
             
         elif len(df_train) <= 5:
-            st.info("ℹ️ ต้องการข้อมูลที่มีผลการแข่งขันในอดีตอย่างน้อย 5 แถวขึ้นไป เพื่อให้ AI ใช้เป็นฐานข้อมูลในการทำนาย")
+            st.info("ℹ️ ต้องการข้อมูลที่มีผลการแข่งขันในอดีต (ทั้ง HDP และ สูง-ต่ำ) อย่างน้อย 5 แถวขึ้นไป เพื่อให้ AI เริ่มประมวลผล")
         else:
-            st.success("🎉 ไม่มีคู่ค้างที่ยังไม่ลงผลสกอร์ ทุกคู่ใน Google Sheets ถูกบันทึกผลการแข่งขันครบเรียบร้อยแล้ว!")
+            st.success("🎉 ไม่มีคู่ค้างที่ยังไม่ลงผลสกอร์ ทุกคู่ใน Google Sheets บันทึกผลครบถ้วนแล้ว!")
     else:
-        st.warning("⚠️ ไม่พบคอลัมน์ 'ผล HDP' ใน Google Sheets สำหรับประมวลผล")
+        st.warning("⚠️ ไม่พบคอลัมน์ 'ผล HDP' หรือ 'ผลสูง/ต่ำ' ใน Google Sheets สำหรับเทรน AI")
 # ----------------------------------------
 # หัวข้อหลัก
 # ----------------------------------------
