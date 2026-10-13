@@ -6,6 +6,7 @@ import io
 import os
 import re
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 import gc
 import time
@@ -15,11 +16,12 @@ from math import isfinite
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 from html import escape as esc
+from sklearn.ensemble import RandomForestClassifier
 
 # ----------------------------------------
 # ตั้งค่าหน้าเว็บ
 # ----------------------------------------
-st.set_page_config(page_title="ระบบวิเคราะห์ราคาบอล VIP", page_icon="⚽", layout="wide")
+st.set_page_config(page_title="ระบบวิเคราะห์ราคาบอล VIP & AI", page_icon="⚽", layout="wide")
 
 # ----------------------------------------
 # THEME : Black & Emerald
@@ -176,7 +178,6 @@ def _has_gspread_secret():
 
 @st.cache_resource
 def init_gspread():
-    """ถ้าล้มเหลวให้ปล่อย exception เพื่อไม่ให้ Streamlit แคชผลลัพธ์ที่ผิดพลาดไว้"""
     if _has_gspread_secret():
         client = gspread.service_account_from_dict(dict(st.secrets["gspread"]))
     else:
@@ -209,7 +210,6 @@ FMT_CHOICES = {
 }
 
 def to_malay(x, fmt):
-    """แปลงค่าน้ำจากรูปแบบ fmt เป็น Malay odds (ผ่านค่ากลางแบบ HK)"""
     x = float(x)
     if fmt == "MY":
         return round(x, 2)
@@ -222,7 +222,6 @@ def to_malay(x, fmt):
     return round(hk, 2) if hk <= 1 else round(-1 / hk, 2)
 
 def guess_format(nums):
-    """ใช้เมื่อ AI ไม่แน่ใจ: ทุกค่า > 1 = Decimal, มีค่าลบเกิน -1 = Indo, นอกนั้น = Malay"""
     if nums and all(v > 1 for v in nums):
         return "EU"
     if any(v < -1 for v in nums):
@@ -230,7 +229,6 @@ def guess_format(nums):
     return "MY"
 
 def parse_cell(v):
-    """แปลงข้อความเป็นตัวเลข (ตัด o/u นำหน้า) ถ้าแปลงไม่ได้คืนเป็นข้อความเดิม"""
     cleaned = re.sub(r'^[oOuU\s]+', '', str(v).strip().replace('−', '-'))
     try:
         return float(cleaned) if '.' in cleaned else int(cleaned)
@@ -241,15 +239,13 @@ def clean_raw_data(raw_text):
     text = raw_text.replace('`', '').replace('\n', ' ').strip()
     raw_data = [item.strip().replace('−', '-') for item in text.split(',')]
     if not 12 <= len(raw_data) <= 13:
-        raise ValueError(f"AI คืนค่ามา {len(raw_data)} ช่อง (ต้องเป็น 12-13 ช่อง) "
-                         "อาจมีเครื่องหมายจุลภาคปนในชื่อทีม กรุณาอ่านภาพใหม่อีกครั้ง")
+        raise ValueError(f"AI คืนค่ามา {len(raw_data)} ช่อง (ต้องเป็น 12-13 ช่อง) อาจมีเครื่องหมายจุลภาคปนในชื่อทีม กรุณาอ่านภาพใหม่อีกครั้ง")
     m = re.search(r'\b(MY|HK|ID|EU)\b', raw_data[12].upper()) if len(raw_data) > 12 else None
     ai_fmt = m.group(1) if m else "UNK"
     row_data = raw_data[:2] + [parse_cell(x) for x in raw_data[2:12]]
     return row_data, ai_fmt
 
 def convert_water_to_malay(row, user_fmt, ai_fmt):
-    """แปลงค่าน้ำทั้ง 4 ช่องเป็น Malay -> คืน (แถวใหม่, ข้อความแจ้งผล, ข้อความเตือน)"""
     new_row = list(row)
     idx = [i for i in WATER_IDX if i < len(new_row) and isinstance(new_row[i], (int, float))]
     if not idx:
@@ -279,14 +275,12 @@ def convert_water_to_malay(row, user_fmt, ai_fmt):
         warn = "⚠️ AI ไม่แน่ใจรูปแบบราคา ระบบจึงเดาให้ ควรเช็กค่าน้ำที่บันทึกอีกครั้ง"
     return new_row, note, warn
 
-# Form5: six fields only. Rates in the form are percentages (0 to 100).
 FORM5_HEADERS = [
     "H_WinRate_Last5", "H_GoalsFor_Last5", "H_GoalsAgainst_Last5",
     "A_WinRate_Last5", "A_GoalsFor_Last5", "A_GoalsAgainst_Last5",
 ]
 
 def validate_form5(values):
-    """Validate six raw inputs; return rates as fractions and goals as integers."""
     if len(values) != 6 or any(v is None or v == "" or isinstance(v, bool) for v in values):
         raise ValueError('กรุณากรอกข้อมูลให้ครบ 6 ช่อง; ช่องว่างไม่ใช่ 0')
     try:
@@ -305,11 +299,6 @@ def validate_form5(values):
             nums[3] / 100, int(nums[4]), int(nums[5])]
 
 def save_row_to_sheet(ws, row, form5):
-    """Preserve the original team-pair upsert; write only A:L and X:AC.
-
-    Headers, optional grid expansion, values and percentage formatting are one
-    Sheets batch. M:W and AD onwards are never included in a write request.
-    """
     normalized = validate_form5(form5)
     if len(row) != 12:
         raise ValueError("Price data must have exactly 12 cells (A:L).")
@@ -320,7 +309,7 @@ def save_row_to_sheet(ws, row, form5):
     if not new_home or not new_away:
         raise ValueError("Both team names are required.")
     target_row = None
-    for i in range(1, len(col_a)):  # Do not match the header.
+    for i in range(1, len(col_a)):
         away = str(col_b[i]).strip() if i < len(col_b) else ""
         if str(col_a[i]).strip() == new_home and away == new_away:
             target_row = i + 1
@@ -334,7 +323,6 @@ def save_row_to_sheet(ws, row, form5):
     for i, (old, expected) in enumerate(zip(headers, FORM5_HEADERS)):
         if str(old).strip() not in ("", expected):
             raise ValueError(f"X:AC header conflict (column {24+i}): {old!r}; expected {expected!r}. Nothing saved.")
-    # Do not adopt populated unnamed columns from an unrelated worksheet.
     unnamed = [i for i, h in enumerate(headers) if not str(h).strip()]
     if unnamed and ws.col_count >= 24:
         last_col = min(ws.col_count, 29)
@@ -377,7 +365,6 @@ def save_row_to_sheet(ws, row, form5):
     return target_row, overwritten
 
 def wait_for_result(ws, target_row, tries=10):
-    """รอให้ชีตคำนวณคำแนะนำ (คอลัมน์ P) เสร็จ แทนการ sleep ตายตัว"""
     time.sleep(2)
     for _ in range(tries):
         r = ws.row_values(target_row)
@@ -386,8 +373,6 @@ def wait_for_result(ws, target_row, tries=10):
         time.sleep(1)
     return ws.row_values(target_row)
 
-# "current" = สูตรเดิม: ชนะครึ่งนับ 0.5 แต้ม แต่ยังนับเป็น 1 เกมในตัวหาร (ไม่นับเจ๊า)
-# "symmetric" = ครึ่งชนะ/ครึ่งแพ้ นับ 0.5 เท่ากันทั้งสองฝั่ง: ชนะ / (ชนะ + แพ้)
 WIN_RATE_MODE = "current"
 
 def calc_win_stats(df_comp):
@@ -427,16 +412,15 @@ def get_money_management(rec_text, conf_text):
         return "⭐ 0.5 Unit (รอเก็บสถิติ ⏳)", rec_text
 
 # ----------------------------------------
-# ระบบงานเบื้องหลัง: อ่านภาพ + บันทึกชีตบนเซิร์ฟเวอร์ ไม่ผูกกับหน้าเว็บ
+# ระบบงานเบื้องหลัง: อ่านภาพ + บันทึกชีตบนเซิร์ฟเวอร์
 # ----------------------------------------
 EXTRACT_PROMPT = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ (ระบุเฉพาะตัวเลข ห้ามมีตัวอักษร o หรือ u นำหน้า),ค่าน้ำสูง,ค่าน้ำต่ำ,รหัสรูปแบบราคาน้ำ (ตอบรหัสเดียว: MY=มาเลเซีย มีทั้งบวกและลบ, HK=ฮ่องกง, ID=อินโดนีเซีย, EU=Decimal เช่น 1.90, UNK=ไม่แน่ใจ) ค่าน้ำทุกค่าให้คัดลอกตามที่เห็นในภาพทุกประการรวมเครื่องหมายลบ ห้ามแปลงค่าเอง โดยคั่นแต่ละค่าด้วยลูกน้ำ (,) เท่านั้น ห้ามมีข้อความอื่น"
 
 class JobManager:
-    """เก็บสถานะงานไว้บนเซิร์ฟเวอร์ (แชร์ข้ามทุก session) เพื่อให้งานเดินต่อแม้ปิดหน้า/สลับแอป"""
     def __init__(self):
         self.jobs = {}
-        self.lock = threading.Lock()        # ป้องกันการแก้ dict พร้อมกัน
-        self.sheet_lock = threading.Lock()  # บันทึกชีตทีละงาน กันแย่งแถวเดียวกัน
+        self.lock = threading.Lock()
+        self.sheet_lock = threading.Lock()
         self.pool = ThreadPoolExecutor(max_workers=3)
         self.data_version = 0
 
@@ -447,7 +431,7 @@ class JobManager:
                                  "created": time.time(), "finished": None, "img": img_bytes,
                                  "user_fmt": user_fmt, "result": None, "note": None, "warn": None,
                                  "owner_id": owner_id, "row_data": None, "form5": None}
-            if len(self.jobs) > 40:  # ลบงานที่จบแล้วเก่าสุด
+            if len(self.jobs) > 40:
                 done = sorted((j for j in self.jobs.values() if j["status"] in ("done", "error")),
                               key=lambda j: j["created"])
                 for j in done[:len(self.jobs) - 40]:
@@ -486,7 +470,6 @@ if "form5_owner_id" not in st.session_state:
     st.session_state["form5_owner_id"] = uuid.uuid4().hex
 
 def validate_row(row):
-    """ตรวจเฉพาะข้อผิดพลาดร้ายแรงที่ทำให้สถิติเพี้ยน -> คืนเหตุผล หรือ None ถ้าบันทึกได้"""
     if len(row) < 12:
         return "ข้อมูลไม่ครบ 12 ช่อง"
     if not str(row[0]).strip() or not str(row[1]).strip():
@@ -509,7 +492,7 @@ def extract_row(img_bytes, user_fmt, model):
     data = buf.getvalue()
 
     last_err = None
-    for attempt in range(3):  # AI อาจตอบเพี้ยนบางครั้ง ลองใหม่อัตโนมัติ
+    for attempt in range(3):
         try:
             resp = model.generate_content([{"mime_type": "image/jpeg", "data": data}, EXTRACT_PROMPT])
             row, ai_fmt = clean_raw_data(resp.text.strip())
@@ -520,7 +503,6 @@ def extract_row(img_bytes, user_fmt, model):
     raise RuntimeError(f"อ่านภาพไม่สำเร็จหลังลอง 3 ครั้ง: {last_err}")
 
 def process_job(job_id, workbook, model):
-    """รันใน thread เบื้องหลัง: ห้ามเรียกคำสั่ง st.* ในฟังก์ชันนี้"""
     try:
         job = JOBS.get(job_id)
         if not workbook:
@@ -544,7 +526,6 @@ def process_job(job_id, workbook, model):
         gc.collect()
 
 def save_confirmed_job(job_id, workbook):
-    """Write only after the user submits the six-field form. No st.* in threads."""
     job = JOBS.get(job_id)
     if not job or job["status"] != "saving":
         return
@@ -559,7 +540,6 @@ def save_confirmed_job(job_id, workbook):
         JOBS.update(job_id, status="error", msg=f"Save not confirmed: {exc}. Check the sheet before retrying.", finished=time.time())
         return
 
-    # A failed result read must not imply the successful write failed.
     JOBS.bump_version()
     warn = job.get("warn")
     try:
@@ -576,9 +556,7 @@ def save_confirmed_job(job_id, workbook):
                         "confidence": confidence, "radar": radar,
                         "row": target_row, "overwritten": overwritten})
 
-
 def submit_form5(job_id, values, owner_id):
-    """Claim a draft exactly once within this app process, then schedule its save."""
     validate_form5(values)
     with JOBS.lock:
         job = JOBS.jobs.get(job_id)
@@ -593,7 +571,6 @@ def submit_form5(job_id, values, owner_id):
     except RuntimeError:
         JOBS.update(job_id, status="ready", msg="Could not start saving. Please submit again.")
         raise
-
 
 def submit_job(name, img_bytes, user_fmt):
     job_id = JOBS.create(name, img_bytes, user_fmt, st.session_state["form5_owner_id"])
@@ -661,7 +638,6 @@ def render_form5_editor():
     row = job["row_data"]
     st.subheader('กรอกฟอร์ม 5 นัด')
     st.caption('Win rate: ชนะ 3 จาก 5 นัด กรอก 60; ประตูกรอกเป็นยอดรวม ไม่ใช่ค่าเฉลี่ย')
-    # Only the six requested fields are editable. No date/league/source fields.
     with st.form(f"form5_{job_id}", clear_on_submit=False):
         left, right = st.columns(2)
         with left:
@@ -693,17 +669,13 @@ def render_form5_editor():
         except (ValueError, RuntimeError) as exc:
             st.error(str(exc))
 
-
 if hasattr(st, "fragment"):
-    render_jobs_live = st.fragment(run_every=2)(render_jobs)  # รีเฟรชสถานะเองทุก 2 วินาที
+    render_jobs_live = st.fragment(run_every=2)(render_jobs)
 else:
     def render_jobs_live():
         st.button("🔄 อัปเดตสถานะ", key="refresh_jobs")
         render_jobs()
 
-# ----------------------------------------
-# Helper สำหรับกราฟ
-# ----------------------------------------
 def base_layout(fig, height=380):
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
@@ -713,14 +685,9 @@ def base_layout(fig, height=380):
     )
     return fig
 
-# ----------------------------------------
-# ประวัติอัตราชนะรายกฎ (ใช้ทำลูกศรขึ้น/ลง)
-# ----------------------------------------
 HIST_SHEET = "ประวัติสถิติ"
 
 def update_rate_history(workbook, rates):
-    """บันทึกอัตราชนะของแต่ละกฎลงชีต 'ประวัติสถิติ' เมื่อค่าเปลี่ยน
-    คืน ({กฎ: [(เวลา, ค่า), ...]}, ข้อความ error หรือ None)"""
     stamp = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M")
     try:
         try:
@@ -763,9 +730,8 @@ def trend_delta(h):
     return h[-1][1] - h[-2][1] if len(h) >= 2 else None
 
 def trend_html(h):
-    """ป้ายลูกศรบนการ์ด: ▲ เพิ่มขึ้น / ▼ ลดลง เทียบกับค่าก่อนหน้า"""
     if not h:
-        return ""
+        return "<div class='trend-box'><span class='trend flat'>● เริ่มติดตาม</span></div>"
     d = trend_delta(h)
     if d is None:
         return "<div class='trend-box'><span class='trend flat'>● เริ่มติดตาม</span></div>"
@@ -780,12 +746,61 @@ def panel_header(title, sub):
     st.markdown(f"<p class='panel-title'>{title}</p><p class='panel-sub'>{sub}</p>", unsafe_allow_html=True)
 
 # ----------------------------------------
+# ฟังก์ชันส่วนเสริม: AI Machine Learning Predictions
+# ----------------------------------------
+def render_ai_prediction_section(df):
+    st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
+    panel_header("🤖 AI Machine Learning Predictions", "ระบบวิเคราะห์ความน่าจะเป็นและฟันธงผลการแข่งขันจากสถิติใน Google Sheets (สดๆ)")
+    
+    numeric_cols = ['1X2 เหย้า', '1X2 เสมอ', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 'โกลสูง/ต่ำ']
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+    if 'ผล HDP' in df.columns:
+        def map_result(res):
+            res = str(res)
+            if 'เจ้าบ้านได้เต็ม' in res or 'เจ้าบ้านได้ครึ่ง' in res: return 1
+            if 'เจ้าบ้านเสียเต็ม' in res or 'เจ้าบ้านเสียครึ่ง' in res: return 0
+            return np.nan 
+
+        df['Target_Home_Win'] = df['ผล HDP'].apply(map_result)
+        df_train = df.dropna(subset=['1X2 เหย้า', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 'โกลสูง/ต่ำ', 'Target_Home_Win']).copy()
+        
+        if len(df_train) > 5:
+            features = ['1X2 เหย้า', '1X2 เสมอ', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 'โกลสูง/ต่ำ']
+            X_train = df_train[features].fillna(0)
+            y_train = df_train['Target_Home_Win']
+            
+            model_ai = RandomForestClassifier(n_estimators=100, max_depth=6, random_state=42)
+            model_ai.fit(X_train, y_train)
+            
+            X_all = df[features].fillna(0)
+            df['AI_โอกาสเหย้าชนะ(%)'] = (model_ai.predict_proba(X_all)[:, 1] * 100).round(1)
+            
+            def ai_decision(prob):
+                if prob >= 58: return "⭐⭐⭐ ไม้หนัก (แทงเหย้า)"
+                elif prob >= 53: return "⭐⭐ ลงทุนเหย้า"
+                elif prob <= 42: return "❌ รองทีมเยือน VIP"
+                elif prob <= 47: return "🔻 รองทีมเยือน"
+                else: return "⚠️ ข้าม (50/50)"
+                
+            df['AI_ฟันธง'] = df['AI_โอกาสเหย้าชนะ(%)'].apply(ai_decision)
+            
+            display_cols = [c for c in ['ทีมเหย้า', 'ทีมเยือน', 'แฮนดิแคป (เหย้า)', 'AI_โอกาสเหย้าชนะ(%)', 'AI_ฟันธง'] if c in df.columns]
+            st.dataframe(df[display_cols], use_container_width=True)
+        else:
+            st.info("ℹ️ ต้องการข้อมูลที่มีผลการแข่งขัน (ผล HDP) อย่างน้อย 5 แถวขึ้นไป เพื่อให้ AI เริ่มประมวลผลความน่าจะเป็น")
+    else:
+        st.warning("⚠️ ไม่พบคอลัมน์ 'ผล HDP' ใน Google Sheets สำหรับเทรน AI")
+
+# ----------------------------------------
 # หัวข้อหลัก
 # ----------------------------------------
-st.markdown("<h1 class='page-title'>⚽ ระบบวิเคราะห์ราคาบอล VIP</h1>", unsafe_allow_html=True)
-st.markdown("<p class='page-sub'>สกัดราคาจากภาพ วิเคราะห์ และติดตามผลงานในที่เดียว</p>", unsafe_allow_html=True)
+st.markdown("<h1 class='page-title'>⚽ ระบบวิเคราะห์ราคาบอล VIP & AI</h1>", unsafe_allow_html=True)
+st.markdown("<p class='page-sub'>สกัดราคาจากภาพ วิเคราะห์ ติดตามผล และพยากรณ์ด้วย Machine Learning ในที่เดียว</p>", unsafe_allow_html=True)
 
-tab1, tab2 = st.tabs(["📸 อัปโหลดราคาบอล", "📊 Dashboard"])
+tab1, tab2 = st.tabs(["📸 อัปโหลดราคาบอล", "📊 Dashboard & AI"])
 
 # ----------------------------------------
 # TAB 1
@@ -800,21 +815,21 @@ with tab1:
 
     up_n = st.session_state.get("up_n", 0)
     uploaded_files = st.file_uploader("เลือกไฟล์รูปภาพตารางราคาบอล", type=['png', 'jpg', 'jpeg'],
-                                      accept_multiple_files=True, key=f"uploader_{up_n}")
+                                     accept_multiple_files=True, key=f"uploader_{up_n}")
     if uploaded_files:
         if not workbook:
             st.error("ไม่สามารถเชื่อมต่อ Google Sheets ได้")
         else:
             for f in uploaded_files:
                 submit_job(f.name, f.getvalue(), FMT_CHOICES[fmt_choice])
-            st.session_state["up_n"] = up_n + 1  # เคลียร์ช่องอัปโหลดให้พร้อมรับรูปถัดไป
+            st.session_state["up_n"] = up_n + 1
             st.rerun()
 
     render_jobs_live()
     render_form5_editor()
 
 # ----------------------------------------
-# TAB 2 : Dashboard
+# TAB 2 : Dashboard & AI
 # ----------------------------------------
 with tab2:
     if not workbook:
@@ -964,7 +979,8 @@ with tab2:
             else:
                 st.warning("ไม่พบข้อมูลสถิติในตาราง")
 
+            # --- 5. เพิ่มการเรียกใช้งาน AI Machine Learning Predictions ตรงนี้ ---
+            render_ai_prediction_section(df)
+
         except Exception as e:
             st.error(f"เกิดข้อผิดพลาดในการโหลดข้อมูลสถิติ: {str(e)}")
-
-# End of app.py - original app with six Form5 inputs.
