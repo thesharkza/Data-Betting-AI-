@@ -5,3 +5,7 @@ pillow
 requests
 pandas
 plotly
+numpy
+scikit-learn
+gspread
+oauth2client
