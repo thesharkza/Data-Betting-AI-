@@ -157,7 +157,49 @@ p, label, span { color: inherit; }
 .result-val { color: #e6f2ea; font-weight: 500; }
 .result-val.hl { color: #4ade80; }
 
-@media (max-width: 900px) { .kpi-wrap { grid-template-columns: 1fr; } }
+/* AI Predictions */
+.pred-summary { display: flex; flex-wrap: wrap; gap: 10px; margin: 4px 0 18px 0; }
+.pred-chip { background: #0c130f; border: 1px solid #1b2a22; border-radius: 999px; padding: 6px 14px; font-size: 0.85rem; color: #a7c4b5; }
+.pred-chip b { color: #e6f2ea; font-weight: 600; margin-left: 6px; }
+.pred-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 16px; }
+.pred-card {
+    background: linear-gradient(180deg, #0e1712 0%, #0c130f 100%);
+    border: 1px solid #1b2a22; border-radius: 18px; padding: 20px 22px;
+    transition: border-color .2s ease, box-shadow .2s ease;
+}
+.pred-card:hover { border-color: #1f6b3d; box-shadow: 0 0 30px -14px rgba(34,197,94,0.45); }
+.pred-teams { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.pred-team { flex: 1; font-weight: 600; color: #e6f2ea; font-size: 1.02rem; line-height: 1.3; }
+.pred-team.away { text-align: right; }
+.pred-vs { font-size: 0.72rem; color: #7f9a8b; border: 1px solid #1b2a22; border-radius: 999px; padding: 2px 10px; }
+.pred-sections { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.pred-box { background: #09100c; border: 1px solid #14211a; border-radius: 14px; padding: 14px 16px; }
+.pred-box-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.pred-kind { color: #7f9a8b; font-size: 0.78rem; letter-spacing: 0.04em; }
+.pred-line { color: #cfe3d6; font-size: 0.85rem; font-weight: 500; }
+.pred-pct { font-size: 2rem; font-weight: 600; line-height: 1.1; margin: 8px 0 10px 0; }
+.pred-pct small { font-size: 0.9rem; font-weight: 400; color: #7f9a8b; margin-left: 2px; }
+.pred-track { position: relative; height: 6px; background: #17241d; border-radius: 6px; }
+.pred-fill { height: 100%; border-radius: 6px; }
+.pred-mid { position: absolute; left: 50%; top: -3px; width: 1px; height: 12px; background: #3a5547; }
+.pred-verdict { margin-top: 14px; font-size: 0.82rem; padding: 5px 11px; border-radius: 10px; display: inline-block; font-weight: 500; }
+.tone-gs { color: #4ade80; } .tone-gf { color: #86efac; } .tone-cs { color: #67e8f9; } .tone-cf { color: #a5f3fc; } .tone-skip { color: #7f9a8b; }
+.fill-gs { background: linear-gradient(90deg, #16a34a, #4ade80); }
+.fill-gf { background: linear-gradient(90deg, #15803d, #86efac); }
+.fill-cs { background: linear-gradient(90deg, #0e7490, #67e8f9); }
+.fill-cf { background: linear-gradient(90deg, #155e75, #a5f3fc); }
+.fill-skip { background: #4b5f54; }
+.bg-gs { background: rgba(34,197,94,0.16); color: #4ade80; }
+.bg-gf { background: rgba(34,197,94,0.09); color: #86efac; }
+.bg-cs { background: rgba(34,211,238,0.15); color: #67e8f9; }
+.bg-cf { background: rgba(34,211,238,0.09); color: #a5f3fc; }
+.bg-skip { background: rgba(127,154,139,0.12); color: #7f9a8b; }
+
+@media (max-width: 900px) {
+    .kpi-wrap { grid-template-columns: 1fr; }
+    .pred-grid { grid-template-columns: 1fr; }
+    .pred-sections { grid-template-columns: 1fr; }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -746,6 +788,64 @@ def panel_header(title, sub):
     st.markdown(f"<p class='panel-title'>{title}</p><p class='panel-sub'>{sub}</p>", unsafe_allow_html=True)
 
 # ----------------------------------------
+# ฟังก์ชันแสดงผลการ์ดทำนาย (UI เท่านั้น ไม่มี logic การทำนาย)
+# ----------------------------------------
+def _pred_tone(text, kind):
+    t = str(text)
+    if "ข้าม" in t:
+        return "skip"
+    if kind == "hdp":
+        return ("cs" if "VIP" in t else "cf") if "รอง" in t else ("gs" if "ไม้หนัก" in t else "gf")
+    strong = "มั่นใจสูง" in t
+    if "ต่ำ" in t:
+        return "cs" if strong else "cf"
+    return "gs" if strong else "gf"
+
+def render_prediction_cards(df_pred):
+    def fnum(v, signed=False):
+        try:
+            x = float(v)
+        except (TypeError, ValueError):
+            return "-"
+        if pd.isna(x):
+            return "-"
+        return f"{x:+g}" if signed else f"{x:g}"
+
+    def box(kind_label, line_txt, prob, verdict, kind):
+        tone = _pred_tone(verdict, kind)
+        return (f"<div class='pred-box'>"
+                f"<div class='pred-box-head'><span class='pred-kind'>{kind_label}</span>"
+                f"<span class='pred-line'>{esc(line_txt)}</span></div>"
+                f"<div class='pred-pct tone-{tone}'>{prob:g}<small>%</small></div>"
+                f"<div class='pred-track'><div class='pred-fill fill-{tone}' style='width:{max(0, min(prob, 100))}%'></div>"
+                f"<div class='pred-mid'></div></div>"
+                f"<span class='pred-verdict bg-{tone}'>{esc(str(verdict))}</span>"
+                f"</div>")
+
+    n_hdp = sum(1 for v in df_pred['AI_ฟันธง_HDP'] if _pred_tone(v, "hdp") != "skip")
+    n_ou = sum(1 for v in df_pred['AI_ฟันธง_สูงต่ำ'] if _pred_tone(v, "ou") != "skip")
+    html = [f"<div class='pred-summary'>"
+            f"<span class='pred-chip'>แมตช์รอทำนาย<b>{len(df_pred)}</b></span>"
+            f"<span class='pred-chip'>สัญญาณ HDP<b>{n_hdp}</b></span>"
+            f"<span class='pred-chip'>สัญญาณสูง-ต่ำ<b>{n_ou}</b></span></div>",
+            "<div class='pred-grid'>"]
+    for _, r in df_pred.iterrows():
+        home = esc(str(r.get('ทีมเหย้า', '-')))
+        away = esc(str(r.get('ทีมเยือน', '-')))
+        html.append(
+            "<div class='pred-card'>"
+            f"<div class='pred-teams'><span class='pred-team'>{home}</span>"
+            f"<span class='pred-vs'>VS</span><span class='pred-team away'>{away}</span></div>"
+            "<div class='pred-sections'>"
+            + box("HANDICAP", f"เหย้า {fnum(r.get('แฮนดิแคป (เหย้า)'), True)}",
+                  r['AI_โอกาสเหย้าชนะHDP(%)'], r['AI_ฟันธง_HDP'], "hdp")
+            + box("OVER / UNDER", f"ไลน์ {fnum(r.get('โกลสูง/ต่ำ'))}",
+                  r['AI_โอกาสออกสูง(%)'], r['AI_ฟันธง_สูงต่ำ'], "ou")
+            + "</div></div>")
+    html.append("</div>")
+    return "".join(html)
+
+# ----------------------------------------
 # ฟังก์ชันส่วนเสริม: AI Machine Learning Predictions (ทายทั้งแฮนดิแคป และ สกอร์สูง-ต่ำ)
 # ----------------------------------------
 def render_ai_prediction_section(df):
@@ -829,7 +929,7 @@ def render_ai_prediction_section(df):
             display_cols = [c for c in ['ทีมเหย้า', 'ทีมเยือน', 'แฮนดิแคป (เหย้า)', 'AI_โอกาสเหย้าชนะHDP(%)', 'AI_ฟันธง_HDP', 'โกลสูง/ต่ำ', 'AI_โอกาสออกสูง(%)', 'AI_ฟันธง_สูงต่ำ'] if c in df_predict.columns]
             
             st.markdown(f"พบแมตช์ที่ยังไม่ลงผลสกอร์ทั้งหมด **{len(df_predict)} คู่**:")
-            st.dataframe(df_predict[display_cols], use_container_width=True)
+            st.markdown(render_prediction_cards(df_predict), unsafe_allow_html=True)
             
         elif len(df_train) <= 5:
             st.info("ℹ️ ต้องการข้อมูลที่มีผลการแข่งขันในอดีต (ทั้ง HDP และ สูง-ต่ำ) อย่างน้อย 5 แถวขึ้นไป เพื่อให้ AI เริ่มประมวลผล")
