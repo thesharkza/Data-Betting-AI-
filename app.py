@@ -780,8 +780,8 @@ ML_CSS = """
 .dv-lbl { font-size: 0.82rem; color: #7f9a8b; white-space: nowrap; }
 .dv-lbl.l { text-align: right; }
 .dv-lbl b { font-size: 1.05rem; font-weight: 600; margin-left: 4px; }
-.dv-lbl.lead.r b { color: #4ade80; }
-.dv-lbl.lead.l b { color: #7cc4f2; }
+.dv-lbl.lead.g b { color: #4ade80; }
+.dv-lbl.lead.b b { color: #7cc4f2; }
 .dv-lbl:not(.lead) b { color: #a7c4b5; }
 .dv-track { position: relative; height: 10px; background: #17241d; border-radius: 6px; overflow: hidden; }
 .dv-band { position: absolute; top: 0; bottom: 0; left: 44%; width: 12%; background: #0b110e; }
@@ -789,6 +789,8 @@ ML_CSS = """
 .dv-fill { position: absolute; top: 0; bottom: 0; z-index: 1; }
 .dv-fill.r { background: linear-gradient(90deg, #16a34a, #4ade80); border-radius: 0 6px 6px 0; }
 .dv-fill.l { background: linear-gradient(270deg, #2f7fbf, #7cc4f2); border-radius: 6px 0 0 6px; }
+.dv-fill.gl { background: linear-gradient(270deg, #16a34a, #4ade80); border-radius: 6px 0 0 6px; }
+.dv-fill.br { background: linear-gradient(90deg, #2f7fbf, #7cc4f2); border-radius: 0 6px 6px 0; }
 
 @media (max-width: 480px) {
     .ml-grid { grid-template-columns: 1fr; }
@@ -834,26 +836,35 @@ def ou_decision(prob):
     return "ข้าม", "skip", "r"
 
 
-def _diverging_row(market, line_txt, prob, decision, left_name, right_name):
+def _diverging_row(market, line_txt, prob, decision, left_name, right_name, green_left=False):
+    """prob = โอกาสของฝั่งสีเขียว (เหย้า / สูง)
+    green_left=True  -> ฝั่งเขียวอยู่ซ้าย (ใช้กับ HDP: เหย้าซ้าย เยือนขวา)
+    green_left=False -> ฝั่งเขียวอยู่ขวา (ใช้กับ สูง-ต่ำ: ต่ำซ้าย สูงขวา)"""
     text, level, side = decision
-    p_right = round(prob, 1)
-    p_left = round(100 - prob, 1)
+    p_green, p_blue = round(prob, 1), round(100 - prob, 1)
     w = min(abs(prob - 50) * 2, 50)           # เต็มครึ่งแถบ = เอนเอียง 25 จุด
     if prob >= 50:
-        fill = f"<span class='dv-fill r' style='left:50%;width:{w:.1f}%'></span>"
+        cls, start = ("gl", 50 - w) if green_left else ("r", 50)
     else:
-        fill = f"<span class='dv-fill l' style='left:{50 - w:.1f}%;width:{w:.1f}%'></span>"
-    lead_l = "lead" if prob < 50 else ""
-    lead_r = "lead" if prob >= 50 else ""
+        cls, start = ("br", 50) if green_left else ("l", 50 - w)
+    fill = f"<span class='dv-fill {cls}' style='left:{start:.1f}%;width:{w:.1f}%'></span>"
+    lead_g = "lead" if prob >= 50 else ""
+    lead_b = "lead" if prob < 50 else ""
+    if green_left:
+        left_html = f"<div class='dv-lbl l g {lead_g}'>{esc(left_name)}<b>{p_green:g}%</b></div>"
+        right_html = f"<div class='dv-lbl r b {lead_b}'><b>{p_blue:g}%</b>{esc(right_name)}</div>"
+    else:
+        left_html = f"<div class='dv-lbl l b {lead_b}'>{esc(left_name)}<b>{p_blue:g}%</b></div>"
+        right_html = f"<div class='dv-lbl r g {lead_g}'><b>{p_green:g}%</b>{esc(right_name)}</div>"
     pill_cls = "skip" if level == "skip" else f"{side} {level}"
     return (
         "<div class='ml-row'>"
         f"<div class='ml-row-top'><span class='ml-mkt'>{esc(market)}<b>{esc(line_txt)}</b></span>"
         f"<span class='ml-pill {pill_cls}'>{esc(text)}</span></div>"
         "<div class='dv'>"
-        f"<div class='dv-lbl l {lead_l}'>{esc(left_name)}<b>{p_left:g}%</b></div>"
+        f"{left_html}"
         f"<div class='dv-track'><span class='dv-band'></span>{fill}<span class='dv-mid'></span></div>"
-        f"<div class='dv-lbl r {lead_r}'><b>{p_right:g}%</b>{esc(right_name)}</div>"
+        f"{right_html}"
         "</div></div>"
     )
 
@@ -991,8 +1002,8 @@ def render_ai_prediction_section(df):
         cards.append(
             f"<div class='ml-card {x['tier']}'>"
             f"<div class='ml-teams'>{esc(x['home'])}<span class='vs'> vs </span>{esc(x['away'])}</div>"
-            + _diverging_row("แฮนดิแคป เหย้า ", x["hdp_line"], x["p_hdp"], x["d_hdp"], "เยือน ", " เหย้า")
-            + _diverging_row("สูง-ต่ำ ", x["ou_line"], x["p_ou"], x["d_ou"], "ต่ำ ", " สูง")
+            + _diverging_row("แฮนดิแคป เหย้า ", x["hdp_line"], x["p_hdp"], x["d_hdp"], "เหย้า ", " เยือน", green_left=True)
+            + _diverging_row("สูง-ต่ำ ", x["ou_line"], x["p_ou"], x["d_ou"], "ต่ำ ", " สูง", green_left=False)
             + "</div>")
     cards.append("</div>")
     st.markdown("".join(cards), unsafe_allow_html=True)
