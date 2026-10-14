@@ -473,13 +473,15 @@ with tab2:
         df = load_dashboard_data(workbook, JOBS.data_version)
         
         # 1. Clean Numeric Cols
-        numeric_cols = ['1X2 เหย้า', '1X2 เสมอ', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 'โกลสูง/ต่ำ', 'ค่าน้ำ (สูง)', 'ค่าน้ำ (ต่ำ)',
-                        'H_WinRate_Last5', 'H_GoalsFor_Last5', 'H_GoalsAgainst_Last5', 'A_WinRate_Last5', 'A_GoalsFor_Last5', 'A_GoalsAgainst_Last5']
+        numeric_cols_raw = ['1X2 เหย้า', '1X2 เสมอ', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 'โกลสูง/ต่ำ', 'ค่าน้ำ (สูง)', 'ค่าน้ำ (ต่ำ)',
+                            'H_WinRate_Last5', 'H_GoalsFor_Last5', 'H_GoalsAgainst_Last5', 'A_WinRate_Last5', 'A_GoalsFor_Last5', 'A_GoalsAgainst_Last5']
+        
+        # กรองเฉพาะคอลัมน์ที่มีอยู่จริงในชีต (ป้องกัน KeyError)
+        numeric_cols = [c for c in numeric_cols_raw if c in df.columns]
         
         for col in numeric_cols:
-            if col in df.columns:
-                if df[col].dtype == object: df[col] = df[col].astype(str).str.replace('%', '').str.strip()
-                df[col] = pd.to_numeric(df[col], errors='coerce')
+            if df[col].dtype == object: df[col] = df[col].astype(str).str.replace('%', '').str.strip()
+            df[col] = pd.to_numeric(df[col], errors='coerce')
 
         # 2. Feature Engineering
         if all(c in df.columns for c in ['H_GoalsFor_Last5', 'A_GoalsAgainst_Last5', 'A_GoalsFor_Last5', 'H_GoalsAgainst_Last5', 'โกลสูง/ต่ำ']):
@@ -525,7 +527,7 @@ with tab2:
                 if len(df_train) > 5:
                     features = numeric_cols.copy()
                     new_ou_features = ['Expected_Total_Goals', 'OU_Goal_Diff', 'Total_Goals_Conceded_Last5']
-                    if all(c in df.columns for c in new_ou_features): features.extend(new_ou_features)
+                    if all(c in df_train.columns for c in new_ou_features): features.extend(new_ou_features)
                     
                     train_medians = df_train[features].median().fillna(0)
                     X_train = df_train[features].fillna(train_medians)
@@ -631,8 +633,17 @@ with tab2:
                     if len(df_predict) > 0:
                         X_pred = df_predict[features].fillna(train_medians)
                         
-                        df_predict['AI_โอกาสเหย้าชนะHDP(%)'] = (model_hdp.predict_proba(X_pred)[:, 1] * 100).round(1)
-                        df_predict['AI_โอกาสออกสูง(%)'] = (model_ou.predict_proba(X_pred)[:, 1] * 100).round(1)
+                        # ฟังก์ชันดึงค่า Prob ป้องกันบัคเวลาผลลัพธ์เทรนมีด้านเดียว
+                        def get_win_prob(model, X):
+                            probs = model.predict_proba(X)
+                            if hasattr(model, 'classes_') and 1 in model.classes_:
+                                return probs[:, list(model.classes_).index(1)]
+                            elif probs.shape[1] > 1:
+                                return probs[:, 1]
+                            return np.zeros(len(X))
+                        
+                        df_predict['AI_โอกาสเหย้าชนะHDP(%)'] = (get_win_prob(model_hdp, X_pred) * 100).round(1)
+                        df_predict['AI_โอกาสออกสูง(%)'] = (get_win_prob(model_ou, X_pred) * 100).round(1)
                         
                         def hdp_decision(prob):
                             if prob >= 60: return "⭐⭐⭐ ไม้หนัก VIP (แทงเหย้า)"
