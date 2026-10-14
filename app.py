@@ -417,27 +417,49 @@ def _pred_tone(text, kind):
     return "cs" if "มั่นใจ" in text and "ต่ำ" in text else "cf" if "ต่ำ" in text else "gs" if "มั่นใจ" in text else "gf"
 
 def render_prediction_cards(df_pred):
-    html = ["<div class='pred-grid'>"]
     for _, r in df_pred.iterrows():
-        hdp_tone = _pred_tone(r['AI_ฟันธง_HDP'], "hdp")
-        ou_tone = _pred_tone(r['AI_ฟันธง_สูงต่ำ'], "ou")
-        html.append(f"""
-        <div class='pred-card'>
-            <div class='pred-teams'><span class='pred-team'>{esc(str(r.get('ทีมเหย้า','-')))}</span><span class='pred-vs'>VS</span><span class='pred-team away'>{esc(str(r.get('ทีมเยือน','-')))}</span></div>
-            <div class='pred-sections'>
-                <div class='pred-box'><div class='pred-box-head'><span class='pred-kind'>HANDICAP</span><span class='pred-line'>เหย้า {r.get('แฮนดิแคป (เหย้า)'):+g}</span></div>
-                <div class='pred-pct tone-{hdp_tone}'>{r['AI_โอกาสเหย้าชนะHDP(%)']:g}<small>%</small></div>
-                <div class='pred-track'><div class='pred-fill fill-{hdp_tone}' style='width:{r['AI_โอกาสเหย้าชนะHDP(%)']}%'></div><div class='pred-mid'></div></div>
-                <span class='pred-verdict bg-{hdp_tone}'>{esc(r['AI_ฟันธง_HDP'])}</span></div>
-                
-                <div class='pred-box'><div class='pred-box-head'><span class='pred-kind'>OVER / UNDER</span><span class='pred-line'>ไลน์ {r.get('โกลสูง/ต่ำ'):g}</span></div>
-                <div class='pred-pct tone-{ou_tone}'>{r['AI_โอกาสออกสูง(%)']:g}<small>%</small></div>
-                <div class='pred-track'><div class='pred-fill fill-{ou_tone}' style='width:{r['AI_โอกาสออกสูง(%)']}%'></div><div class='pred-mid'></div></div>
-                <span class='pred-verdict bg-{ou_tone}'>{esc(r['AI_ฟันธง_สูงต่ำ'])}</span></div>
+        home = str(r.get('ทีมเหย้า', '-'))
+        away = str(r.get('ทีมเยือน', '-'))
+        hdp_prob = float(r.get('AI_โอกาสเหย้าชนะHDP(%)', 50))
+        ou_prob = float(r.get('AI_โอกาสออกสูง(%)', 50))
+        hdp_verdict = str(r.get('AI_ฟันธง_HDP', '-'))
+        ou_verdict = str(r.get('AI_ฟันธง_สูงต่ำ', '-'))
+        hdp_line = r.get('แฮนดิแคป (เหย้า)', 0)
+        ou_line = r.get('โกลสูง/ต่ำ', 0)
+
+        # ใช้กล่อง Container และ Columns ของ Streamlit แทน HTML ดิบ เพื่อความเสถียร 100%
+        with st.container():
+            st.markdown(f"""
+            <div style='background: linear-gradient(180deg, #0e1712 0%, #0c130f 100%); border: 1px solid #1b2a22; border-radius: 18px; padding: 20px 22px; margin-bottom: 16px;'>
+                <div style='font-size: 1.05rem; font-weight: 600; color: #e6f2ea; margin-bottom: 12px; text-align: center;'>
+                    ⚽ {esc(home)} <span style='color: #7f9a8b; font-weight: 400; padding: 0 8px;'>VS</span> {esc(away)}
+                </div>
             </div>
-        </div>""")
-    html.append("</div>")
-    return "".join(html)
+            """, unsafe_allow_html=True)
+            
+            col1, col2 = st.columns(2, gap="medium")
+            with col1:
+                st.markdown(f"""
+                <div style='background: #09100c; border: 1px solid #14211a; border-radius: 14px; padding: 14px 16px;'>
+                    <div style='display: flex; justify-content: space-between; font-size: 0.78rem; color: #7f9a8b;'>
+                        <span>HANDICAP</span><span>เหย้า {hdp_line:+g}</span>
+                    </div>
+                    <div style='font-size: 1.8rem; font-weight: 600; color: #4ade80; margin: 6px 0;'>{hdp_prob:g}%</div>
+                    <div style='font-size: 0.82rem; background: rgba(34,197,94,0.15); color: #4ade80; padding: 4px 10px; border-radius: 8px; display: inline-block; font-weight: 500;'>{esc(hdp_verdict)}</div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+            with col2:
+                st.markdown(f"""
+                <div style='background: #09100c; border: 1px solid #14211a; border-radius: 14px; padding: 14px 16px;'>
+                    <div style='display: flex; justify-content: space-between; font-size: 0.78rem; color: #7f9a8b;'>
+                        <span>OVER / UNDER</span><span>ไลน์ {ou_line:g}</span>
+                    </div>
+                    <div style='font-size: 1.8rem; font-weight: 600; color: #38bdf8; margin: 6px 0;'>{ou_prob:g}%</div>
+                    <div style='font-size: 0.82rem; background: rgba(14,165,233,0.15); color: #38bdf8; padding: 4px 10px; border-radius: 8px; display: inline-block; font-weight: 500;'>{esc(ou_verdict)}</div>
+                </div>
+                """, unsafe_allow_html=True)
+            st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
 
 # ----------------------------------------
 # หัวข้อหลัก
