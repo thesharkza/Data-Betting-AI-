@@ -795,8 +795,10 @@ def _pred_tone(text, kind):
     if "ข้าม" in t:
         return "skip"
     if kind == "hdp":
-        return ("cs" if "VIP" in t else "cf") if "รอง" in t else ("gs" if "ไม้หนัก" in t else "gf")
-    strong = "มั่นใจสูง" in t
+        # ปรับแก้สีปุ่มให้สอดคล้องกับคำว่า "VIP" ใหม่
+        return ("cs" if "VIP" in t else "cf") if "รอง" in t else ("gs" if "VIP" in t else "gf")
+    # สำหรับสูง-ต่ำ ตรวจจับคำว่า "มั่นใจ" (ครอบคลุมทั้ง มั่นใจสูง, มั่นใจมาก)
+    strong = "มั่นใจ" in t 
     if "ต่ำ" in t:
         return "cs" if strong else "cf"
     return "gs" if strong else "gf"
@@ -846,16 +848,25 @@ def render_prediction_cards(df_pred):
     return "".join(html)
 
 # ----------------------------------------
-# ฟังก์ชันส่วนเสริม: AI Machine Learning Predictions (ทายทั้งแฮนดิแคป และ สกอร์สูง-ต่ำ)
+# ฟังก์ชันส่วนเสริม: AI Machine Learning Predictions (พร้อม 3 จุดอัปเกรดความแม่นยำ)
 # ----------------------------------------
 def render_ai_prediction_section(df):
     st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
     panel_header("🤖 AI Machine Learning Predictions (แฮนดิแคป & สกอร์สูง-ต่ำ)", "ระบบวิเคราะห์ความน่าจะเป็นและฟันธงผลการแข่งขันเฉพาะแมตช์ที่ยังไม่ลงผลสกอร์")
     
-    # 1. แปลงคอลัมน์ตัวเลขให้พร้อมใช้งาน
-    numeric_cols = ['1X2 เหย้า', '1X2 เสมอ', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 'โกลสูง/ต่ำ', 'ค่าน้ำ (สูง)', 'ค่าน้ำ (ต่ำ)']
+    # [จุดอัปเกรดที่ 1] เพิ่มคอลัมน์ Form 5 (ฟอร์ม 5 นัดล่าสุด) ให้ AI ประมวลผลร่วมกับราคา
+    numeric_cols = [
+        '1X2 เหย้า', '1X2 เสมอ', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 
+        'โกลสูง/ต่ำ', 'ค่าน้ำ (สูง)', 'ค่าน้ำ (ต่ำ)',
+        'H_WinRate_Last5', 'H_GoalsFor_Last5', 'H_GoalsAgainst_Last5',
+        'A_WinRate_Last5', 'A_GoalsFor_Last5', 'A_GoalsAgainst_Last5'
+    ]
+    
     for col in numeric_cols:
         if col in df.columns:
+            # ล้างเครื่องหมาย % หากมีติดมา และแปลงเป็นตัวเลข
+            if df[col].dtype == object:
+                df[col] = df[col].astype(str).str.replace('%', '').str.strip()
             df[col] = pd.to_numeric(df[col], errors='coerce')
             
     if 'ผล HDP' in df.columns and 'ผลสูง/ต่ำ' in df.columns:
@@ -885,11 +896,22 @@ def render_ai_prediction_section(df):
         else:
             df_predict = df[df['ผล HDP'].astype(str).str.strip().isin(["", "nan", "None"])].copy()
 
+        # สร้างฐานข้อมูล Training Set (อนุญาตให้ Form5 เป็น NaN ได้ก่อน แล้วค่อยเติมด้วย Median ทีหลัง)
+        core_features_hdp = ['1X2 เหย้า', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 'โกลสูง/ต่ำ', 'Target_HDP']
+        core_features_ou  = ['1X2 เหย้า', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 'โกลสูง/ต่ำ', 'Target_OU']
+        
+        # ใช้เฉพาะแถวที่มีข้อมูลราคาหลักครบถ้วนในการเรียนรู้
         df_train = df.dropna(subset=['1X2 เหย้า', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 'โกลสูง/ต่ำ', 'Target_HDP', 'Target_OU']).copy()
 
         if len(df_train) > 5 and len(df_predict) > 0:
-            features = ['1X2 เหย้า', '1X2 เสมอ', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 'โกลสูง/ต่ำ', 'ค่าน้ำ (สูง)', 'ค่าน้ำ (ต่ำ)']
-            X_train = df_train[features].fillna(0)
+            features = numeric_cols # เรียกใช้ตัวแปรทั้งหมดรวมถึง Form 5
+            
+            # [จุดอัปเกรดที่ 3] ใช้ค่า Median เติมเต็มข้อมูลที่หายไป (Missing Value Imputation) 
+            # ป้องกันไม่ให้ AI เพี้ยนจากการถูกแทนที่ด้วยเลข 0
+            train_medians = df_train[features].median().fillna(0) # กันเหนียวกรณีที่คอลัมน์นั้นว่างทั้งแถว
+            
+            X_train = df_train[features].fillna(train_medians)
+            X_pred = df_predict[features].fillna(train_medians)
             
             # --- 1. โมเดลทำนาย แฮนดิแคป ---
             model_hdp = RandomForestClassifier(n_estimators=100, max_depth=6, random_state=42)
@@ -900,33 +922,28 @@ def render_ai_prediction_section(df):
             model_ou.fit(X_train, df_train['Target_OU'])
             
             # ทำนายผลเฉพาะคู่ที่ยังไม่แข่ง
-            X_pred = df_predict[features].fillna(0)
-            
-            # คำนวณ % โอกาส
             df_predict['AI_โอกาสเหย้าชนะHDP(%)'] = (model_hdp.predict_proba(X_pred)[:, 1] * 100).round(1)
             df_predict['AI_โอกาสออกสูง(%)'] = (model_ou.predict_proba(X_pred)[:, 1] * 100).round(1)
             
+            # [จุดอัปเกรดที่ 2] ปรับเกณฑ์ความมั่นใจให้เข้มงวดขึ้น (Threshold)
             # ฟันธง HDP
             def hdp_decision(prob):
-                if prob >= 58: return "⭐⭐⭐ ไม้หนัก (แทงเหย้า)"
-                elif prob >= 53: return "⭐⭐ ลงทุนเหย้า"
-                elif prob <= 42: return "❌ รองทีมเยือน VIP"
-                elif prob <= 47: return "🔻 รองทีมเยือน"
-                else: return "⚠️ ข้าม (HDP)"
+                if prob >= 60: return "⭐⭐⭐ ไม้หนัก VIP (แทงเหย้า)"
+                elif prob >= 55: return "⭐⭐ ลงทุนเหย้า"
+                elif prob <= 40: return "❌ รองทีมเยือน VIP"
+                elif prob <= 45: return "🔻 รองทีมเยือน"
+                else: return "⚠️ ข้าม (โอกาสไม่ชัดเจน)"
                 
             # ฟันธง สูง-ต่ำ
             def ou_decision(prob):
-                if prob >= 58: return "🔥 สูง (Over) มั่นใจสูง"
-                elif prob >= 53: return "📈 น่าแทงสูง"
-                elif prob <= 42: return "🛡️ ต่ำ (Under) มั่นใจสูง"
-                elif prob <= 47: return "📉 น่าแทงต่ำ"
+                if prob >= 60: return "🔥 สูง (Over) มั่นใจมาก"
+                elif prob >= 55: return "📈 น่าลงทุนสูง"
+                elif prob <= 40: return "🛡️ ต่ำ (Under) มั่นใจมาก"
+                elif prob <= 45: return "📉 น่าลงทุนต่ำ"
                 else: return "⚠️ ข้าม (O/U)"
 
             df_predict['AI_ฟันธง_HDP'] = df_predict['AI_โอกาสเหย้าชนะHDP(%)'].apply(hdp_decision)
             df_predict['AI_ฟันธง_สูงต่ำ'] = df_predict['AI_โอกาสออกสูง(%)'].apply(ou_decision)
-            
-            # เลือกคอลัมน์ที่จะแสดงบนตาราง
-            display_cols = [c for c in ['ทีมเหย้า', 'ทีมเยือน', 'แฮนดิแคป (เหย้า)', 'AI_โอกาสเหย้าชนะHDP(%)', 'AI_ฟันธง_HDP', 'โกลสูง/ต่ำ', 'AI_โอกาสออกสูง(%)', 'AI_ฟันธง_สูงต่ำ'] if c in df_predict.columns]
             
             st.markdown(f"พบแมตช์ที่ยังไม่ลงผลสกอร์ทั้งหมด **{len(df_predict)} คู่**:")
             st.markdown(render_prediction_cards(df_predict), unsafe_allow_html=True)
