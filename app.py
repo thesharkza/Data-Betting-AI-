@@ -35,6 +35,8 @@ GREEN = "#22c55e"
 GREEN_SOFT = "#86efac"
 AMBER = "#d9a441"
 RED = "#e5484d"
+CYAN = "#0ea5e9"
+CYAN_SOFT = "#7dd3fc"
 
 st.markdown("""
 <style>
@@ -71,15 +73,12 @@ p, label, span { color: inherit; }
     background: #0c130f; border: 1px dashed #2a4136; border-radius: 14px;
 }
 
-/* Alerts */
-[data-testid="stAlert"] { background: #0c130f; border: 1px solid #1b2a22; border-radius: 12px; }
-
 /* Page heading */
 .page-title { font-size: 1.9rem; font-weight: 600; margin: 0; color: #e6f2ea; }
 .page-sub { color: #7f9a8b; margin: 4px 0 22px 0; font-size: 0.95rem; }
 
 /* KPI strip */
-.kpi-wrap { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 16px; margin-bottom: 22px; }
+.kpi-wrap { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 22px; }
 .kpi {
     background: #0c130f; border: 1px solid #1b2a22; border-radius: 16px; padding: 22px 26px;
 }
@@ -87,42 +86,22 @@ p, label, span { color: inherit; }
     background: linear-gradient(160deg, #0f2a1b 0%, #0c130f 70%);
     border-color: #1f6b3d; box-shadow: 0 0 40px -12px rgba(34,197,94,0.35);
 }
+.kpi.hero-cyan {
+    background: linear-gradient(160deg, #082f49 0%, #0c130f 70%);
+    border-color: #0284c7; box-shadow: 0 0 40px -12px rgba(14,165,233,0.35);
+}
 .kpi-label { color: #7f9a8b; font-size: 0.9rem; margin-bottom: 6px; }
 .kpi-value { font-size: 2.6rem; font-weight: 600; line-height: 1.15; color: #e6f2ea; }
 .kpi.hero .kpi-value { font-size: 3.6rem; color: #4ade80; }
+.kpi.hero-cyan .kpi-value { font-size: 3.6rem; color: #38bdf8; }
 .kpi-unit { font-size: 1rem; color: #7f9a8b; font-weight: 400; margin-left: 4px; }
 .kpi-bar { height: 6px; background: #17241d; border-radius: 6px; margin-top: 14px; overflow: hidden; }
 .kpi-bar > div { height: 100%; background: linear-gradient(90deg, #16a34a, #4ade80); border-radius: 6px; }
+.kpi.hero-cyan .kpi-bar > div { background: linear-gradient(90deg, #0284c7, #38bdf8); }
 
 /* Panels */
 .panel-title { font-size: 1.05rem; font-weight: 500; color: #e6f2ea; margin: 0 0 2px 0; }
 .panel-sub { font-size: 0.85rem; color: #7f9a8b; margin: 0 0 6px 0; }
-
-/* Rule cards */
-.rule-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }
-.rule-card { background: #0c130f; border: 1px solid #1b2a22; border-radius: 16px; padding: 20px 22px; }
-.rule-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
-.rule-name { color: #e6f2ea; font-weight: 500; font-size: 1rem; }
-.rule-tag { font-size: 0.78rem; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
-.rule-rate-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 10px; margin: 10px 0 10px 0; }
-.rule-rate { font-size: 2.4rem; font-weight: 600; line-height: 1.1; }
-.trend-box { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; padding-bottom: 4px; }
-.trend { font-size: 0.9rem; font-weight: 600; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
-.trend.up { color: #4ade80; background: rgba(34,197,94,0.15); }
-.trend.down { color: #f06b70; background: rgba(229,72,77,0.14); }
-.trend.flat { color: #7f9a8b; background: rgba(127,154,139,0.12); font-weight: 500; }
-.trend-prev { font-size: 0.78rem; color: #7f9a8b; white-space: nowrap; }
-.trend-sum { display: flex; flex-wrap: wrap; gap: 8px; margin: 2px 0 14px 0; }
-.rule-bar { height: 6px; background: #17241d; border-radius: 6px; overflow: hidden; }
-.rule-bar > div { height: 100%; border-radius: 6px; }
-.rule-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 14px; }
-.rule-meta span { color: #7f9a8b; font-size: 0.85rem; }
-.rule-meta b { color: #cfe3d6; font-weight: 500; margin-left: 4px; }
-.t-g { color: #4ade80; } .t-a { color: #e8bb62; } .t-r { color: #f06b70; }
-.b-g { background: #22c55e; } .b-a { background: #d9a441; } .b-r { background: #e5484d; }
-.tag-g { background: rgba(34,197,94,0.15); color: #4ade80; }
-.tag-a { background: rgba(217,164,65,0.14); color: #e8bb62; }
-.tag-r { background: rgba(229,72,77,0.14); color: #f06b70; }
 
 /* Background jobs */
 .job-card { background: #0c130f; border: 1px solid #1b2a22; border-left: 4px solid #1b2a22; border-radius: 14px; padding: 16px 20px; margin-bottom: 10px; }
@@ -138,24 +117,6 @@ p, label, span { color: inherit; }
 .job-title { color: #e6f2ea; font-size: 1.1rem; font-weight: 600; margin: 8px 0 4px 0; }
 .job-msg { color: #a7c4b5; font-size: 0.9rem; }
 .job-note { color: #7f9a8b; font-size: 0.8rem; margin-top: 8px; }
-
-/* Secondary buttons */
-.stButton > button:not([kind="primary"]) {
-    background: #0c130f; color: #cfe3d6; border: 1px solid #1b2a22; border-radius: 10px;
-}
-.stButton > button:not([kind="primary"]):hover { border-color: #22c55e; color: #4ade80; }
-
-/* Result card (tab 1) */
-.result-card {
-    background: #0c130f; border: 1px solid #1b2a22; border-left: 4px solid #22c55e;
-    border-radius: 14px; padding: 24px 28px;
-}
-.result-card h3 { margin: 0 0 12px 0; color: #e6f2ea; }
-.result-card .vs { color: #7f9a8b; font-weight: 400; padding: 0 6px; }
-.result-row { display: flex; gap: 10px; padding: 8px 0; border-top: 1px solid #111c16; }
-.result-key { color: #7f9a8b; min-width: 170px; }
-.result-val { color: #e6f2ea; font-weight: 500; }
-.result-val.hl { color: #4ade80; }
 
 /* AI Predictions */
 .pred-summary { display: flex; flex-wrap: wrap; gap: 10px; margin: 4px 0 18px 0; }
@@ -183,16 +144,16 @@ p, label, span { color: inherit; }
 .pred-fill { height: 100%; border-radius: 6px; }
 .pred-mid { position: absolute; left: 50%; top: -3px; width: 1px; height: 12px; background: #3a5547; }
 .pred-verdict { margin-top: 14px; font-size: 0.82rem; padding: 5px 11px; border-radius: 10px; display: inline-block; font-weight: 500; }
-.tone-gs { color: #4ade80; } .tone-gf { color: #86efac; } .tone-cs { color: #67e8f9; } .tone-cf { color: #a5f3fc; } .tone-skip { color: #7f9a8b; }
+.tone-gs { color: #4ade80; } .tone-gf { color: #86efac; } .tone-cs { color: #38bdf8; } .tone-cf { color: #bae6fd; } .tone-skip { color: #7f9a8b; }
 .fill-gs { background: linear-gradient(90deg, #16a34a, #4ade80); }
 .fill-gf { background: linear-gradient(90deg, #15803d, #86efac); }
-.fill-cs { background: linear-gradient(90deg, #0e7490, #67e8f9); }
-.fill-cf { background: linear-gradient(90deg, #155e75, #a5f3fc); }
+.fill-cs { background: linear-gradient(90deg, #0284c7, #38bdf8); }
+.fill-cf { background: linear-gradient(90deg, #0369a1, #bae6fd); }
 .fill-skip { background: #4b5f54; }
 .bg-gs { background: rgba(34,197,94,0.16); color: #4ade80; }
 .bg-gf { background: rgba(34,197,94,0.09); color: #86efac; }
-.bg-cs { background: rgba(34,211,238,0.15); color: #67e8f9; }
-.bg-cf { background: rgba(34,211,238,0.09); color: #a5f3fc; }
+.bg-cs { background: rgba(14,165,233,0.16); color: #38bdf8; }
+.bg-cf { background: rgba(14,165,233,0.09); color: #bae6fd; }
 .bg-skip { background: rgba(127,154,139,0.12); color: #7f9a8b; }
 
 @media (max-width: 900px) {
@@ -226,7 +187,7 @@ def init_gspread():
         base_dir = os.path.dirname(os.path.abspath(__file__))
         creds_path = os.path.join(base_dir, 'credentials.json')
         if not os.path.exists(creds_path):
-            raise FileNotFoundError('ไม่พบไฟล์ credentials.json ในโฟลเดอร์โครงการ และยังไม่ได้ตั้งค่า st.secrets["gspread"]')
+            raise FileNotFoundError('ไม่พบไฟล์ credentials.json')
         client = gspread.service_account(filename=creds_path)
     return client.open("ข้อมูลราคาบอลสกัดจากภาพ")
 
@@ -241,7 +202,7 @@ model = genai.GenerativeModel('gemini-3.7-flash')
 # ----------------------------------------
 # แปลงค่าน้ำเป็นระบบมาเลเซีย (Malay Odds) เสมอ
 # ----------------------------------------
-WATER_IDX = [6, 8, 10, 11]  # ค่าน้ำ HDP เหย้า / HDP เยือน / น้ำสูง / น้ำต่ำ
+WATER_IDX = [6, 8, 10, 11]
 FMT_LABELS = {"MY": "มาเลเซีย", "HK": "ฮ่องกง", "ID": "อินโดนีเซีย", "EU": "ยุโรป (Decimal)"}
 FMT_CHOICES = {
     "อัตโนมัติ (ให้ AI ตรวจจับ)": None,
@@ -259,15 +220,13 @@ def to_malay(x, fmt):
         hk = x - 1
     elif fmt == "ID":
         hk = x if x > 0 else (1 / abs(x) if x != 0 else 0)
-    else:  # HK
+    else:
         hk = x
     return round(hk, 2) if hk <= 1 else round(-1 / hk, 2)
 
 def guess_format(nums):
-    if nums and all(v > 1 for v in nums):
-        return "EU"
-    if any(v < -1 for v in nums):
-        return "ID"
+    if nums and all(v > 1 for v in nums): return "EU"
+    if any(v < -1 for v in nums): return "ID"
     return "MY"
 
 def parse_cell(v):
@@ -290,32 +249,12 @@ def clean_raw_data(raw_text):
 def convert_water_to_malay(row, user_fmt, ai_fmt):
     new_row = list(row)
     idx = [i for i in WATER_IDX if i < len(new_row) and isinstance(new_row[i], (int, float))]
-    if not idx:
-        return new_row, "ℹ️ ไม่พบค่าน้ำที่เป็นตัวเลข จึงไม่ได้แปลงราคา", "ตรวจสอบค่าน้ำในชีตอีกครั้ง"
-
+    if not idx: return new_row, "ℹ️ ไม่พบค่าน้ำที่เป็นตัวเลข", ""
     fmt, source = (user_fmt, "คุณเลือกเอง") if user_fmt else (ai_fmt, "AI ตรวจพบ")
     if fmt not in FMT_LABELS:
-        fmt, source = guess_format([new_row[i] for i in idx]), "ระบบประเมินเอง เพราะ AI ไม่แน่ใจ"
-
-    changes = []
-    for i in idx:
-        old = new_row[i]
-        new_row[i] = to_malay(old, fmt)
-        changes.append(f"{old:g} → {new_row[i]:g}")
-
-    if fmt == "MY":
-        note = f"✅ ค่าน้ำเป็นแบบมาเลเซียอยู่แล้ว ({source})"
-    else:
-        note = f"🔄 แปลงค่าน้ำจาก{FMT_LABELS[fmt]} → มาเลเซีย ({source}): " + "  |  ".join(changes)
-
-    warn = None
-    if fmt == "EU" and any(row[i] <= 1 for i in idx):
-        warn = "⚠️ ระบุเป็นรูปแบบยุโรป (Decimal) แต่มีค่าน้ำ ≤ 1 ซึ่งไม่เข้าเงื่อนไข ควรเลือกรูปแบบราคาให้ตรงกับภาพ"
-    elif any(abs(new_row[i]) > 1 for i in idx):
-        warn = "⚠️ ค่าน้ำหลังแปลงเกิน ±1 ซึ่งผิดปกติสำหรับระบบมาเลเซีย กรุณาเลือกรูปแบบราคาให้ตรงกับภาพแล้วอัปโหลดใหม่"
-    elif source.startswith("ระบบประเมิน"):
-        warn = "⚠️ AI ไม่แน่ใจรูปแบบราคา ระบบจึงเดาให้ ควรเช็กค่าน้ำที่บันทึกอีกครั้ง"
-    return new_row, note, warn
+        fmt, source = guess_format([new_row[i] for i in idx]), "ระบบประเมินเอง"
+    for i in idx: new_row[i] = to_malay(new_row[i], fmt)
+    return new_row, f"อิงรูปแบบ: {FMT_LABELS.get(fmt, fmt)} ({source})", None
 
 FORM5_HEADERS = [
     "H_WinRate_Last5", "H_GoalsFor_Last5", "H_GoalsAgainst_Last5",
@@ -325,133 +264,37 @@ FORM5_HEADERS = [
 def validate_form5(values):
     if len(values) != 6 or any(v is None or v == "" or isinstance(v, bool) for v in values):
         raise ValueError('กรุณากรอกข้อมูลให้ครบ 6 ช่อง; ช่องว่างไม่ใช่ 0')
-    try:
-        nums = [float(v) for v in values]
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError('ข้อมูลต้องเป็นตัวเลขที่ถูกต้อง') from exc
-    if not all(isfinite(v) for v in nums):
-        raise ValueError('ข้อมูลต้องเป็นตัวเลขที่ถูกต้อง')
-    for i in (0, 3):
-        if not 0 <= nums[i] <= 100 or abs(nums[i] / 20 - round(nums[i] / 20)) > 1e-8:
-            raise ValueError('Win rate ของ 5 นัดใช้ 0, 20, 40, 60, 80 หรือ 100%')
-    for i in (1, 2, 4, 5):
-        if nums[i] < 0 or not nums[i].is_integer():
-            raise ValueError('ประตูได้/เสียต้องเป็นจำนวนเต็มตั้งแต่ 0 ขึ้นไป')
-    return [nums[0] / 100, int(nums[1]), int(nums[2]),
-            nums[3] / 100, int(nums[4]), int(nums[5])]
+    nums = [float(v) for v in values]
+    return [nums[0] / 100, int(nums[1]), int(nums[2]), nums[3] / 100, int(nums[4]), int(nums[5])]
 
 def save_row_to_sheet(ws, row, form5):
     normalized = validate_form5(form5)
-    if len(row) != 12:
-        raise ValueError("Price data must have exactly 12 cells (A:L).")
-    col_a = ws.col_values(1)
-    col_b = ws.col_values(2)
+    col_a, col_b = ws.col_values(1), ws.col_values(2)
     last_row = max((i + 1 for i, v in enumerate(col_a) if str(v).strip()), default=1)
     new_home, new_away = str(row[0]).strip(), str(row[1]).strip()
-    if not new_home or not new_away:
-        raise ValueError("Both team names are required.")
-    target_row = None
-    for i in range(1, len(col_a)):
-        away = str(col_b[i]).strip() if i < len(col_b) else ""
-        if str(col_a[i]).strip() == new_home and away == new_away:
-            target_row = i + 1
-            break
+    target_row = next((i + 1 for i in range(1, len(col_a)) if str(col_a[i]).strip() == new_home and (str(col_b[i]).strip() if i < len(col_b) else "") == new_away), None)
     overwritten = target_row is not None
-    if not overwritten:
-        target_row = max(2, last_row + 1)
-
-    all_headers = ws.row_values(1)
-    headers = (all_headers + [""] * 29)[23:29]
-    for i, (old, expected) in enumerate(zip(headers, FORM5_HEADERS)):
-        if str(old).strip() not in ("", expected):
-            raise ValueError(f"X:AC header conflict (column {24+i}): {old!r}; expected {expected!r}. Nothing saved.")
-    unnamed = [i for i, h in enumerate(headers) if not str(h).strip()]
-    if unnamed and ws.col_count >= 24:
-        last_col = min(ws.col_count, 29)
-        last_letter = ('X', 'Y', 'Z', 'AA', 'AB', 'AC')[last_col - 24]
-        existing = ws.get(f"X2:{last_letter}", value_render_option="FORMULA")
-        if any(i < len(r) and str(r[i]).strip() for r in existing for i in unnamed):
-            raise ValueError("X:AC contains data without matching headers. Review these columns first; nothing saved.")
+    if not overwritten: target_row = max(2, last_row + 1)
 
     requests = []
-    if ws.col_count < 29:
-        requests.append({"appendDimension": {"sheetId": ws.id, "dimension": "COLUMNS", "length": 29 - ws.col_count}})
-    if target_row > ws.row_count:
-        requests.append({"appendDimension": {"sheetId": ws.id, "dimension": "ROWS", "length": target_row - ws.row_count}})
+    if ws.col_count < 29: requests.append({"appendDimension": {"sheetId": ws.id, "dimension": "COLUMNS", "length": 29 - ws.col_count}})
+    if target_row > ws.row_count: requests.append({"appendDimension": {"sheetId": ws.id, "dimension": "ROWS", "length": target_row - ws.row_count}})
 
     def typed(value):
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            if not isfinite(value):
-                raise ValueError("Numeric price data must be finite.")
-            return {"userEnteredValue": {"numberValue": value}}
+        if isinstance(value, (int, float)) and not isinstance(value, bool): return {"userEnteredValue": {"numberValue": value}}
         return {"userEnteredValue": {"stringValue": str(value)}}
 
     def update(start_row, start_col, cells, fields):
-        return {"updateCells": {
-            "start": {"sheetId": ws.id, "rowIndex": start_row, "columnIndex": start_col},
-            "rows": [{"values": cells}], "fields": fields,
-        }}
+        return {"updateCells": {"start": {"sheetId": ws.id, "rowIndex": start_row, "columnIndex": start_col}, "rows": [{"values": cells}], "fields": fields}}
 
-    if unnamed:
-        requests.append(update(0, 23, [typed(h) for h in FORM5_HEADERS], "userEnteredValue"))
+    requests.append(update(0, 23, [typed(h) for h in FORM5_HEADERS], "userEnteredValue"))
     requests.append(update(target_row - 1, 0, [typed(v) for v in row], "userEnteredValue"))
     form_cells = [typed(v) for v in normalized]
     for i, cell in enumerate(form_cells):
-        cell["userEnteredFormat"] = {"numberFormat": {
-            "type": "PERCENT" if i in (0, 3) else "NUMBER",
-            "pattern": "0.0%" if i in (0, 3) else "0",
-        }}
-    requests.append(update(target_row - 1, 23, form_cells,
-                           "userEnteredValue,userEnteredFormat.numberFormat"))
+        cell["userEnteredFormat"] = {"numberFormat": {"type": "PERCENT" if i in (0, 3) else "NUMBER", "pattern": "0.0%" if i in (0, 3) else "0"}}
+    requests.append(update(target_row - 1, 23, form_cells, "userEnteredValue,userEnteredFormat.numberFormat"))
     ws.spreadsheet.batch_update({"requests": requests})
     return target_row, overwritten
-
-def wait_for_result(ws, target_row, tries=10):
-    time.sleep(2)
-    for _ in range(tries):
-        r = ws.row_values(target_row)
-        if len(r) > 15 and str(r[15]).strip():
-            return r
-        time.sleep(1)
-    return ws.row_values(target_row)
-
-WIN_RATE_MODE = "current"
-
-def calc_win_stats(df_comp):
-    c = df_comp['ผลเปรียบเทียบ'].value_counts()
-    wf, wh = int(c.get('ชนะเต็ม', 0)), int(c.get('ชนะครึ่ง', 0))
-    lf, lh = int(c.get('แพ้เต็ม', 0)), int(c.get('แพ้ครึ่ง', 0))
-    draws = int(c.get('เจ๊า', 0))
-    total = len(df_comp)
-    total_wins = wf + wh * 0.5
-    denom = (total_wins + lf + lh * 0.5) if WIN_RATE_MODE == "symmetric" else (total - draws)
-    win_rate = round(total_wins / denom * 100, 2) if denom > 0 else 0
-    return total, total_wins, win_rate
-
-def get_money_management(rec_text, conf_text):
-    if "ข้าม" in str(rec_text):
-        return "0 Unit (ข้าม ห้ามลงทุน) 🛑", rec_text
-
-    match_pct = re.search(r'(\d+(\.\d+)?)%', str(conf_text))
-    match_n = re.search(r'n=(\d+)', str(conf_text))
-
-    if match_pct:
-        pct_val = float(match_pct.group(1))
-        n_val = int(match_n.group(1)) if match_n else 0
-
-        if n_val < 5 and "SNIPER" in str(rec_text):
-            return "⭐ 0.5 Unit (ช่วงทดสอบโมเดลใหม่ 🧪)", rec_text
-
-        if pct_val < 55 and "SNIPER" in str(rec_text):
-            modified_rec = f"⏸️ พักชั่วคราว: {rec_text} (สถิติตกเหลือ {pct_val}%)"
-            return "0 Unit (รอสถิติฟื้นตัว 🛑)", modified_rec
-
-        if pct_val >= 70: return "⭐⭐⭐⭐ 3 Units (Max Bet 🎯)", rec_text
-        elif pct_val >= 60: return "⭐⭐⭐ 2 Units (High 🚀)", rec_text
-        elif pct_val >= 55: return "⭐⭐ 1 Unit (Normal 👍)", rec_text
-        else: return "⭐ 0.5 Unit (Low / Test 🧪)", rec_text
-    else:
-        return "⭐ 0.5 Unit (รอเก็บสถิติ ⏳)", rec_text
 
 # ----------------------------------------
 # ระบบงานเบื้องหลัง: อ่านภาพ + บันทึกชีตบนเซิร์ฟเวอร์
@@ -469,690 +312,351 @@ class JobManager:
     def create(self, name, img_bytes, user_fmt, owner_id):
         job_id = uuid.uuid4().hex[:8]
         with self.lock:
-            self.jobs[job_id] = {"id": job_id, "name": name, "status": "queued", "msg": "รอคิว...",
-                                 "created": time.time(), "finished": None, "img": img_bytes,
-                                 "user_fmt": user_fmt, "result": None, "note": None, "warn": None,
-                                 "owner_id": owner_id, "row_data": None, "form5": None}
-            if len(self.jobs) > 40:
-                done = sorted((j for j in self.jobs.values() if j["status"] in ("done", "error")),
-                              key=lambda j: j["created"])
-                for j in done[:len(self.jobs) - 40]:
-                    self.jobs.pop(j["id"], None)
+            self.jobs[job_id] = {"id": job_id, "name": name, "status": "queued", "msg": "รอคิว...", "created": time.time(), "finished": None, "img": img_bytes, "user_fmt": user_fmt, "result": None, "note": None, "warn": None, "owner_id": owner_id, "row_data": None, "form5": None}
         return job_id
-
     def get(self, job_id):
-        with self.lock:
-            j = self.jobs.get(job_id)
-            return dict(j) if j else None
-
+        with self.lock: return dict(self.jobs.get(job_id)) if job_id in self.jobs else None
     def update(self, job_id, **kw):
         with self.lock:
-            if job_id in self.jobs:
-                self.jobs[job_id].update(kw)
-
+            if job_id in self.jobs: self.jobs[job_id].update(kw)
     def bump_version(self):
-        with self.lock:
-            self.data_version += 1
-
+        with self.lock: self.data_version += 1
     def snapshot(self):
-        with self.lock:
-            return sorted((dict(j) for j in self.jobs.values()), key=lambda j: j["created"], reverse=True)
-
+        with self.lock: return sorted((dict(j) for j in self.jobs.values()), key=lambda j: j["created"], reverse=True)
     def clear_finished(self, owner_id):
         with self.lock:
-            for k in [k for k, j in self.jobs.items() if j["status"] in ("done", "error") and j.get("owner_id") == owner_id]:
-                self.jobs.pop(k)
+            for k in [k for k, j in self.jobs.items() if j["status"] in ("done", "error") and j.get("owner_id") == owner_id]: self.jobs.pop(k)
 
 @st.cache_resource
-def get_job_manager():
-    return JobManager()
+def get_job_manager(): return JobManager()
 
 JOBS = get_job_manager()
-if "form5_owner_id" not in st.session_state:
-    st.session_state["form5_owner_id"] = uuid.uuid4().hex
-
-def validate_row(row):
-    if len(row) < 12:
-        return "ข้อมูลไม่ครบ 12 ช่อง"
-    if not str(row[0]).strip() or not str(row[1]).strip():
-        return "อ่านชื่อทีมไม่ได้"
-    water = [row[i] for i in WATER_IDX if isinstance(row[i], (int, float))]
-    if not water:
-        return "อ่านค่าน้ำไม่ได้เลย"
-    bad = [v for v in water if abs(v) > 1]
-    if bad:
-        return f"ค่าน้ำ {bad[0]:g} เกิน ±1 หลังแปลงเป็นมาเลเซีย (น่าจะรูปแบบราคาผิด)"
-    return None
+if "form5_owner_id" not in st.session_state: st.session_state["form5_owner_id"] = uuid.uuid4().hex
 
 def extract_row(img_bytes, user_fmt, model):
-    img = Image.open(io.BytesIO(img_bytes))
-    if img.mode != 'RGB':
-        img = img.convert('RGB')
+    img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
     img.thumbnail((1600, 1600))
     buf = io.BytesIO()
     img.save(buf, format='JPEG', quality=85)
-    data = buf.getvalue()
-
-    last_err = None
     for attempt in range(3):
         try:
-            resp = model.generate_content([{"mime_type": "image/jpeg", "data": data}, EXTRACT_PROMPT])
+            resp = model.generate_content([{"mime_type": "image/jpeg", "data": buf.getvalue()}, EXTRACT_PROMPT])
             row, ai_fmt = clean_raw_data(resp.text.strip())
             return convert_water_to_malay(row, user_fmt, ai_fmt)
-        except Exception as e:
-            last_err = e
-            time.sleep(2 * (attempt + 1))
-    raise RuntimeError(f"อ่านภาพไม่สำเร็จหลังลอง 3 ครั้ง: {last_err}")
+        except Exception: time.sleep(2)
+    raise RuntimeError("อ่านภาพไม่สำเร็จ")
 
 def process_job(job_id, workbook, model):
     try:
         job = JOBS.get(job_id)
-        if not workbook:
-            raise RuntimeError("ไม่สามารถเชื่อมต่อ Google Sheets ได้")
-
         JOBS.update(job_id, status="reading", msg="🤖 AI กำลังอ่านราคาจากภาพ...")
         row, note, warn = extract_row(job["img"], job["user_fmt"], model)
-
-        problem = validate_row(row)
-        if problem:
-            JOBS.update(job_id, status="error", msg=f"ไม่บันทึก: {problem}", note=note, finished=time.time())
-            return
-        if any(not isinstance(row[i], (int, float)) for i in WATER_IDX):
-            warn = ((warn + " ") if warn else "") + "⚠️ มีค่าน้ำที่อ่านไม่ได้บางช่อง ควรเช็กแถวนี้ในชีต"
-
-        JOBS.update(job_id, status="ready", msg='อ่านราคาแล้ว กรอก Win rate และประตูได้/เสียก่อนบันทึก',
-                    row_data=list(row), note=note, warn=warn, img=None)
+        if len(row) < 12: raise ValueError("ข้อมูลไม่ครบ")
+        JOBS.update(job_id, status="ready", msg='อ่านราคาแล้ว กรอกฟอร์มก่อนบันทึก', row_data=list(row), note=note, warn=warn, img=None)
     except Exception as e:
         JOBS.update(job_id, status="error", msg=f"{e}", finished=time.time())
-    finally:
-        gc.collect()
+    finally: gc.collect()
 
 def save_confirmed_job(job_id, workbook):
     job = JOBS.get(job_id)
-    if not job or job["status"] != "saving":
-        return
-    row = job["row_data"]
+    if not job or job["status"] != "saving": return
     try:
-        if not workbook:
-            raise RuntimeError("Google Sheets is not connected.")
-        ws = workbook.sheet1
         with JOBS.sheet_lock:
-            target_row, overwritten = save_row_to_sheet(ws, row, job["form5"])
+            target_row, overwritten = save_row_to_sheet(workbook.sheet1, job["row_data"], job["form5"])
+        JOBS.bump_version()
+        JOBS.update(job_id, status="done", msg="บันทึกสำเร็จ", finished=time.time(), result={"home": str(job["row_data"][0]), "away": str(job["row_data"][1]), "row": target_row, "overwritten": overwritten})
     except Exception as exc:
-        JOBS.update(job_id, status="error", msg=f"Save not confirmed: {exc}. Check the sheet before retrying.", finished=time.time())
-        return
-
-    JOBS.bump_version()
-    warn = job.get("warn")
-    try:
-        updated = wait_for_result(ws, target_row)
-    except Exception as exc:
-        updated = []
-        warn = ((warn + " ") if warn else "") + f"Saved row {target_row}; result read failed: {exc}"
-    rec = updated[15] if len(updated) > 15 and str(updated[15]).strip() else "Waiting for sheet calculation"
-    confidence = updated[17] if len(updated) > 17 else "-"
-    radar = updated[18] if len(updated) > 18 else "-"
-    mm_text, rec = get_money_management(rec, confidence)
-    JOBS.update(job_id, status="done", msg="", img=None, finished=time.time(), warn=warn,
-                result={"home": str(row[0]), "away": str(row[1]), "rec": rec, "mm": mm_text,
-                        "confidence": confidence, "radar": radar,
-                        "row": target_row, "overwritten": overwritten})
+        JOBS.update(job_id, status="error", msg=f"Save error: {exc}", finished=time.time())
 
 def submit_form5(job_id, values, owner_id):
-    validate_form5(values)
-    with JOBS.lock:
-        job = JOBS.jobs.get(job_id)
-        if not job or job.get("owner_id") != owner_id:
-            raise ValueError("This form does not belong to this browser session.")
-        if job["status"] not in ("ready", "error") or not job.get("row_data"):
-            raise ValueError("This item is already being saved, saved, or not ready.")
-        job.update(status="saving", msg="Saving prices and Form5 to Google Sheets...",
-                   form5=list(values), finished=None)
-    try:
+    job = JOBS.jobs.get(job_id)
+    if job:
+        job.update(status="saving", msg="Saving to Sheets...", form5=list(values))
         JOBS.pool.submit(save_confirmed_job, job_id, workbook)
-    except RuntimeError:
-        JOBS.update(job_id, status="ready", msg="Could not start saving. Please submit again.")
-        raise
-
-def submit_job(name, img_bytes, user_fmt):
-    job_id = JOBS.create(name, img_bytes, user_fmt, st.session_state["form5_owner_id"])
-    JOBS.pool.submit(process_job, job_id, workbook, model)
-
-def retry_job(job_id):
-    j = JOBS.get(job_id)
-    if j and j.get("owner_id") == st.session_state["form5_owner_id"] and j["status"] == "error" and j["img"] and not j.get("row_data"):
-        JOBS.update(job_id, status="queued", msg="รอคิว (ลองใหม่)", result=None, finished=None)
-        JOBS.pool.submit(process_job, job_id, workbook, model)
-
-STATUS_UI = {"ready": ('รอกรอกฟอร์ม 5 นัด', "run"), "queued": ("รอคิว", "run"), "reading": ("กำลังอ่านภาพ", "run"),
-             "saving": ("กำลังบันทึก", "run"), "done": ("บันทึกแล้ว", "ok"), "error": ("ไม่สำเร็จ", "err")}
 
 def render_jobs():
     jobs = [j for j in JOBS.snapshot() if j.get("owner_id") == st.session_state["form5_owner_id"]]
-    if not jobs:
-        st.caption('ยังไม่มีงาน — อัปโหลดรูป ระบบจะรอกรอกฟอร์มก่อนบันทึก')
-        return
-
-    active = sum(1 for j in jobs if j["status"] in ("queued", "reading", "saving"))
-    c1, c2 = st.columns([4, 1])
-    with c1:
-        panel_header("งานล่าสุด", f"กำลังทำ {active} งาน · ปิดหน้านี้หรือสลับแอปได้ งานจะทำต่อบนเซิร์ฟเวอร์")
-    with c2:
-        st.button("🧹 ล้างรายการที่จบแล้ว", on_click=JOBS.clear_finished, args=(st.session_state["form5_owner_id"],), key="clear_jobs")
-
+    if not jobs: return
     for j in jobs:
-        label, cls = STATUS_UI[j["status"]]
-        head = (f"<div class='job-head'><span class='job-name'>{esc(j['name'])}</span>"
-                f"<span class='job-pill {cls}'>{label}</span></div>")
-        if j["status"] == "done":
-            r = j["result"]
-            where = "บันทึกทับแถวเดิม" if r["overwritten"] else "คู่ใหม่"
-            body = (f"<div class='job-title'>{esc(r['home'])}<span class='vs'> vs </span>{esc(r['away'])}"
-                    f"<span class='job-msg'> · แถว {r['row']} ({where})</span></div>"
-                    f"<div class='result-row'><span class='result-key'>🎯 แนะนำลงทุน</span><span class='result-val hl'>{esc(str(r['rec']))}</span></div>"
-                    f"<div class='result-row'><span class='result-key'>💰 Money Mgt</span><span class='result-val'>{esc(r['mm'])}</span></div>"
-                    f"<div class='result-row'><span class='result-key'>📊 สถิติความเชื่อมั่น</span><span class='result-val'>{esc(str(r['confidence']))}</span></div>"
-                    f"<div class='result-row'><span class='result-key'>🚨 เช็กราคา</span><span class='result-val'>{esc(str(r['radar']))}</span></div>")
-        else:
-            pair = j.get("row_data")
-            title = (f"<div class='job-title'>{esc(str(pair[0]))} vs {esc(str(pair[1]))}</div>" if pair else "")
-            body = title + f"<div class='job-msg' style='margin-top:8px'>{esc(j['msg'])}</div>"
-        extra = ""
-        if j.get("note"):
-            extra += f"<div class='job-note'>{esc(j['note'])}</div>"
-        if j.get("warn"):
-            extra += f"<div class='job-note' style='color:#e8bb62'>{esc(j['warn'])}</div>"
-        st.markdown(f"<div class='job-card {cls}'>{head}{body}{extra}</div>", unsafe_allow_html=True)
-        if j.get("row_data") and j["status"] in ("ready", "error"):
+        cls = "ok" if j["status"] == "done" else "err" if j["status"] == "error" else "run"
+        st.markdown(f"<div class='job-card {cls}'><div class='job-head'><span class='job-name'>{esc(j['name'])}</span></div><div class='job-msg'>{esc(j['msg'])}</div></div>", unsafe_allow_html=True)
+        if j["status"] == "ready":
             if st.button('กรอกฟอร์ม 5 นัด', key=f"open_form5_{j['id']}"):
                 st.session_state["form5_editing"] = j["id"]
                 st.rerun()
-        if j["status"] == "error" and j.get("img") and not j.get("row_data"):
-            st.button("🔁 ลองใหม่", key=f"retry_{j['id']}", on_click=retry_job, args=(j["id"],))
 
 def render_form5_editor():
     job_id = st.session_state.get("form5_editing")
     job = JOBS.get(job_id) if job_id else None
-    if not job or job.get("owner_id") != st.session_state["form5_owner_id"]:
-        return
-    if job["status"] not in ("ready", "error") or not job.get("row_data"):
-        return
-    row = job["row_data"]
-    st.subheader('กรอกฟอร์ม 5 นัด')
-    st.caption('Win rate: ชนะ 3 จาก 5 นัด กรอก 60; ประตูกรอกเป็นยอดรวม ไม่ใช่ค่าเฉลี่ย')
-    with st.form(f"form5_{job_id}", clear_on_submit=False):
-        left, right = st.columns(2)
-        with left:
-            st.write('เจ้าบ้าน' + " : " + str(row[0]))
-            h_win = st.number_input('Win rate 5 นัดล่าสุด (%)', min_value=0.0, max_value=100.0,
-                                    value=None, step=20.0, key=f"{job_id}_h_win")
-            h_for = st.number_input('ประตูได้รวม 5 นัด', min_value=0, value=None, step=1, key=f"{job_id}_h_for")
-            h_against = st.number_input('ประตูเสียรวม 5 นัด', min_value=0, value=None, step=1, key=f"{job_id}_h_against")
-        with right:
-            st.write('ทีมเยือน' + " : " + str(row[1]))
-            a_win = st.number_input('Win rate 5 นัดล่าสุด (%)', min_value=0.0, max_value=100.0,
-                                    value=None, step=20.0, key=f"{job_id}_a_win")
-            a_for = st.number_input('ประตูได้รวม 5 นัด', min_value=0, value=None, step=1, key=f"{job_id}_a_for")
-            a_against = st.number_input('ประตูเสียรวม 5 นัด', min_value=0, value=None, step=1, key=f"{job_id}_a_against")
-        preview = st.form_submit_button('ตรวจข้อมูลก่อนบันทึก')
-        save = st.form_submit_button('ยืนยันบันทึกลง Google Sheets', type="primary")
-    if preview or save:
-        values = [h_win, h_for, h_against, a_win, a_for, a_against]
-        try:
-            normalized = validate_form5(values)
-            if save:
-                submit_form5(job_id, values, st.session_state["form5_owner_id"])
-                st.session_state.pop("form5_editing", None)
-                st.rerun()
-            else:
-                st.success('ข้อมูลผ่านการตรวจ; ยังไม่บันทึกข้อมูลคู่แข่งขัน')
-                st.write(f"{row[0]}: {normalized[0]:.0%}, GF={normalized[1]}, GA={normalized[2]} | "
-                         f"{row[1]}: {normalized[3]:.0%}, GF={normalized[4]}, GA={normalized[5]}")
-        except (ValueError, RuntimeError) as exc:
-            st.error(str(exc))
-
-if hasattr(st, "fragment"):
-    render_jobs_live = st.fragment(run_every=2)(render_jobs)
-else:
-    def render_jobs_live():
-        st.button("🔄 อัปเดตสถานะ", key="refresh_jobs")
-        render_jobs()
-
-def base_layout(fig, height=380):
-    fig.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(family="Prompt, sans-serif", color=MUTED, size=13),
-        margin=dict(l=10, r=10, t=10, b=10), height=height,
-        hoverlabel=dict(bgcolor=SURFACE, bordercolor=LINE, font=dict(color=TEXT)),
-    )
-    return fig
-
-HIST_SHEET = "ประวัติสถิติ"
-
-def update_rate_history(workbook, rates):
-    stamp = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M")
-    try:
-        try:
-            ws = workbook.worksheet(HIST_SHEET)
-        except gspread.exceptions.WorksheetNotFound:
-            ws = workbook.add_worksheet(title=HIST_SHEET, rows=1000, cols=3)
-            ws.append_row(["เวลาบันทึก", "กฎ", "อัตราชนะ (%)"])
-
-        history = {}
-        for r in ws.get_all_values()[1:]:
-            if len(r) >= 3:
-                try:
-                    history.setdefault(r[1].strip(), []).append((r[0], float(r[2].replace(',', '.'))))
-                except ValueError:
-                    pass
-
-        new_rows = []
-        for rule, v in rates.items():
-            h = history.setdefault(rule, [])
-            if not h or abs(h[-1][1] - v) >= 0.01:
-                h.append((stamp, v))
-                new_rows.append([stamp, rule, v])
-        if new_rows:
-            ws.append_rows(new_rows, value_input_option="USER_ENTERED")
-        return history, None
-    except Exception as e:
-        return {r: [(stamp, v)] for r, v in rates.items()}, str(e)
-
-@st.cache_data(ttl=60, show_spinner=False)
-def cached_rate_history(_workbook, rates):
-    return update_rate_history(_workbook, rates)
+    if not job or job["status"] != "ready": return
+    with st.form(f"form5_{job_id}"):
+        st.write(f"ฟอร์ม 5 นัด: {job['row_data'][0]} vs {job['row_data'][1]}")
+        h_win, h_for, h_ag = st.number_input('Win H', step=20.), st.number_input('GF H', step=1), st.number_input('GA H', step=1)
+        a_win, a_for, a_ag = st.number_input('Win A', step=20.), st.number_input('GF A', step=1), st.number_input('GA A', step=1)
+        if st.form_submit_button('บันทึก'):
+            submit_form5(job_id, [h_win, h_for, h_ag, a_win, a_for, a_ag], st.session_state["form5_owner_id"])
+            st.session_state.pop("form5_editing", None)
+            st.rerun()
 
 @st.cache_data(ttl=60, show_spinner=False)
 def load_dashboard_data(_workbook, version=0):
-    df = pd.DataFrame(_workbook.sheet1.get_all_records())
-    df_stats = pd.DataFrame(_workbook.worksheet("สรุปสถิติ").get_all_records())
-    return df, df_stats
+    return pd.DataFrame(_workbook.sheet1.get_all_records())
 
-def trend_delta(h):
-    return h[-1][1] - h[-2][1] if len(h) >= 2 else None
+def base_layout(fig, height=380):
+    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(family="Prompt, sans-serif", color=MUTED, size=13), margin=dict(l=10, r=10, t=10, b=10), height=height)
+    return fig
 
-def trend_html(h):
-    if not h:
-        return "<div class='trend-box'><span class='trend flat'>● เริ่มติดตาม</span></div>"
-    d = trend_delta(h)
-    if d is None:
-        return "<div class='trend-box'><span class='trend flat'>● เริ่มติดตาม</span></div>"
-    stamp, prev = h[-1][0], h[-2][1]
-    cls, icon = ("up", "▲") if d > 0 else ("down", "▼")
-    d_txt = f"{d:+.2f}".rstrip('0').rstrip('.')
-    when = f"{stamp[8:10]}/{stamp[5:7]}"
-    return (f"<div class='trend-box'><span class='trend {cls}'>{icon} {d_txt}</span>"
-            f"<span class='trend-prev'>จาก {prev:g}% · {when}</span></div>")
-
-def panel_header(title, sub):
-    st.markdown(f"<p class='panel-title'>{title}</p><p class='panel-sub'>{sub}</p>", unsafe_allow_html=True)
+def panel_header(title, sub): st.markdown(f"<p class='panel-title'>{title}</p><p class='panel-sub'>{sub}</p>", unsafe_allow_html=True)
 
 # ----------------------------------------
-# ฟังก์ชันแสดงผลการ์ดทำนาย (UI เท่านั้น ไม่มี logic การทำนาย)
+# UI ฟันธง
 # ----------------------------------------
 def _pred_tone(text, kind):
-    t = str(text)
-    if "ข้าม" in t:
-        return "skip"
-    if kind == "hdp":
-        return ("cs" if "VIP" in t else "cf") if "รอง" in t else ("gs" if "VIP" in t else "gf")
-    strong = "มั่นใจ" in t 
-    if "ต่ำ" in t:
-        return "cs" if strong else "cf"
-    return "gs" if strong else "gf"
+    if "ข้าม" in text: return "skip"
+    if kind == "hdp": return ("cs" if "VIP" in text else "cf") if "รอง" in text else ("gs" if "VIP" in text else "gf")
+    return "cs" if "มั่นใจ" in text and "ต่ำ" in text else "cf" if "ต่ำ" in text else "gs" if "มั่นใจ" in text else "gf"
 
 def render_prediction_cards(df_pred):
-    def fnum(v, signed=False):
-        try:
-            x = float(v)
-        except (TypeError, ValueError):
-            return "-"
-        if pd.isna(x):
-            return "-"
-        return f"{x:+g}" if signed else f"{x:g}"
-
-    def box(kind_label, line_txt, prob, verdict, kind):
-        tone = _pred_tone(verdict, kind)
-        return (f"<div class='pred-box'>"
-                f"<div class='pred-box-head'><span class='pred-kind'>{kind_label}</span>"
-                f"<span class='pred-line'>{esc(line_txt)}</span></div>"
-                f"<div class='pred-pct tone-{tone}'>{prob:g}<small>%</small></div>"
-                f"<div class='pred-track'><div class='pred-fill fill-{tone}' style='width:{max(0, min(prob, 100))}%'></div>"
-                f"<div class='pred-mid'></div></div>"
-                f"<span class='pred-verdict bg-{tone}'>{esc(str(verdict))}</span>"
-                f"</div>")
-
-    n_hdp = sum(1 for v in df_pred['AI_ฟันธง_HDP'] if _pred_tone(v, "hdp") != "skip")
-    n_ou = sum(1 for v in df_pred['AI_ฟันธง_สูงต่ำ'] if _pred_tone(v, "ou") != "skip")
-    html = [f"<div class='pred-summary'>"
-            f"<span class='pred-chip'>แมตช์รอทำนาย<b>{len(df_pred)}</b></span>"
-            f"<span class='pred-chip'>สัญญาณ HDP<b>{n_hdp}</b></span>"
-            f"<span class='pred-chip'>สัญญาณสูง-ต่ำ<b>{n_ou}</b></span></div>",
-            "<div class='pred-grid'>"]
+    html = ["<div class='pred-grid'>"]
     for _, r in df_pred.iterrows():
-        home = esc(str(r.get('ทีมเหย้า', '-')))
-        away = esc(str(r.get('ทีมเยือน', '-')))
-        html.append(
-            "<div class='pred-card'>"
-            f"<div class='pred-teams'><span class='pred-team'>{home}</span>"
-            f"<span class='pred-vs'>VS</span><span class='pred-team away'>{away}</span></div>"
-            "<div class='pred-sections'>"
-            + box("HANDICAP", f"เหย้า {fnum(r.get('แฮนดิแคป (เหย้า)'), True)}",
-                  r['AI_โอกาสเหย้าชนะHDP(%)'], r['AI_ฟันธง_HDP'], "hdp")
-            + box("OVER / UNDER", f"ไลน์ {fnum(r.get('โกลสูง/ต่ำ'))}",
-                  r['AI_โอกาสออกสูง(%)'], r['AI_ฟันธง_สูงต่ำ'], "ou")
-            + "</div></div>")
+        hdp_tone = _pred_tone(r['AI_ฟันธง_HDP'], "hdp")
+        ou_tone = _pred_tone(r['AI_ฟันธง_สูงต่ำ'], "ou")
+        html.append(f"""
+        <div class='pred-card'>
+            <div class='pred-teams'><span class='pred-team'>{esc(str(r.get('ทีมเหย้า','-')))}</span><span class='pred-vs'>VS</span><span class='pred-team away'>{esc(str(r.get('ทีมเยือน','-')))}</span></div>
+            <div class='pred-sections'>
+                <div class='pred-box'><div class='pred-box-head'><span class='pred-kind'>HANDICAP</span><span class='pred-line'>เหย้า {r.get('แฮนดิแคป (เหย้า)'):+g}</span></div>
+                <div class='pred-pct tone-{hdp_tone}'>{r['AI_โอกาสเหย้าชนะHDP(%)']:g}<small>%</small></div>
+                <div class='pred-track'><div class='pred-fill fill-{hdp_tone}' style='width:{r['AI_โอกาสเหย้าชนะHDP(%)']}%'></div><div class='pred-mid'></div></div>
+                <span class='pred-verdict bg-{hdp_tone}'>{esc(r['AI_ฟันธง_HDP'])}</span></div>
+                
+                <div class='pred-box'><div class='pred-box-head'><span class='pred-kind'>OVER / UNDER</span><span class='pred-line'>ไลน์ {r.get('โกลสูง/ต่ำ'):g}</span></div>
+                <div class='pred-pct tone-{ou_tone}'>{r['AI_โอกาสออกสูง(%)']:g}<small>%</small></div>
+                <div class='pred-track'><div class='pred-fill fill-{ou_tone}' style='width:{r['AI_โอกาสออกสูง(%)']}%'></div><div class='pred-mid'></div></div>
+                <span class='pred-verdict bg-{ou_tone}'>{esc(r['AI_ฟันธง_สูงต่ำ'])}</span></div>
+            </div>
+        </div>""")
     html.append("</div>")
     return "".join(html)
-
-# ----------------------------------------
-# ฟังก์ชันส่วนเสริม: AI Machine Learning Predictions (พร้อมโลจิกวิเคราะห์สูง-ต่ำขั้นสูง และแก้บัค)
-# ----------------------------------------
-def render_ai_prediction_section(df):
-    st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
-    panel_header("🤖 AI Machine Learning Predictions (แฮนดิแคป & สกอร์สูง-ต่ำ)", "ระบบวิเคราะห์ความน่าจะเป็นและฟันธงผลการแข่งขันเฉพาะแมตช์ที่ยังไม่ลงผลสกอร์")
-    
-    # ดึงคอลัมน์ที่ต้องการใช้
-    numeric_cols = [
-        '1X2 เหย้า', '1X2 เสมอ', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 
-        'โกลสูง/ต่ำ', 'ค่าน้ำ (สูง)', 'ค่าน้ำ (ต่ำ)',
-        'H_WinRate_Last5', 'H_GoalsFor_Last5', 'H_GoalsAgainst_Last5',
-        'A_WinRate_Last5', 'A_GoalsFor_Last5', 'A_GoalsAgainst_Last5'
-    ]
-    
-    for col in numeric_cols:
-        if col in df.columns:
-            # ล้างเครื่องหมาย % หากมีติดมา และแปลงเป็นตัวเลข
-            if df[col].dtype == object:
-                df[col] = df[col].astype(str).str.replace('%', '').str.strip()
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-
-    # --- [เสริมโลจิกพิเศษสำหรับวิเคราะห์ O/U (สูง-ต่ำ)] ---
-    if all(c in df.columns for c in ['H_GoalsFor_Last5', 'A_GoalsAgainst_Last5', 'A_GoalsFor_Last5', 'H_GoalsAgainst_Last5', 'โกลสูง/ต่ำ']):
-        df['Exp_Goals_Home'] = (df['H_GoalsFor_Last5'] + df['A_GoalsAgainst_Last5']) / 10.0
-        df['Exp_Goals_Away'] = (df['A_GoalsFor_Last5'] + df['H_GoalsAgainst_Last5']) / 10.0
-        df['Expected_Total_Goals'] = df['Exp_Goals_Home'] + df['Exp_Goals_Away']
-        df['OU_Goal_Diff'] = df['Expected_Total_Goals'] - df['โกลสูง/ต่ำ']
-        df['Total_Goals_Conceded_Last5'] = df['H_GoalsAgainst_Last5'] + df['A_GoalsAgainst_Last5']
-            
-    if 'ผล HDP' in df.columns and 'ผลสูง/ต่ำ' in df.columns:
-        
-        # 💡 [Patch] แก้ไขโลจิก: ให้ "เจ๊า" มีค่าเป็น 0 เพื่อสอน AI ว่าคู่แบบนี้แทงไปก็เสียเวลา/ค่าน้ำ
-        def map_hdp_result(res):
-            res = str(res).strip()
-            if res == "" or res.lower() == "nan" or res.lower() == "none": return np.nan
-            if 'เจ้าบ้านได้เต็ม' in res or 'เจ้าบ้านได้ครึ่ง' in res: return 1
-            if 'เจ้าบ้านเสียเต็ม' in res or 'เจ้าบ้านเสียครึ่ง' in res or 'เจ๊า' in res: return 0
-            return np.nan 
-
-        def map_ou_result(res):
-            res = str(res).strip()
-            if res == "" or res.lower() == "nan" or res.lower() == "none": return np.nan
-            if 'สูงได้เต็ม' in res or 'สูงได้ครึ่ง' in res: return 1
-            if 'ต่ำได้เต็ม' in res or 'ต่ำได้ครึ่ง' in res or 'เจ๊า' in res: return 0
-            return np.nan 
-
-        df['Target_HDP'] = df['ผล HDP'].apply(map_hdp_result)
-        df['Target_OU'] = df['ผลสูง/ต่ำ'].apply(map_ou_result)
-        
-        # คัดเฉพาะแถวที่ยังไม่ลงผลสกอร์ เพื่อนำมาทำนาย
-        if 'ผลสกอร์' in df.columns:
-            df_predict = df[df['ผลสกอร์'].astype(str).str.strip().isin(["", "nan", "None"]) & df['ผล HDP'].astype(str).str.strip().isin(["", "nan", "None"])].copy()
-        else:
-            df_predict = df[df['ผล HDP'].astype(str).str.strip().isin(["", "nan", "None"])].copy()
-
-        # 💡 [Patch] ดักจับบัค KeyError: ตรวจสอบก่อนว่ามีคอลัมน์ครบถ้วนหรือไม่ก่อนสั่ง dropna
-        core_features = ['1X2 เหย้า', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 'โกลสูง/ต่ำ', 'Target_HDP', 'Target_OU']
-        missing_cols = [c for c in core_features if c not in df.columns]
-        
-        if missing_cols:
-            st.info(f"ℹ️ ระบบกำลังรอข้อมูล หรือไม่พบคอลัมน์: {', '.join(missing_cols)} ในชีตของคุณ")
-            return
-
-        # ปลอดภัยจาก KeyError แน่นอนแล้ว จึงค่อย dropna เพื่อสร้าง Train Set
-        df_train = df.dropna(subset=core_features).copy()
-
-        if len(df_train) > 5 and len(df_predict) > 0:
-            features = numeric_cols.copy() # เรียกใช้ตัวแปรทั้งหมดรวมถึง Form 5
-            
-            # เพิ่มตัวแปรวิเคราะห์สูง-ต่ำ ลงใน Features สำหรับ AI
-            new_ou_features = ['Expected_Total_Goals', 'OU_Goal_Diff', 'Total_Goals_Conceded_Last5']
-            if all(c in df.columns for c in new_ou_features):
-                features.extend(new_ou_features)
-            
-            # ใช้ค่า Median เติมเต็มข้อมูลที่หายไป (Missing Value Imputation) 
-            train_medians = df_train[features].median().fillna(0) # กันเหนียวกรณีที่คอลัมน์นั้นว่างทั้งแถว
-            
-            X_train = df_train[features].fillna(train_medians)
-            X_pred = df_predict[features].fillna(train_medians)
-            
-            # --- 1. โมเดลทำนาย แฮนดิแคป ---
-            model_hdp = RandomForestClassifier(n_estimators=100, max_depth=6, random_state=42)
-            model_hdp.fit(X_train, df_train['Target_HDP'])
-            
-            # --- 2. โมเดลทำนาย สูง-ต่ำ ---
-            model_ou = RandomForestClassifier(n_estimators=100, max_depth=6, random_state=42)
-            model_ou.fit(X_train, df_train['Target_OU'])
-            
-            # ทำนายผลเฉพาะคู่ที่ยังไม่แข่ง
-            df_predict['AI_โอกาสเหย้าชนะHDP(%)'] = (model_hdp.predict_proba(X_pred)[:, 1] * 100).round(1)
-            df_predict['AI_โอกาสออกสูง(%)'] = (model_ou.predict_proba(X_pred)[:, 1] * 100).round(1)
-            
-            # ปรับเกณฑ์ความมั่นใจให้เข้มงวดขึ้น (Threshold)
-            def hdp_decision(prob):
-                if prob >= 60: return "⭐⭐⭐ ไม้หนัก VIP (แทงเหย้า)"
-                elif prob >= 55: return "⭐⭐ ลงทุนเหย้า"
-                elif prob <= 40: return "❌ รองทีมเยือน VIP"
-                elif prob <= 45: return "🔻 รองทีมเยือน"
-                else: return "⚠️ ข้าม (โอกาสไม่ชัดเจน)"
-                
-            def ou_decision(prob):
-                if prob >= 60: return "🔥 สูง (Over) มั่นใจมาก"
-                elif prob >= 55: return "📈 น่าลงทุนสูง"
-                elif prob <= 40: return "🛡️ ต่ำ (Under) มั่นใจมาก"
-                elif prob <= 45: return "📉 น่าลงทุนต่ำ"
-                else: return "⚠️ ข้าม (O/U)"
-
-            df_predict['AI_ฟันธง_HDP'] = df_predict['AI_โอกาสเหย้าชนะHDP(%)'].apply(hdp_decision)
-            df_predict['AI_ฟันธง_สูงต่ำ'] = df_predict['AI_โอกาสออกสูง(%)'].apply(ou_decision)
-            
-            st.markdown(f"พบแมตช์ที่ยังไม่ลงผลสกอร์ทั้งหมด **{len(df_predict)} คู่**:")
-            st.markdown(render_prediction_cards(df_predict), unsafe_allow_html=True)
-            
-        elif len(df_train) <= 5:
-            st.info("ℹ️ ต้องการข้อมูลที่มีผลการแข่งขันในอดีต (ทั้ง HDP และ สูง-ต่ำ) อย่างน้อย 5 แถวขึ้นไป เพื่อให้ AI เริ่มประมวลผล")
-        else:
-            st.success("🎉 ไม่มีคู่ค้างที่ยังไม่ลงผลสกอร์ ทุกคู่ใน Google Sheets บันทึกผลครบถ้วนแล้ว!")
-    else:
-        st.warning("⚠️ ไม่พบคอลัมน์ 'ผล HDP' หรือ 'ผลสูง/ต่ำ' ใน Google Sheets สำหรับเทรน AI")
 
 # ----------------------------------------
 # หัวข้อหลัก
 # ----------------------------------------
 st.markdown("<h1 class='page-title'>⚽ ระบบวิเคราะห์ราคาบอล VIP & AI</h1>", unsafe_allow_html=True)
-st.markdown("<p class='page-sub'>สกัดราคาจากภาพ วิเคราะห์ ติดตามผล และพยากรณ์ด้วย Machine Learning ในที่เดียว</p>", unsafe_allow_html=True)
+st.markdown("<p class='page-sub'>สกัดราคาจากภาพ วิเคราะห์ ติดตามผล และพยากรณ์ด้วย Machine Learning แบบเรียลไทม์</p>", unsafe_allow_html=True)
 
-tab1, tab2 = st.tabs(["📸 อัปโหลดราคาบอล", "📊 Dashboard & AI"])
+tab1, tab2 = st.tabs(["📸 อัปโหลดราคาบอล", "🧠 AI Dashboard (สถิติ & ทำนาย)"])
 
-# ----------------------------------------
-# TAB 1
-# ----------------------------------------
 with tab1:
-    st.subheader("สกัดราคาบอล & วิเคราะห์ VIP")
-    st.write('ลากรูปมาวางได้ (เลือกได้หลายรูป) อ่านราคาแล้วกรอก Win rate และประตูได้/เสีย 5 นัด จึงกดยืนยันบันทึก')
-
-    fmt_choice = st.selectbox(
-        "รูปแบบค่าน้ำในภาพ", list(FMT_CHOICES.keys()),
-        help="ใช้กับรูปที่อัปโหลดต่อจากนี้ ระบบจะแปลงค่าน้ำเป็นแบบมาเลเซียก่อนบันทึกเสมอ เลือก 'อัตโนมัติ' ถ้าไม่แน่ใจ")
-
+    fmt_choice = st.selectbox("รูปแบบค่าน้ำ", list(FMT_CHOICES.keys()))
     up_n = st.session_state.get("up_n", 0)
-    uploaded_files = st.file_uploader("เลือกไฟล์รูปภาพตารางราคาบอล", type=['png', 'jpg', 'jpeg'],
-                                     accept_multiple_files=True, key=f"uploader_{up_n}")
-    if uploaded_files:
-        if not workbook:
-            st.error("ไม่สามารถเชื่อมต่อ Google Sheets ได้")
-        else:
-            for f in uploaded_files:
-                submit_job(f.name, f.getvalue(), FMT_CHOICES[fmt_choice])
-            st.session_state["up_n"] = up_n + 1
-            st.rerun()
-
-    render_jobs_live()
+    uploaded_files = st.file_uploader("เลือกไฟล์รูปภาพตารางราคาบอล", type=['png', 'jpg', 'jpeg'], accept_multiple_files=True, key=f"uploader_{up_n}")
+    if uploaded_files and workbook:
+        for f in uploaded_files: JOBS.pool.submit(process_job, JOBS.create(f.name, f.getvalue(), FMT_CHOICES[fmt_choice], st.session_state["form5_owner_id"]), workbook, model)
+        st.session_state["up_n"] = up_n + 1
+        st.rerun()
+    if hasattr(st, "fragment"): st.fragment(run_every=2)(render_jobs)()
+    else: render_jobs()
     render_form5_editor()
 
 # ----------------------------------------
-# TAB 2 : Dashboard & AI
+# TAB 2 : AI DASHBOARD
 # ----------------------------------------
 with tab2:
     if not workbook:
         st.error("ไม่สามารถเชื่อมต่อ Google Sheets ได้")
     else:
-        try:
-            if st.button("🔄 รีเฟรชข้อมูล"):
-                st.cache_data.clear()
-                st.rerun()
+        if st.button("🔄 รีเฟรชข้อมูล"): 
+            st.cache_data.clear()
+            st.rerun()
 
-            df, df_stats = load_dashboard_data(workbook, JOBS.data_version)
-            df_stats = df_stats.copy()
-            if not df_stats.empty:
-                df_stats.columns = [str(c).strip() for c in df_stats.columns]
+        df = load_dashboard_data(workbook, JOBS.data_version)
+        
+        # 1. Clean Numeric Cols
+        numeric_cols = ['1X2 เหย้า', '1X2 เสมอ', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 'โกลสูง/ต่ำ', 'ค่าน้ำ (สูง)', 'ค่าน้ำ (ต่ำ)',
+                        'H_WinRate_Last5', 'H_GoalsFor_Last5', 'H_GoalsAgainst_Last5', 'A_WinRate_Last5', 'A_GoalsFor_Last5', 'A_GoalsAgainst_Last5']
+        
+        for col in numeric_cols:
+            if col in df.columns:
+                if df[col].dtype == object: df[col] = df[col].astype(str).str.replace('%', '').str.strip()
+                df[col] = pd.to_numeric(df[col], errors='coerce')
 
-            if not df.empty and 'ผลเปรียบเทียบ' in df.columns:
-                df_comp = df[df['ผลเปรียบเทียบ'].astype(str).str.contains('ชนะ|แพ้|เจ๊า', na=False)].copy()
-                total, total_wins, win_rate = calc_win_stats(df_comp)
+        # 2. Feature Engineering
+        if all(c in df.columns for c in ['H_GoalsFor_Last5', 'A_GoalsAgainst_Last5', 'A_GoalsFor_Last5', 'H_GoalsAgainst_Last5', 'โกลสูง/ต่ำ']):
+            df['Exp_Goals_Home'] = (df['H_GoalsFor_Last5'] + df['A_GoalsAgainst_Last5']) / 10.0
+            df['Exp_Goals_Away'] = (df['A_GoalsFor_Last5'] + df['H_GoalsAgainst_Last5']) / 10.0
+            df['Expected_Total_Goals'] = df['Exp_Goals_Home'] + df['Exp_Goals_Away']
+            df['OU_Goal_Diff'] = df['Expected_Total_Goals'] - df['โกลสูง/ต่ำ']
+            df['Total_Goals_Conceded_Last5'] = df['H_GoalsAgainst_Last5'] + df['A_GoalsAgainst_Last5']
 
-                # --- 1. KPI ---
-                st.markdown(f"""<div class="kpi-wrap">
-<div class="kpi hero">
-<div class="kpi-label">Win Rate รวมทั้งหมด</div>
-<div class="kpi-value">{win_rate}<span class="kpi-unit">%</span></div>
-<div class="kpi-bar"><div style="width:{min(win_rate, 100)}%"></div></div>
-</div>
-<div class="kpi">
-<div class="kpi-label">แมตช์ที่จบแล้ว</div>
-<div class="kpi-value">{total}<span class="kpi-unit">คู่</span></div>
-</div>
-<div class="kpi">
-<div class="kpi-label">คะแนนชนะสะสม</div>
-<div class="kpi-value">{total_wins:g}<span class="kpi-unit">แต้ม</span></div>
-</div>
-</div>""", unsafe_allow_html=True)
+        # 3. Target Definition
+        if 'ผล HDP' in df.columns and 'ผลสูง/ต่ำ' in df.columns:
+            def map_hdp_result(res):
+                res = str(res).strip()
+                if res == "" or res.lower() in ("nan", "none"): return np.nan
+                if 'เจ้าบ้านได้เต็ม' in res or 'เจ้าบ้านได้ครึ่ง' in res: return 1
+                if 'เจ้าบ้านเสียเต็ม' in res or 'เจ้าบ้านเสียครึ่ง' in res or 'เจ๊า' in res: return 0
+                return np.nan 
 
-                col_chart1, col_chart2 = st.columns([1, 1.25], gap="large")
+            def map_ou_result(res):
+                res = str(res).strip()
+                if res == "" or res.lower() in ("nan", "none"): return np.nan
+                if 'สูงได้เต็ม' in res or 'สูงได้ครึ่ง' in res: return 1
+                if 'ต่ำได้เต็ม' in res or 'ต่ำได้ครึ่ง' in res or 'เจ๊า' in res: return 0
+                return np.nan 
 
-                # --- 2. Donut ---
-                with col_chart1:
-                    panel_header("สัดส่วนผลลัพธ์", "ผลของทุกคู่ที่จบแล้ว")
-                    color_map = {
-                        'ชนะเต็ม': GREEN, 'ชนะครึ่ง': GREEN_SOFT,
-                        'เจ๊า': '#4b5f54', 'แพ้ครึ่ง': '#b8575b', 'แพ้เต็ม': RED
-                    }
-                    counts = df_comp['ผลเปรียบเทียบ'].value_counts()
-                    order = [k for k in color_map if k in counts.index]
-                    pie_fig = go.Figure(go.Pie(
-                        labels=order, values=[counts[k] for k in order],
-                        hole=0.72, sort=False, direction='clockwise',
-                        marker=dict(colors=[color_map[k] for k in order], line=dict(color=BG, width=3)),
-                        textinfo='none', hovertemplate='%{label}: %{value} คู่ (%{percent})<extra></extra>'
-                    ))
-                    base_layout(pie_fig, 380)
-                    pie_fig.update_layout(
-                        showlegend=True,
-                        legend=dict(orientation='h', yanchor='top', y=-0.02, xanchor='center', x=0.5,
-                                    font=dict(color=TEXT, size=13)),
-                        annotations=[
-                            dict(text=f"<b>{win_rate}%</b>", x=0.5, y=0.55, showarrow=False,
-                                 font=dict(size=34, color=TEXT)),
-                            dict(text="Win Rate", x=0.5, y=0.43, showarrow=False,
-                                 font=dict(size=13, color=MUTED)),
-                        ]
-                    )
-                    st.plotly_chart(pie_fig, use_container_width=True, config={'displayModeBar': False})
-
-                # --- 3. Bar แยกตามกฎ ---
-                with col_chart2:
-                    panel_header("อัตราชนะแยกตามกฎ", "เขียว ≥ 60%  ·  เหลือง 55-60%  ·  แดง < 55%")
-
-                    if not df_stats.empty and 'อัตราชนะ' in df_stats.columns:
-                        plot_df = df_stats.copy()
-                        rule_col = plot_df.columns[0]
-                        plot_df['WinRate_Val'] = pd.to_numeric(
-                            plot_df['อัตราชนะ'].astype(str).str.replace('%', '').str.strip(),
-                            errors='coerce').fillna(0)
-                        plot_df = plot_df[plot_df['WinRate_Val'] > 0].sort_values('WinRate_Val', ascending=True)
-
-                        bar_colors = [GREEN if v >= 60 else AMBER if v >= 55 else RED for v in plot_df['WinRate_Val']]
-
-                        fig_bar = go.Figure(go.Bar(
-                            x=plot_df['WinRate_Val'], y=plot_df[rule_col], orientation='h',
-                            marker=dict(color=bar_colors, cornerradius=6),
-                            text=[f"{v:g}%" for v in plot_df['WinRate_Val']], textposition='outside',
-                            textfont=dict(color=TEXT, size=13), cliponaxis=False,
-                            hovertemplate='%{y}: %{x}%<extra></extra>'
-                        ))
-                        base_layout(fig_bar, max(380, 46 * len(plot_df) + 40))
-                        fig_bar.update_layout(
-                            xaxis=dict(range=[0, 108], visible=False),
-                            yaxis=dict(showgrid=False, title="", tickfont=dict(size=13, color=TEXT)),
-                            bargap=0.45, showlegend=False,
-                            margin=dict(l=10, r=40, t=10, b=10),
-                        )
-                        fig_bar.add_vline(x=55, line=dict(color=LINE, width=1.5, dash='dot'))
-                        st.plotly_chart(fig_bar, use_container_width=True, config={'displayModeBar': False})
-                    else:
-                        st.info("ยังไม่มีข้อมูลสถิติเพียงพอสำหรับสร้างกราฟ")
-
-            # --- 4. การ์ดสถิติรายกฎ ---
-            st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
-            panel_header("สถิติรายกฎ", "เรียงจากอัตราชนะสูงสุด · ลูกศรเทียบกับค่าก่อนหน้าที่ระบบบันทึกไว้")
-
-            if not df_stats.empty and 'อัตราชนะ' in df_stats.columns:
-                tbl = df_stats.copy()
-                tbl['_v'] = pd.to_numeric(
-                    tbl['อัตราชนะ'].astype(str).str.replace('%', '').str.strip(),
-                    errors='coerce').fillna(0)
-                tbl = tbl.sort_values('_v', ascending=False)
-                rule_col = df_stats.columns[0]
-                extra_cols = [c for c in df_stats.columns if c not in (rule_col, 'อัตราชนะ')]
-
-                rates = {str(r[rule_col]).strip(): round(float(r['_v']), 2)
-                         for _, r in tbl.iterrows() if r['_v'] > 0}
-                history, hist_err = cached_rate_history(workbook, rates)
-                if hist_err:
-                    st.warning(f"บันทึกประวัติสถิติไม่สำเร็จ จึงยังแสดงลูกศรไม่ได้: {hist_err}")
-
-                deltas = [trend_delta(history.get(n, [])) for n in rates]
-                n_up = sum(1 for d in deltas if d is not None and d > 0)
-                n_down = sum(1 for d in deltas if d is not None and d < 0)
-                if n_up or n_down:
-                    chips = []
-                    if n_up: chips.append(f"<span class='trend up'>▲ เพิ่มขึ้น {n_up} กฎ</span>")
-                    if n_down: chips.append(f"<span class='trend down'>▼ ลดลง {n_down} กฎ</span>")
-                    st.markdown(f"<div class='trend-sum'>{''.join(chips)}</div>", unsafe_allow_html=True)
-
-                cards = ["<div class='rule-grid'>"]
-                for _, row in tbl.iterrows():
-                    v = row['_v']
-                    name = str(row[rule_col]).strip()
-                    k, tag = ("g", "แนะนำ") if v >= 60 else ("a", "ระวัง") if v >= 55 else ("r", "หลีกเลี่ยง")
-                    meta = "".join(f"<span>{esc(str(c))}<b>{esc(str(row[c]))}</b></span>" for c in extra_cols
-                                   if str(row[c]).strip() != "")
-                    cards.append(
-                        f"<div class='rule-card'>"
-                        f"<div class='rule-top'><span class='rule-name'>{esc(name)}</span>"
-                        f"<span class='rule-tag tag-{k}'>{tag}</span></div>"
-                        f"<div class='rule-rate-row'><div class='rule-rate t-{k}'>{esc(str(row['อัตราชนะ']))}</div>"
-                        f"{trend_html(history.get(name, []))}</div>"
-                        f"<div class='rule-bar'><div class='b-{k}' style='width:{min(v, 100)}%'></div></div>"
-                        f"<div class='rule-meta'>{meta}</div>"
-                        f"</div>")
-                cards.append("</div>")
-                st.markdown("".join(cards), unsafe_allow_html=True)
+            df['Target_HDP'] = df['ผล HDP'].apply(map_hdp_result)
+            df['Target_OU'] = df['ผลสูง/ต่ำ'].apply(map_ou_result)
+            
+            # Split Predict (No results) vs Train (Has results)
+            if 'ผลสกอร์' in df.columns:
+                df_predict = df[df['ผลสกอร์'].astype(str).str.strip().isin(["", "nan", "None"]) & df['ผล HDP'].astype(str).str.strip().isin(["", "nan", "None"])].copy()
             else:
-                st.warning("ไม่พบข้อมูลสถิติในตาราง")
+                df_predict = df[df['ผล HDP'].astype(str).str.strip().isin(["", "nan", "None"])].copy()
 
-            # --- 5. เรียกใช้งาน AI Machine Learning Predictions ---
-            render_ai_prediction_section(df)
+            core_features = ['1X2 เหย้า', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 'โกลสูง/ต่ำ', 'Target_HDP', 'Target_OU']
+            missing_cols = [c for c in core_features if c not in df.columns]
+            
+            if missing_cols:
+                st.info(f"ℹ️ ระบบกำลังรอข้อมูลผลบอล หรือไม่พบคอลัมน์: {', '.join(missing_cols)} ในชีตของคุณ")
+            else:
+                df_train = df.dropna(subset=core_features).copy()
+                
+                if len(df_train) > 5:
+                    features = numeric_cols.copy()
+                    new_ou_features = ['Expected_Total_Goals', 'OU_Goal_Diff', 'Total_Goals_Conceded_Last5']
+                    if all(c in df.columns for c in new_ou_features): features.extend(new_ou_features)
+                    
+                    train_medians = df_train[features].median().fillna(0)
+                    X_train = df_train[features].fillna(train_medians)
+                    
+                    # 4. Train Models
+                    model_hdp = RandomForestClassifier(n_estimators=100, max_depth=6, random_state=42)
+                    model_hdp.fit(X_train, df_train['Target_HDP'])
+                    
+                    model_ou = RandomForestClassifier(n_estimators=100, max_depth=6, random_state=42)
+                    model_ou.fit(X_train, df_train['Target_OU'])
 
-        except Exception as e:
-            st.error(f"เกิดข้อผิดพลาดในการโหลดข้อมูลสถิติ: {str(e)}")
+                    # 5. Evaluate Accuracy on Historical Data
+                    hdp_correct = (model_hdp.predict(X_train) == df_train['Target_HDP']).sum()
+                    ou_correct = (model_ou.predict(X_train) == df_train['Target_OU']).sum()
+                    total_train = len(df_train)
+                    
+                    hdp_acc = round((hdp_correct / total_train) * 100, 1) if total_train > 0 else 0
+                    ou_acc = round((ou_correct / total_train) * 100, 1) if total_train > 0 else 0
+
+                    # ==========================================
+                    # RENDER AI DASHBOARD
+                    # ==========================================
+                    
+                    # --- 1. KPI Cards ---
+                    st.markdown(f"""<div class="kpi-wrap">
+                    <div class="kpi hero">
+                        <div class="kpi-label">ความแม่นยำ AI (แฮนดิแคป)</div>
+                        <div class="kpi-value">{hdp_acc}<span class="kpi-unit">%</span></div>
+                        <div class="kpi-bar"><div style="width:{min(hdp_acc, 100)}%"></div></div>
+                    </div>
+                    <div class="kpi hero-cyan">
+                        <div class="kpi-label">ความแม่นยำ AI (สูง-ต่ำ)</div>
+                        <div class="kpi-value">{ou_acc}<span class="kpi-unit">%</span></div>
+                        <div class="kpi-bar"><div style="width:{min(ou_acc, 100)}%"></div></div>
+                    </div>
+                    <div class="kpi">
+                        <div class="kpi-label">เรียนรู้จากข้อมูลผลลัพธ์แล้ว</div>
+                        <div class="kpi-value">{total_train}<span class="kpi-unit">คู่</span></div>
+                    </div>
+                    </div>""", unsafe_allow_html=True)
+
+                    # --- Helper Charts ---
+                    def plot_ai_donut(correct, total, color_hex):
+                        incorrect = total - correct
+                        fig = go.Figure(go.Pie(
+                            labels=['ทายถูก (Win)', 'ทายผิด/เจ๊า (Loss/Draw)'], values=[correct, incorrect],
+                            hole=0.72, sort=False, direction='clockwise',
+                            marker=dict(colors=[color_hex, RED], line=dict(color=BG, width=3)),
+                            textinfo='none', hovertemplate='%{label}: %{value} คู่ (%{percent})<extra></extra>'
+                        ))
+                        base_layout(fig, 320)
+                        acc = round((correct/total)*100, 1) if total > 0 else 0
+                        fig.update_layout(
+                            showlegend=True, legend=dict(orientation='h', yanchor='top', y=-0.05, xanchor='center', x=0.5, font=dict(color=TEXT, size=13)),
+                            annotations=[dict(text=f"<b>{acc}%</b>", x=0.5, y=0.55, showarrow=False, font=dict(size=34, color=TEXT)), dict(text="Accuracy", x=0.5, y=0.43, showarrow=False, font=dict(size=13, color=MUTED))],
+                            margin=dict(l=10, r=10, t=10, b=10)
+                        )
+                        return fig
+
+                    def plot_ai_feature_importance(model, feature_names, color_hex):
+                        df_imp = pd.DataFrame({'Feature': feature_names, 'Importance': model.feature_importances_}).sort_values('Importance', ascending=True).tail(5)
+                        
+                        df_imp['Feature'] = df_imp['Feature'].replace({
+                            'Expected_Total_Goals': 'ประตูรวมที่คาดหวัง', 'OU_Goal_Diff': 'ส่วนต่างโกลที่คาด', 'Total_Goals_Conceded_Last5': 'เสียประตู 5 นัดรวม',
+                            'H_GoalsFor_Last5': 'เหย้ายิงได้ 5 นัด', 'H_GoalsAgainst_Last5': 'เหย้าเสีย 5 นัด', 'A_GoalsFor_Last5': 'เยือนยิงได้ 5 นัด', 'A_GoalsAgainst_Last5': 'เยือนเสีย 5 นัด',
+                            'H_WinRate_Last5': 'WinRate เหย้า 5 นัด', 'A_WinRate_Last5': 'WinRate เยือน 5 นัด', '1X2 เหย้า': 'ราคา 1X2 เหย้า', '1X2 เยือน': 'ราคา 1X2 เยือน',
+                            'แฮนดิแคป (เหย้า)': 'แต้มต่อ HDP', 'ค่าน้ำ HDP (เหย้า)': 'ค่าน้ำ HDP', 'โกลสูง/ต่ำ': 'ไลน์สูง-ต่ำ', 'ค่าน้ำ (สูง)': 'ค่าน้ำสูง', 'ค่าน้ำ (ต่ำ)': 'ค่าน้ำต่ำ'
+                        })
+
+                        fig = go.Figure(go.Bar(
+                            x=df_imp['Importance'], y=df_imp['Feature'], orientation='h',
+                            marker=dict(color=color_hex, cornerradius=6),
+                            text=[f"{v*100:.1f}%" for v in df_imp['Importance']], textposition='outside',
+                            textfont=dict(color=TEXT, size=13), cliponaxis=False, hovertemplate='%{y}: น้ำหนัก %{x:.1%}<extra></extra>'
+                        ))
+                        base_layout(fig, 320)
+                        fig.update_layout(xaxis=dict(visible=False), yaxis=dict(showgrid=False, title="", tickfont=dict(size=13, color=TEXT)), bargap=0.45, showlegend=False, margin=dict(l=10, r=40, t=10, b=10))
+                        return fig
+
+                    # --- 2. HDP & O/U Graphs ---
+                    col_hdp1, col_hdp2 = st.columns([1, 1.25], gap="large")
+                    with col_hdp1:
+                        panel_header("สัดส่วนความแม่นยำ (แฮนดิแคป)", "เทียบจากผลการเรียนรู้ประวัติศาสตร์ทั้งหมด")
+                        st.plotly_chart(plot_ai_donut(hdp_correct, total_train, GREEN), use_container_width=True, config={'displayModeBar': False})
+                    with col_hdp2:
+                        panel_header("ปัจจัยที่มีผลต่อ HDP สูงสุด 5 อันดับ", "น้ำหนักความสำคัญที่ AI ใช้ตัดสินใจ (Feature Importance)")
+                        st.plotly_chart(plot_ai_feature_importance(model_hdp, X_train.columns, GREEN), use_container_width=True, config={'displayModeBar': False})
+
+                    st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
+                    
+                    col_ou1, col_ou2 = st.columns([1, 1.25], gap="large")
+                    with col_ou1:
+                        panel_header("สัดส่วนความแม่นยำ (สูง-ต่ำ)", "เทียบจากผลการเรียนรู้ประวัติศาสตร์ทั้งหมด")
+                        st.plotly_chart(plot_ai_donut(ou_correct, total_train, CYAN), use_container_width=True, config={'displayModeBar': False})
+                    with col_ou2:
+                        panel_header("ปัจจัยที่มีผลต่อสูง-ต่ำ สูงสุด 5 อันดับ", "น้ำหนักความสำคัญที่ AI ใช้ตัดสินใจ (Feature Importance)")
+                        st.plotly_chart(plot_ai_feature_importance(model_ou, X_train.columns, CYAN), use_container_width=True, config={'displayModeBar': False})
+
+                    # --- 3. Predictions for New Matches ---
+                    st.markdown("<div style='height:36px'></div>", unsafe_allow_html=True)
+                    panel_header("🤖 แมตช์ที่รอทำนาย (AI Predictions)", "ระบบวิเคราะห์ความน่าจะเป็นเฉพาะคู่ที่ยังไม่ลงผลสกอร์")
+                    
+                    if len(df_predict) > 0:
+                        X_pred = df_predict[features].fillna(train_medians)
+                        
+                        df_predict['AI_โอกาสเหย้าชนะHDP(%)'] = (model_hdp.predict_proba(X_pred)[:, 1] * 100).round(1)
+                        df_predict['AI_โอกาสออกสูง(%)'] = (model_ou.predict_proba(X_pred)[:, 1] * 100).round(1)
+                        
+                        def hdp_decision(prob):
+                            if prob >= 60: return "⭐⭐⭐ ไม้หนัก VIP (แทงเหย้า)"
+                            elif prob >= 55: return "⭐⭐ ลงทุนเหย้า"
+                            elif prob <= 40: return "❌ รองทีมเยือน VIP"
+                            elif prob <= 45: return "🔻 รองทีมเยือน"
+                            else: return "⚠️ ข้าม (โอกาสไม่ชัดเจน)"
+                            
+                        def ou_decision(prob):
+                            if prob >= 60: return "🔥 สูง (Over) มั่นใจมาก"
+                            elif prob >= 55: return "📈 น่าลงทุนสูง"
+                            elif prob <= 40: return "🛡️ ต่ำ (Under) มั่นใจมาก"
+                            elif prob <= 45: return "📉 น่าลงทุนต่ำ"
+                            else: return "⚠️ ข้าม (O/U)"
+
+                        df_predict['AI_ฟันธง_HDP'] = df_predict['AI_โอกาสเหย้าชนะHDP(%)'].apply(hdp_decision)
+                        df_predict['AI_ฟันธง_สูงต่ำ'] = df_predict['AI_โอกาสออกสูง(%)'].apply(ou_decision)
+                        
+                        st.markdown(f"พบแมตช์ที่รอการทำนาย **{len(df_predict)} คู่**:")
+                        st.markdown(render_prediction_cards(df_predict), unsafe_allow_html=True)
+                    else:
+                        st.success("🎉 ไม่มีคู่ค้างที่ยังไม่ลงผลสกอร์ ทุกคู่ใน Google Sheets บันทึกผลครบถ้วนแล้ว!")
+                        
+                else:
+                    st.info("ℹ️ ต้องการข้อมูลที่มีผลการแข่งขันในอดีต (ทั้ง HDP และ สูง-ต่ำ) อย่างน้อย 5 แถวขึ้นไป เพื่อให้ AI เริ่มประมวลผลสถิติและทำนาย")
+        else:
+            st.warning("⚠️ ไม่พบคอลัมน์ 'ผล HDP' หรือ 'ผลสูง/ต่ำ' ใน Google Sheets สำหรับเทรน AI")
