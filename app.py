@@ -277,4 +277,12 @@ def parse_cell(v):
     except Exception:
         return cleaned
 
-def clean_raw
+def clean_raw_data(raw_text):
+    text = raw_text.replace('`', '').replace('\n', ' ').strip()
+    raw_data = [item.strip().replace('−', '-') for item in text.split(',')]
+    if not 12 <= len(raw_data) <= 13:
+        raise ValueError(f"AI คืนค่ามา {len(raw_data)} ช่อง (ต้องเป็น 12-13 ช่อง) อาจมีเครื่องหมายจุลภาคปนในชื่อทีม กรุณาอ่านภาพใหม่อีกครั้ง")
+    m = re.search(r'\b(MY|HK|ID|EU)\b', raw_data[12].upper()) if len(raw_data) > 12 else None
+    ai_fmt = m.group(1) if m else "UNK"
+    row_data = raw_data[:2] + [parse_cell(x) for x in raw_data[2:12]]
+    return row_data, ai_fmt
