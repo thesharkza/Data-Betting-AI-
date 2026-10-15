@@ -41,55 +41,25 @@ CYAN_SOFT = "#7dd3fc"
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap');
-
-html, body, [class*="css"], .stApp, .stMarkdown, button, input, textarea {
-    font-family: 'Prompt', 'Segoe UI', sans-serif !important;
-}
+html, body, [class*="css"], .stApp, .stMarkdown, button, input, textarea { font-family: 'Prompt', 'Segoe UI', sans-serif !important; }
 .stApp { background: #050907; color: #e6f2ea; }
 header[data-testid="stHeader"] { background: transparent; }
 .block-container { padding-top: 2.2rem; max-width: 1280px; }
-
 h1, h2, h3, h4 { color: #e6f2ea !important; letter-spacing: -0.01em; }
 p, label, span { color: inherit; }
-
-/* Tabs */
 .stTabs [data-baseweb="tab-list"] { gap: 6px; border-bottom: 1px solid #1b2a22; }
-.stTabs [data-baseweb="tab"] {
-    background: transparent; color: #7f9a8b; padding: 10px 18px;
-    border-radius: 10px 10px 0 0; font-weight: 500;
-}
+.stTabs [data-baseweb="tab"] { background: transparent; color: #7f9a8b; padding: 10px 18px; border-radius: 10px 10px 0 0; font-weight: 500; }
 .stTabs [aria-selected="true"] { color: #22c55e !important; background: #0c130f; }
 .stTabs [data-baseweb="tab-highlight"] { background-color: #22c55e; }
-
-/* Buttons */
-.stButton > button[kind="primary"] {
-    background: #22c55e; color: #03140a; border: none; font-weight: 600;
-    border-radius: 10px; padding: 0.55rem 1.4rem;
-}
+.stButton > button[kind="primary"] { background: #22c55e; color: #03140a; border: none; font-weight: 600; border-radius: 10px; padding: 0.55rem 1.4rem; }
 .stButton > button[kind="primary"]:hover { background: #4ade80; color: #03140a; }
-
-/* Uploader */
-[data-testid="stFileUploader"] section {
-    background: #0c130f; border: 1px dashed #2a4136; border-radius: 14px;
-}
-
-/* Page heading */
+[data-testid="stFileUploader"] section { background: #0c130f; border: 1px dashed #2a4136; border-radius: 14px; }
 .page-title { font-size: 1.9rem; font-weight: 600; margin: 0; color: #e6f2ea; }
 .page-sub { color: #7f9a8b; margin: 4px 0 22px 0; font-size: 0.95rem; }
-
-/* KPI strip */
 .kpi-wrap { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 22px; }
-.kpi {
-    background: #0c130f; border: 1px solid #1b2a22; border-radius: 16px; padding: 22px 26px;
-}
-.kpi.hero {
-    background: linear-gradient(160deg, #0f2a1b 0%, #0c130f 70%);
-    border-color: #1f6b3d; box-shadow: 0 0 40px -12px rgba(34,197,94,0.35);
-}
-.kpi.hero-cyan {
-    background: linear-gradient(160deg, #082f49 0%, #0c130f 70%);
-    border-color: #0284c7; box-shadow: 0 0 40px -12px rgba(14,165,233,0.35);
-}
+.kpi { background: #0c130f; border: 1px solid #1b2a22; border-radius: 16px; padding: 22px 26px; }
+.kpi.hero { background: linear-gradient(160deg, #0f2a1b 0%, #0c130f 70%); border-color: #1f6b3d; box-shadow: 0 0 40px -12px rgba(34,197,94,0.35); }
+.kpi.hero-cyan { background: linear-gradient(160deg, #082f49 0%, #0c130f 70%); border-color: #0284c7; box-shadow: 0 0 40px -12px rgba(14,165,233,0.35); }
 .kpi-label { color: #7f9a8b; font-size: 0.9rem; margin-bottom: 6px; }
 .kpi-value { font-size: 2.6rem; font-weight: 600; line-height: 1.15; color: #e6f2ea; }
 .kpi.hero .kpi-value { font-size: 3.6rem; color: #4ade80; }
@@ -98,29 +68,16 @@ p, label, span { color: inherit; }
 .kpi-bar { height: 6px; background: #17241d; border-radius: 6px; margin-top: 14px; overflow: hidden; }
 .kpi-bar > div { height: 100%; background: linear-gradient(90deg, #16a34a, #4ade80); border-radius: 6px; }
 .kpi.hero-cyan .kpi-bar > div { background: linear-gradient(90deg, #0284c7, #38bdf8); }
-
-/* Panels */
 .panel-title { font-size: 1.05rem; font-weight: 500; color: #e6f2ea; margin: 0 0 2px 0; }
 .panel-sub { font-size: 0.85rem; color: #7f9a8b; margin: 0 0 6px 0; }
-
-/* Background jobs */
 .job-card { background: #0c130f; border: 1px solid #1b2a22; border-left: 4px solid #1b2a22; border-radius: 14px; padding: 16px 20px; margin-bottom: 10px; }
 .job-card.ok { border-left-color: #22c55e; }
 .job-card.err { border-left-color: #e5484d; }
 .job-card.run { border-left-color: #d9a441; }
 .job-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .job-name { color: #7f9a8b; font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.job-pill { font-size: 0.78rem; padding: 3px 10px; border-radius: 999px; white-space: nowrap; font-weight: 500; }
-.job-pill.ok { color: #4ade80; background: rgba(34,197,94,0.15); }
-.job-pill.err { color: #f06b70; background: rgba(229,72,77,0.14); }
-.job-pill.run { color: #e8bb62; background: rgba(217,164,65,0.14); }
-.job-title { color: #e6f2ea; font-size: 1.1rem; font-weight: 600; margin: 8px 0 4px 0; }
 .job-msg { color: #a7c4b5; font-size: 0.9rem; }
-.job-note { color: #7f9a8b; font-size: 0.8rem; margin-top: 8px; }
-
-@media (max-width: 900px) {
-    .kpi-wrap { grid-template-columns: 1fr; }
-}
+@media (max-width: 900px) { .kpi-wrap { grid-template-columns: 1fr; } }
 </style>
 """, unsafe_allow_html=True)
 
@@ -134,10 +91,8 @@ else:
     st.error("❌ ไม่พบ GEMINI_API_KEY กรุณาตั้งค่าใน Streamlit Secrets")
 
 def _has_gspread_secret():
-    try:
-        return "gspread" in st.secrets
-    except Exception:
-        return False
+    try: return "gspread" in st.secrets
+    except Exception: return False
 
 @st.cache_resource
 def init_gspread():
@@ -145,10 +100,7 @@ def init_gspread():
         client = gspread.service_account_from_dict(dict(st.secrets["gspread"]))
     else:
         base_dir = os.path.dirname(os.path.abspath(__file__))
-        creds_path = os.path.join(base_dir, 'credentials.json')
-        if not os.path.exists(creds_path):
-            raise FileNotFoundError('ไม่พบไฟล์ credentials.json')
-        client = gspread.service_account(filename=creds_path)
+        client = gspread.service_account(filename=os.path.join(base_dir, 'credentials.json'))
     return client.open("ข้อมูลราคาบอลสกัดจากภาพ")
 
 try:
@@ -157,17 +109,16 @@ except Exception as e:
     st.error(f"❌ เชื่อมต่อ Google Sheets ไม่สำเร็จ: {e}")
     workbook = None
 
+# ฟังก์ชันผู้ช่วยสำหรับดึงชีตที่ชื่อ DATA
+def get_ws(wb):
+    try: return wb.worksheet("DATA")
+    except gspread.exceptions.WorksheetNotFound: return wb.sheet1
+
 model = genai.GenerativeModel('gemini-3.7-flash')
 
 WATER_IDX = [6, 8, 10, 11]
 FMT_LABELS = {"MY": "มาเลเซีย", "HK": "ฮ่องกง", "ID": "อินโดนีเซีย", "EU": "ยุโรป (Decimal)"}
-FMT_CHOICES = {
-    "อัตโนมัติ (ให้ AI ตรวจจับ)": None,
-    "มาเลเซีย (Malay)": "MY",
-    "ฮ่องกง (HK)": "HK",
-    "อินโดนีเซีย (Indo)": "ID",
-    "ยุโรป (Decimal)": "EU",
-}
+FMT_CHOICES = { "อัตโนมัติ (ให้ AI ตรวจจับ)": None, "มาเลเซีย (Malay)": "MY", "ฮ่องกง (HK)": "HK", "อินโดนีเซีย (Indo)": "ID", "ยุโรป (Decimal)": "EU" }
 
 def to_malay(x, fmt):
     x = float(x)
@@ -188,13 +139,33 @@ def parse_cell(v):
     except Exception: return cleaned
 
 def clean_raw_data(raw_text):
-    text = raw_text.replace('`', '').replace('\n', ' ').strip()
+    # ล้าง Markdown โค้ดบล็อก
+    text = re.sub(r'```(?:csv|json|text)?\n?', '', raw_text)
+    text = text.replace('`', '').strip()
+    
+    # ดึงเฉพาะบรรทัดที่มีลูกน้ำเยอะสุด (เผื่อ AI พิมพ์น้ำท่วมทุ่งมา)
+    if '\n' in text:
+        lines = text.split('\n')
+        text = max(lines, key=lambda l: l.count(','))
+        
+    # ถ้ายังมีคำนำหน้า เช่น "ข้อมูลคือ: ทีมA,ทีมB..." ให้ตัดออก
+    if ':' in text and text.count(',') >= 11:
+        text = text.split(':', 1)[-1].strip()
+        
     raw_data = [item.strip().replace('−', '-') for item in text.split(',')]
     if not 12 <= len(raw_data) <= 13:
-        raise ValueError(f"AI คืนค่ามา {len(raw_data)} ช่อง (ต้องเป็น 12-13 ช่อง)")
+        raise ValueError(f"AI คืนค่ามาผิดรูปแบบ ({len(raw_data)} ช่อง) ข้อมูลดิบ: {text[:50]}")
+        
     m = re.search(r'\b(MY|HK|ID|EU)\b', raw_data[12].upper()) if len(raw_data) > 12 else None
     ai_fmt = m.group(1) if m else "UNK"
-    row_data = raw_data[:2] + [parse_cell(x) for x in raw_data[2:12]]
+    
+    row_data = raw_data[:2] + [parse_cell(x) for x in raw_data]
+    
+    # ป้องกันชื่อทีมเหย้ายาวเกินไป (ตัดเอาแค่ 3 คำสุดท้ายถ้าข้อความยาวผิดปกติ)
+    if isinstance(row_data[0], str) and len(row_data[0]) > 35:
+        words = row_data[0].split()
+        row_data[0] = " ".join(words[-3:]) if len(words) >= 3 else row_data[0]
+        
     return row_data, ai_fmt
 
 def convert_water_to_malay(row, user_fmt, ai_fmt):
@@ -207,10 +178,7 @@ def convert_water_to_malay(row, user_fmt, ai_fmt):
     for i in idx: new_row[i] = to_malay(new_row[i], fmt)
     return new_row, f"อิงรูปแบบ: {FMT_LABELS.get(fmt, fmt)} ({source})", None
 
-FORM5_HEADERS = [
-    "H_WinRate_Last5", "H_GoalsFor_Last5", "H_GoalsAgainst_Last5",
-    "A_WinRate_Last5", "A_GoalsFor_Last5", "A_GoalsAgainst_Last5",
-]
+FORM5_HEADERS = ["H_WinRate_Last5", "H_GoalsFor_Last5", "H_GoalsAgainst_Last5", "A_WinRate_Last5", "A_GoalsFor_Last5", "A_GoalsAgainst_Last5"]
 
 def validate_form5(values):
     if len(values) != 6 or any(v is None or v == "" or isinstance(v, bool) for v in values):
@@ -297,13 +265,22 @@ def extract_row(img_bytes, user_fmt, model):
     img.thumbnail((1600, 1600))
     buf = io.BytesIO()
     img.save(buf, format='JPEG', quality=85)
+    
+    # ปรับคำสั่งให้บังคับ AI ห้ามพิมพ์ข้อความบรรยายเด็ดขาด
+    prompt = (
+        "สกัดข้อมูลจากตารางราคาบอลในภาพนี้ เอาเฉพาะ 1 คู่ที่เด่นที่สุด\n"
+        "คำสั่งสำคัญ: ห้ามพิมพ์ข้อความอธิบาย ห้ามพิมพ์หัวข้อ ห้ามใช้ Markdown ให้พิมพ์แค่ข้อมูลคั่นด้วยลูกน้ำ (,) บรรทัดเดียวจบ\n"
+        "ลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2เหย้า,1X2เสมอ,1X2เยือน,HDPเหย้า,น้ำHDPเหย้า,HDPเยือน,น้ำHDPเยือน,สูงต่ำ,น้ำสูง,น้ำต่ำ,รหัสรูปแบบน้ำ\n"
+        "ตัวอย่าง: Manchester City,Arsenal,1.5,4.0,5.5,-0.5,0.95,0.5,-0.85,2.5,0.80,-0.90,MY"
+    )
+    
     for attempt in range(3):
         try:
-            resp = model.generate_content([{"mime_type": "image/jpeg", "data": buf.getvalue()}, "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ,ค่าน้ำสูง,ค่าน้ำต่ำ,รหัสรูปแบบราคาน้ำ"])
+            resp = model.generate_content([{"mime_type": "image/jpeg", "data": buf.getvalue()}, prompt])
             row, ai_fmt = clean_raw_data(resp.text.strip())
             return convert_water_to_malay(row, user_fmt, ai_fmt)
         except Exception: time.sleep(2)
-    raise RuntimeError("อ่านภาพไม่สำเร็จ")
+    raise RuntimeError("อ่านภาพไม่สำเร็จ (อาจเป็นเพราะ AI ตอบผิดรูปแบบ)")
 
 def process_job(job_id, workbook, model):
     try:
@@ -320,7 +297,9 @@ def save_confirmed_job(job_id, workbook):
     if not job or job["status"] != "saving": return
     try:
         with JOBS.sheet_lock:
-            target_row, overwritten = save_row_to_sheet(workbook.sheet1, job["row_data"], job["form5"])
+            # ดึงชีต "DATA" โดยเฉพาะ
+            ws = get_ws(workbook)
+            target_row, overwritten = save_row_to_sheet(ws, job["row_data"], job["form5"])
         JOBS.bump_version()
         JOBS.update(job_id, status="done", msg="บันทึกสำเร็จ", finished=time.time(), result={"home": str(job["row_data"][0]), "away": str(job["row_data"][1]), "row": target_row, "overwritten": overwritten})
     except Exception as exc:
@@ -328,7 +307,6 @@ def save_confirmed_job(job_id, workbook):
 
 def submit_form5(job_id, values, owner_id):
     job = JOBS.get(job_id)
-    # 💡 บัคอยู่ตรงนี้! เปลี่ยนให้ใช้ JOBS.update แทน job.update เพื่อส่งสถานะ "saving" ไปให้ระบบรับรู้จริงๆ
     if job and job.get("owner_id") == owner_id:
         JOBS.update(job_id, status="saving", msg="Saving...", form5=list(values))
         JOBS.pool.submit(save_confirmed_job, job_id, workbook)
@@ -359,12 +337,12 @@ def render_form5_editor():
 
 @st.cache_data(ttl=60, show_spinner=False)
 def load_dashboard_data(_workbook, version=0):
-    return pd.DataFrame(_workbook.sheet1.get_all_records())
+    ws = get_ws(_workbook)
+    return pd.DataFrame(ws.get_all_records())
 
 def base_layout(fig, height=380):
     fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(family="Prompt, sans-serif", color=MUTED, size=13), margin=dict(l=10, r=10, t=10, b=10), height=height)
     return fig
-
 def panel_header(title, sub): st.markdown(f"<p class='panel-title'>{title}</p><p class='panel-sub'>{sub}</p>", unsafe_allow_html=True)
 
 # ----------------------------------------
@@ -420,23 +398,21 @@ def render_prediction_cards(df_pred, workbook):
 
             with st.form(key=f"score_form_{idx}_{home}_{away}"):
                 sc1, sc2, sc3 = st.columns([2, 1, 1])
-                with sc1:
-                    score_input = st.text_input("กรอกผลสกอร์ (เช่น 2-1)", placeholder="ทีมเหย้า-ทีมเยือน", key=f"score_input_{idx}")
+                with sc1: score_input = st.text_input("กรอกผลสกอร์ (เช่น 2-1)", placeholder="ทีมเหย้า-ทีมเยือน", key=f"score_input_{idx}")
                 with sc3:
                     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
                     submitted = st.form_submit_button("💾 บันทึกผลลงชีต")
                 
                 if submitted:
                     if score_input.strip():
-                        success = update_match_score_in_sheet(workbook.sheet1, home, away, score_input.strip())
+                        # บันทึกลงหน้าชีต DATA โดยเฉพาะ
+                        success = update_match_score_in_sheet(get_ws(workbook), home, away, score_input.strip())
                         if success:
                             st.success(f"บันทึกผลสกอร์ {score_input} ของ {home} vs {away} เรียบร้อยแล้ว!")
                             time.sleep(1)
                             st.rerun()
-                        else:
-                            st.error("ไม่พบคู่นี้ใน Google Sheets กรุณาตรวจสอบชื่อทีม")
-                    else:
-                        st.warning("กรุณากรอกผลสกอร์ก่อนกดบันทึก")
+                        else: st.error("ไม่พบคู่นี้ใน Google Sheets กรุณาตรวจสอบชื่อทีม")
+                    else: st.warning("กรุณากรอกผลสกอร์ก่อนกดบันทึก")
             st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
 
 # ----------------------------------------
@@ -529,7 +505,6 @@ with tab2:
                     
                     model_hdp = RandomForestClassifier(n_estimators=100, max_depth=6, random_state=42)
                     model_hdp.fit(X_train, df_train['Target_HDP'])
-                    
                     model_ou = RandomForestClassifier(n_estimators=100, max_depth=6, random_state=42)
                     model_ou.fit(X_train, df_train['Target_OU'])
 
@@ -618,10 +593,8 @@ with tab2:
                         
                         def get_win_prob(model, X):
                             probs = model.predict_proba(X)
-                            if hasattr(model, 'classes_') and 1 in model.classes_:
-                                return probs[:, list(model.classes_).index(1)]
-                            elif probs.shape[1] > 1:
-                                return probs[:, 1]
+                            if hasattr(model, 'classes_') and 1 in model.classes_: return probs[:, list(model.classes_).index(1)]
+                            elif probs.shape[1] > 1: return probs[:, 1]
                             return np.zeros(len(X))
                         
                         df_predict['AI_โอกาสเหย้าชนะHDP(%)'] = (get_win_prob(model_hdp, X_pred) * 100).round(1)
@@ -648,7 +621,6 @@ with tab2:
                         render_prediction_cards(df_predict, workbook)
                     else:
                         st.success("🎉 ไม่มีคู่ค้างที่ยังไม่ลงผลสกอร์ ทุกคู่ใน Google Sheets บันทึกผลครบถ้วนแล้ว!")
-                        
                 else:
                     st.info("ℹ️ ต้องการข้อมูลที่มีผลการแข่งขันในอดีตอย่างน้อย 5 แถวขึ้นไป เพื่อให้ AI เริ่มประมวลผลสถิติ")
         else:
