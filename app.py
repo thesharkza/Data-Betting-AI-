@@ -118,48 +118,8 @@ p, label, span { color: inherit; }
 .job-msg { color: #a7c4b5; font-size: 0.9rem; }
 .job-note { color: #7f9a8b; font-size: 0.8rem; margin-top: 8px; }
 
-/* AI Predictions */
-.pred-summary { display: flex; flex-wrap: wrap; gap: 10px; margin: 4px 0 18px 0; }
-.pred-chip { background: #0c130f; border: 1px solid #1b2a22; border-radius: 999px; padding: 6px 14px; font-size: 0.85rem; color: #a7c4b5; }
-.pred-chip b { color: #e6f2ea; font-weight: 600; margin-left: 6px; }
-.pred-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 16px; }
-.pred-card {
-    background: linear-gradient(180deg, #0e1712 0%, #0c130f 100%);
-    border: 1px solid #1b2a22; border-radius: 18px; padding: 20px 22px;
-    transition: border-color .2s ease, box-shadow .2s ease;
-}
-.pred-card:hover { border-color: #1f6b3d; box-shadow: 0 0 30px -14px rgba(34,197,94,0.45); }
-.pred-teams { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
-.pred-team { flex: 1; font-weight: 600; color: #e6f2ea; font-size: 1.02rem; line-height: 1.3; }
-.pred-team.away { text-align: right; }
-.pred-vs { font-size: 0.72rem; color: #7f9a8b; border: 1px solid #1b2a22; border-radius: 999px; padding: 2px 10px; }
-.pred-sections { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.pred-box { background: #09100c; border: 1px solid #14211a; border-radius: 14px; padding: 14px 16px; }
-.pred-box-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-.pred-kind { color: #7f9a8b; font-size: 0.78rem; letter-spacing: 0.04em; }
-.pred-line { color: #cfe3d6; font-size: 0.85rem; font-weight: 500; }
-.pred-pct { font-size: 2rem; font-weight: 600; line-height: 1.1; margin: 8px 0 10px 0; }
-.pred-pct small { font-size: 0.9rem; font-weight: 400; color: #7f9a8b; margin-left: 2px; }
-.pred-track { position: relative; height: 6px; background: #17241d; border-radius: 6px; }
-.pred-fill { height: 100%; border-radius: 6px; }
-.pred-mid { position: absolute; left: 50%; top: -3px; width: 1px; height: 12px; background: #3a5547; }
-.pred-verdict { margin-top: 14px; font-size: 0.82rem; padding: 5px 11px; border-radius: 10px; display: inline-block; font-weight: 500; }
-.tone-gs { color: #4ade80; } .tone-gf { color: #86efac; } .tone-cs { color: #38bdf8; } .tone-cf { color: #bae6fd; } .tone-skip { color: #7f9a8b; }
-.fill-gs { background: linear-gradient(90deg, #16a34a, #4ade80); }
-.fill-gf { background: linear-gradient(90deg, #15803d, #86efac); }
-.fill-cs { background: linear-gradient(90deg, #0284c7, #38bdf8); }
-.fill-cf { background: linear-gradient(90deg, #0369a1, #bae6fd); }
-.fill-skip { background: #4b5f54; }
-.bg-gs { background: rgba(34,197,94,0.16); color: #4ade80; }
-.bg-gf { background: rgba(34,197,94,0.09); color: #86efac; }
-.bg-cs { background: rgba(14,165,233,0.16); color: #38bdf8; }
-.bg-cf { background: rgba(14,165,233,0.09); color: #bae6fd; }
-.bg-skip { background: rgba(127,154,139,0.12); color: #7f9a8b; }
-
 @media (max-width: 900px) {
     .kpi-wrap { grid-template-columns: 1fr; }
-    .pred-grid { grid-template-columns: 1fr; }
-    .pred-sections { grid-template-columns: 1fr; }
 }
 </style>
 """, unsafe_allow_html=True)
@@ -199,9 +159,6 @@ except Exception as e:
 
 model = genai.GenerativeModel('gemini-3.7-flash')
 
-# ----------------------------------------
-# แปลงค่าน้ำเป็นระบบมาเลเซีย (Malay Odds) เสมอ
-# ----------------------------------------
 WATER_IDX = [6, 8, 10, 11]
 FMT_LABELS = {"MY": "มาเลเซีย", "HK": "ฮ่องกง", "ID": "อินโดนีเซีย", "EU": "ยุโรป (Decimal)"}
 FMT_CHOICES = {
@@ -214,14 +171,10 @@ FMT_CHOICES = {
 
 def to_malay(x, fmt):
     x = float(x)
-    if fmt == "MY":
-        return round(x, 2)
-    if fmt == "EU":
-        hk = x - 1
-    elif fmt == "ID":
-        hk = x if x > 0 else (1 / abs(x) if x != 0 else 0)
-    else:
-        hk = x
+    if fmt == "MY": return round(x, 2)
+    if fmt == "EU": hk = x - 1
+    elif fmt == "ID": hk = x if x > 0 else (1 / abs(x) if x != 0 else 0)
+    else: hk = x
     return round(hk, 2) if hk <= 1 else round(-1 / hk, 2)
 
 def guess_format(nums):
@@ -231,16 +184,14 @@ def guess_format(nums):
 
 def parse_cell(v):
     cleaned = re.sub(r'^[oOuU\s]+', '', str(v).strip().replace('−', '-'))
-    try:
-        return float(cleaned) if '.' in cleaned else int(cleaned)
-    except Exception:
-        return cleaned
+    try: return float(cleaned) if '.' in cleaned else int(cleaned)
+    except Exception: return cleaned
 
 def clean_raw_data(raw_text):
     text = raw_text.replace('`', '').replace('\n', ' ').strip()
     raw_data = [item.strip().replace('−', '-') for item in text.split(',')]
     if not 12 <= len(raw_data) <= 13:
-        raise ValueError(f"AI คืนค่ามา {len(raw_data)} ช่อง (ต้องเป็น 12-13 ช่อง) อาจมีเครื่องหมายจุลภาคปนในชื่อทีม กรุณาอ่านภาพใหม่อีกครั้ง")
+        raise ValueError(f"AI คืนค่ามา {len(raw_data)} ช่อง (ต้องเป็น 12-13 ช่อง)")
     m = re.search(r'\b(MY|HK|ID|EU)\b', raw_data[12].upper()) if len(raw_data) > 12 else None
     ai_fmt = m.group(1) if m else "UNK"
     row_data = raw_data[:2] + [parse_cell(x) for x in raw_data[2:12]]
@@ -263,7 +214,7 @@ FORM5_HEADERS = [
 
 def validate_form5(values):
     if len(values) != 6 or any(v is None or v == "" or isinstance(v, bool) for v in values):
-        raise ValueError('กรุณากรอกข้อมูลให้ครบ 6 ช่อง; ช่องว่างไม่ใช่ 0')
+        raise ValueError('กรุณากรอกข้อมูลให้ครบ 6 ช่อง')
     nums = [float(v) for v in values]
     return [nums[0] / 100, int(nums[1]), int(nums[2]), nums[3] / 100, int(nums[4]), int(nums[5])]
 
@@ -296,10 +247,21 @@ def save_row_to_sheet(ws, row, form5):
     ws.spreadsheet.batch_update({"requests": requests})
     return target_row, overwritten
 
-# ----------------------------------------
-# ระบบงานเบื้องหลัง: อ่านภาพ + บันทึกชีตบนเซิร์ฟเวอร์
-# ----------------------------------------
-EXTRACT_PROMPT = "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ (ระบุเฉพาะตัวเลข ห้ามมีตัวอักษร o หรือ u นำหน้า),ค่าน้ำสูง,ค่าน้ำต่ำ,รหัสรูปแบบราคาน้ำ (ตอบรหัสเดียว: MY=มาเลเซีย มีทั้งบวกและลบ, HK=ฮ่องกง, ID=อินโดนีเซีย, EU=Decimal เช่น 1.90, UNK=ไม่แน่ใจ) ค่าน้ำทุกค่าให้คัดลอกตามที่เห็นในภาพทุกประการรวมเครื่องหมายลบ ห้ามแปลงค่าเอง โดยคั่นแต่ละค่าด้วยลูกน้ำ (,) เท่านั้น ห้ามมีข้อความอื่น"
+# อัปเดตผลสกอร์ลง Google Sheets ตามแถวที่ตรงกัน
+def update_match_score_in_sheet(ws, home_team, away_team, score_text):
+    col_a = ws.col_values(1)
+    col_b = ws.col_values(2)
+    target_row = None
+    for i in range(1, len(col_a)):
+        if str(col_a[i]).strip() == str(home_team).strip() and str(col_b[i]).strip() == str(away_team).strip():
+            target_row = i + 1
+            break
+    if target_row:
+        # สมมติว่าคอลัมน์ 'ผลสกอร์' อยู่ที่ Column M (index 12 นับจาก 0) หรือปรับตามโครงสร้างชีตจริง
+        # ใช้การอัปเดตผ่านเซลล์ เช่น 'M{target_row}'
+        ws.update(f'M{target_row}', [[score_text]])
+        return True
+    return False
 
 class JobManager:
     def __init__(self):
@@ -340,7 +302,7 @@ def extract_row(img_bytes, user_fmt, model):
     img.save(buf, format='JPEG', quality=85)
     for attempt in range(3):
         try:
-            resp = model.generate_content([{"mime_type": "image/jpeg", "data": buf.getvalue()}, EXTRACT_PROMPT])
+            resp = model.generate_content([{"mime_type": "image/jpeg", "data": buf.getvalue()}, "สกัดข้อมูลจากภาพนี้เรียงตามลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2 เหย้า,1X2 เสมอ,1X2 เยือน,แฮนดิแคปเหย้า,ค่าน้ำHDPเหย้า,แฮนดิแคปเยือน,ค่าน้ำHDPเยือน,โกลสูงต่ำ,ค่าน้ำสูง,ค่าน้ำต่ำ,รหัสรูปแบบราคาน้ำ"])
             row, ai_fmt = clean_raw_data(resp.text.strip())
             return convert_water_to_malay(row, user_fmt, ai_fmt)
         except Exception: time.sleep(2)
@@ -349,10 +311,9 @@ def extract_row(img_bytes, user_fmt, model):
 def process_job(job_id, workbook, model):
     try:
         job = JOBS.get(job_id)
-        JOBS.update(job_id, status="reading", msg="🤖 AI กำลังอ่านราคาจากภาพ...")
+        JOBS.update(job_id, status="reading", msg="🤖 AI กำลังอ่านราคา...")
         row, note, warn = extract_row(job["img"], job["user_fmt"], model)
-        if len(row) < 12: raise ValueError("ข้อมูลไม่ครบ")
-        JOBS.update(job_id, status="ready", msg='อ่านราคาแล้ว กรอกฟอร์มก่อนบันทึก', row_data=list(row), note=note, warn=warn, img=None)
+        JOBS.update(job_id, status="ready", msg='อ่านราคาแล้ว', row_data=list(row), note=note, warn=warn, img=None)
     except Exception as e:
         JOBS.update(job_id, status="error", msg=f"{e}", finished=time.time())
     finally: gc.collect()
@@ -371,11 +332,11 @@ def save_confirmed_job(job_id, workbook):
 def submit_form5(job_id, values, owner_id):
     job = JOBS.jobs.get(job_id)
     if job:
-        job.update(status="saving", msg="Saving to Sheets...", form5=list(values))
+        job.update(status="saving", msg="Saving...", form5=list(values))
         JOBS.pool.submit(save_confirmed_job, job_id, workbook)
 
 def render_jobs():
-    jobs = [j for j in JOBS.snapshot() if j.get("owner_id") == st.session_state["form5_owner_id"]]
+    jobs = [j for j in JOBS.snapshot() if j.get("owner_id"] == st.session_state["form5_owner_id"]]
     if not jobs: return
     for j in jobs:
         cls = "ok" if j["status"] == "done" else "err" if j["status"] == "error" else "run"
@@ -409,15 +370,15 @@ def base_layout(fig, height=380):
 def panel_header(title, sub): st.markdown(f"<p class='panel-title'>{title}</p><p class='panel-sub'>{sub}</p>", unsafe_allow_html=True)
 
 # ----------------------------------------
-# UI ฟันธง
+# UI ฟันธง (อัปเกรดเพิ่มช่องกรอกผลสกอร์)
 # ----------------------------------------
 def _pred_tone(text, kind):
     if "ข้าม" in text: return "skip"
     if kind == "hdp": return ("cs" if "VIP" in text else "cf") if "รอง" in text else ("gs" if "VIP" in text else "gf")
     return "cs" if "มั่นใจ" in text and "ต่ำ" in text else "cf" if "ต่ำ" in text else "gs" if "มั่นใจ" in text else "gf"
 
-def render_prediction_cards(df_pred):
-    for _, r in df_pred.iterrows():
+def render_prediction_cards(df_pred, workbook):
+    for idx, r in df_pred.iterrows():
         home = str(r.get('ทีมเหย้า', '-'))
         away = str(r.get('ทีมเยือน', '-'))
         hdp_prob = float(r.get('AI_โอกาสเหย้าชนะHDP(%)', 50))
@@ -427,11 +388,10 @@ def render_prediction_cards(df_pred):
         hdp_line = r.get('แฮนดิแคป (เหย้า)', 0)
         ou_line = r.get('โกลสูง/ต่ำ', 0)
 
-        # ใช้กล่อง Container และ Columns ของ Streamlit แทน HTML ดิบ เพื่อความเสถียร 100%
         with st.container():
             st.markdown(f"""
-            <div style='background: linear-gradient(180deg, #0e1712 0%, #0c130f 100%); border: 1px solid #1b2a22; border-radius: 18px; padding: 20px 22px; margin-bottom: 16px;'>
-                <div style='font-size: 1.05rem; font-weight: 600; color: #e6f2ea; margin-bottom: 12px; text-align: center;'>
+            <div style='background: linear-gradient(180deg, #0e1712 0%, #0c130f 100%); border: 1px solid #1b2a22; border-radius: 18px; padding: 18px 22px; margin-bottom: 12px;'>
+                <div style='font-size: 1.05rem; font-weight: 600; color: #e6f2ea; margin-bottom: 10px; text-align: center;'>
                     ⚽ {esc(home)} <span style='color: #7f9a8b; font-weight: 400; padding: 0 8px;'>VS</span> {esc(away)}
                 </div>
             </div>
@@ -459,7 +419,28 @@ def render_prediction_cards(df_pred):
                     <div style='font-size: 0.82rem; background: rgba(14,165,233,0.15); color: #38bdf8; padding: 4px 10px; border-radius: 8px; display: inline-block; font-weight: 500;'>{esc(ou_verdict)}</div>
                 </div>
                 """, unsafe_allow_html=True)
-            st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
+
+            # ฟอร์มกรอกผลสกอร์รายคู่
+            with st.form(key=f"score_form_{idx}_{home}_{away}"):
+                sc1, sc2, sc3 = st.columns([2, 1, 1])
+                with sc1:
+                    score_input = st.text_input("กรอกผลสกอร์ (เช่น 2-1)", placeholder="ทีมเหย้า-ทีมเยือน", key=f"score_input_{idx}")
+                with sc3:
+                    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                    submitted = st.form_submit_button("💾 บันทึกผลลงชีต")
+                
+                if submitted:
+                    if score_input.strip():
+                        success = update_match_score_in_sheet(workbook.sheet1, home, away, score_input.strip())
+                        if success:
+                            st.success(f"บันทึกผลสกอร์ {score_input} ของ {home} vs {away} เรียบร้อยแล้ว!")
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error("ไม่พบคู่นี้ใน Google Sheets กรุณาตรวจสอบชื่อทีม")
+                    else:
+                        st.warning("กรุณากรอกผลสกอร์ก่อนกดบันทึก")
+            st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
 
 # ----------------------------------------
 # หัวข้อหลัก
@@ -494,18 +475,15 @@ with tab2:
 
         df = load_dashboard_data(workbook, JOBS.data_version)
         
-        # 1. Clean Numeric Cols
         numeric_cols_raw = ['1X2 เหย้า', '1X2 เสมอ', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 'โกลสูง/ต่ำ', 'ค่าน้ำ (สูง)', 'ค่าน้ำ (ต่ำ)',
                             'H_WinRate_Last5', 'H_GoalsFor_Last5', 'H_GoalsAgainst_Last5', 'A_WinRate_Last5', 'A_GoalsFor_Last5', 'A_GoalsAgainst_Last5']
         
-        # กรองเฉพาะคอลัมน์ที่มีอยู่จริงในชีต (ป้องกัน KeyError)
         numeric_cols = [c for c in numeric_cols_raw if c in df.columns]
         
         for col in numeric_cols:
             if df[col].dtype == object: df[col] = df[col].astype(str).str.replace('%', '').str.strip()
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
-        # 2. Feature Engineering
         if all(c in df.columns for c in ['H_GoalsFor_Last5', 'A_GoalsAgainst_Last5', 'A_GoalsFor_Last5', 'H_GoalsAgainst_Last5', 'โกลสูง/ต่ำ']):
             df['Exp_Goals_Home'] = (df['H_GoalsFor_Last5'] + df['A_GoalsAgainst_Last5']) / 10.0
             df['Exp_Goals_Away'] = (df['A_GoalsFor_Last5'] + df['H_GoalsAgainst_Last5']) / 10.0
@@ -513,7 +491,6 @@ with tab2:
             df['OU_Goal_Diff'] = df['Expected_Total_Goals'] - df['โกลสูง/ต่ำ']
             df['Total_Goals_Conceded_Last5'] = df['H_GoalsAgainst_Last5'] + df['A_GoalsAgainst_Last5']
 
-        # 3. Target Definition
         if 'ผล HDP' in df.columns and 'ผลสูง/ต่ำ' in df.columns:
             def map_hdp_result(res):
                 res = str(res).strip()
@@ -532,7 +509,6 @@ with tab2:
             df['Target_HDP'] = df['ผล HDP'].apply(map_hdp_result)
             df['Target_OU'] = df['ผลสูง/ต่ำ'].apply(map_ou_result)
             
-            # Split Predict (No results) vs Train (Has results)
             if 'ผลสกอร์' in df.columns:
                 df_predict = df[df['ผลสกอร์'].astype(str).str.strip().isin(["", "nan", "None"]) & df['ผล HDP'].astype(str).str.strip().isin(["", "nan", "None"])].copy()
             else:
@@ -554,14 +530,12 @@ with tab2:
                     train_medians = df_train[features].median().fillna(0)
                     X_train = df_train[features].fillna(train_medians)
                     
-                    # 4. Train Models
                     model_hdp = RandomForestClassifier(n_estimators=100, max_depth=6, random_state=42)
                     model_hdp.fit(X_train, df_train['Target_HDP'])
                     
                     model_ou = RandomForestClassifier(n_estimators=100, max_depth=6, random_state=42)
                     model_ou.fit(X_train, df_train['Target_OU'])
 
-                    # 5. Evaluate Accuracy on Historical Data
                     hdp_correct = (model_hdp.predict(X_train) == df_train['Target_HDP']).sum()
                     ou_correct = (model_ou.predict(X_train) == df_train['Target_OU']).sum()
                     total_train = len(df_train)
@@ -569,11 +543,6 @@ with tab2:
                     hdp_acc = round((hdp_correct / total_train) * 100, 1) if total_train > 0 else 0
                     ou_acc = round((ou_correct / total_train) * 100, 1) if total_train > 0 else 0
 
-                    # ==========================================
-                    # RENDER AI DASHBOARD
-                    # ==========================================
-                    
-                    # --- 1. KPI Cards ---
                     st.markdown(f"""<div class="kpi-wrap">
                     <div class="kpi hero">
                         <div class="kpi-label">ความแม่นยำ AI (แฮนดิแคป)</div>
@@ -591,7 +560,6 @@ with tab2:
                     </div>
                     </div>""", unsafe_allow_html=True)
 
-                    # --- Helper Charts ---
                     def plot_ai_donut(correct, total, color_hex):
                         incorrect = total - correct
                         fig = go.Figure(go.Pie(
@@ -611,14 +579,12 @@ with tab2:
 
                     def plot_ai_feature_importance(model, feature_names, color_hex):
                         df_imp = pd.DataFrame({'Feature': feature_names, 'Importance': model.feature_importances_}).sort_values('Importance', ascending=True).tail(5)
-                        
                         df_imp['Feature'] = df_imp['Feature'].replace({
                             'Expected_Total_Goals': 'ประตูรวมที่คาดหวัง', 'OU_Goal_Diff': 'ส่วนต่างโกลที่คาด', 'Total_Goals_Conceded_Last5': 'เสียประตู 5 นัดรวม',
                             'H_GoalsFor_Last5': 'เหย้ายิงได้ 5 นัด', 'H_GoalsAgainst_Last5': 'เหย้าเสีย 5 นัด', 'A_GoalsFor_Last5': 'เยือนยิงได้ 5 นัด', 'A_GoalsAgainst_Last5': 'เยือนเสีย 5 นัด',
                             'H_WinRate_Last5': 'WinRate เหย้า 5 นัด', 'A_WinRate_Last5': 'WinRate เยือน 5 นัด', '1X2 เหย้า': 'ราคา 1X2 เหย้า', '1X2 เยือน': 'ราคา 1X2 เยือน',
                             'แฮนดิแคป (เหย้า)': 'แต้มต่อ HDP', 'ค่าน้ำ HDP (เหย้า)': 'ค่าน้ำ HDP', 'โกลสูง/ต่ำ': 'ไลน์สูง-ต่ำ', 'ค่าน้ำ (สูง)': 'ค่าน้ำสูง', 'ค่าน้ำ (ต่ำ)': 'ค่าน้ำต่ำ'
                         })
-
                         fig = go.Figure(go.Bar(
                             x=df_imp['Importance'], y=df_imp['Feature'], orientation='h',
                             marker=dict(color=color_hex, cornerradius=6),
@@ -629,13 +595,12 @@ with tab2:
                         fig.update_layout(xaxis=dict(visible=False), yaxis=dict(showgrid=False, title="", tickfont=dict(size=13, color=TEXT)), bargap=0.45, showlegend=False, margin=dict(l=10, r=40, t=10, b=10))
                         return fig
 
-                    # --- 2. HDP & O/U Graphs ---
                     col_hdp1, col_hdp2 = st.columns([1, 1.25], gap="large")
                     with col_hdp1:
                         panel_header("สัดส่วนความแม่นยำ (แฮนดิแคป)", "เทียบจากผลการเรียนรู้ประวัติศาสตร์ทั้งหมด")
                         st.plotly_chart(plot_ai_donut(hdp_correct, total_train, GREEN), use_container_width=True, config={'displayModeBar': False})
                     with col_hdp2:
-                        panel_header("ปัจจัยที่มีผลต่อ HDP สูงสุด 5 อันดับ", "น้ำหนักความสำคัญที่ AI ใช้ตัดสินใจ (Feature Importance)")
+                        panel_header("ปัจจัยที่มีผลต่อ HDP สูงสุด 5 อันดับ", "น้ำหนักความสำคัญที่ AI ใช้ตัดสินใจ")
                         st.plotly_chart(plot_ai_feature_importance(model_hdp, X_train.columns, GREEN), use_container_width=True, config={'displayModeBar': False})
 
                     st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
@@ -645,17 +610,15 @@ with tab2:
                         panel_header("สัดส่วนความแม่นยำ (สูง-ต่ำ)", "เทียบจากผลการเรียนรู้ประวัติศาสตร์ทั้งหมด")
                         st.plotly_chart(plot_ai_donut(ou_correct, total_train, CYAN), use_container_width=True, config={'displayModeBar': False})
                     with col_ou2:
-                        panel_header("ปัจจัยที่มีผลต่อสูง-ต่ำ สูงสุด 5 อันดับ", "น้ำหนักความสำคัญที่ AI ใช้ตัดสินใจ (Feature Importance)")
-                        st.plotly_chart(plot_ai_feature_importance(model_ou, X_train.columns, CYAN), use_container_width=True, config={'displayModeBar': False})
+                        panel_header("ปัจจัยที่มีผลต่อสูง-ต่ำ สูงสุด 5 อันดับ", "น้ำหนักความสำคัญที่ AI ใช้ตัดสินใจ")
+                        st.plotly_chart(plot_ai_feature_importance(model_ou, X_train.columns, CYAN), use_container_width=True, config={'displayModeBox': False})
 
-                    # --- 3. Predictions for New Matches ---
                     st.markdown("<div style='height:36px'></div>", unsafe_allow_html=True)
-                    panel_header("🤖 แมตช์ที่รอทำนาย (AI Predictions)", "ระบบวิเคราะห์ความน่าจะเป็นเฉพาะคู่ที่ยังไม่ลงผลสกอร์")
+                    panel_header("🤖 แมตช์ที่รอทำนาย (AI Predictions)", "ระบบวิเคราะห์ความน่าจะเป็นและช่องกรอกผลสกอร์อัปเดต Google Sheets")
                     
                     if len(df_predict) > 0:
                         X_pred = df_predict[features].fillna(train_medians)
                         
-                        # ฟังก์ชันดึงค่า Prob ป้องกันบัคเวลาผลลัพธ์เทรนมีด้านเดียว
                         def get_win_prob(model, X):
                             probs = model.predict_proba(X)
                             if hasattr(model, 'classes_') and 1 in model.classes_:
@@ -685,11 +648,11 @@ with tab2:
                         df_predict['AI_ฟันธง_สูงต่ำ'] = df_predict['AI_โอกาสออกสูง(%)'].apply(ou_decision)
                         
                         st.markdown(f"พบแมตช์ที่รอการทำนาย **{len(df_predict)} คู่**:")
-                        st.markdown(render_prediction_cards(df_predict), unsafe_allow_html=True)
+                        render_prediction_cards(df_predict, workbook)
                     else:
                         st.success("🎉 ไม่มีคู่ค้างที่ยังไม่ลงผลสกอร์ ทุกคู่ใน Google Sheets บันทึกผลครบถ้วนแล้ว!")
                         
                 else:
-                    st.info("ℹ️ ต้องการข้อมูลที่มีผลการแข่งขันในอดีต (ทั้ง HDP และ สูง-ต่ำ) อย่างน้อย 5 แถวขึ้นไป เพื่อให้ AI เริ่มประมวลผลสถิติและทำนาย")
+                    st.info("ℹ️ ต้องการข้อมูลที่มีผลการแข่งขันในอดีตอย่างน้อย 5 แถวขึ้นไป เพื่อให้ AI เริ่มประมวลผลสถิติ")
         else:
             st.warning("⚠️ ไม่พบคอลัมน์ 'ผล HDP' หรือ 'ผลสูง/ต่ำ' ใน Google Sheets สำหรับเทรน AI")
