@@ -251,7 +251,7 @@ def update_match_score_in_sheet(ws, home_team, away_team, score_text):
     col_a = ws.col_values(1)
     col_b = ws.col_values(2)
     target_row = None
-    for i in range(1, len(col_a)):  # ⬅️ แก้ไขเติมเครื่องหมายโคลอน `:` ที่นี่เรียบร้อยแล้ว
+    for i in range(1, len(col_a)):
         if str(col_a[i]).strip() == str(home_team).strip() and str(col_b[i]).strip() == str(away_team).strip():
             target_row = i + 1
             break
@@ -328,8 +328,9 @@ def save_confirmed_job(job_id, workbook):
 
 def submit_form5(job_id, values, owner_id):
     job = JOBS.get(job_id)
-    if job:
-        job.update(status="saving", msg="Saving...", form5=list(values))
+    # 💡 บัคอยู่ตรงนี้! เปลี่ยนให้ใช้ JOBS.update แทน job.update เพื่อส่งสถานะ "saving" ไปให้ระบบรับรู้จริงๆ
+    if job and job.get("owner_id") == owner_id:
+        JOBS.update(job_id, status="saving", msg="Saving...", form5=list(values))
         JOBS.pool.submit(save_confirmed_job, job_id, workbook)
 
 def render_jobs():
