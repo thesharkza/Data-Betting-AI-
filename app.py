@@ -5,6 +5,7 @@ from PIL import Image
 import io
 import os
 import re
+import json
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
@@ -109,7 +110,6 @@ except Exception as e:
     st.error(f"❌ เชื่อมต่อ Google Sheets ไม่สำเร็จ: {e}")
     workbook = None
 
-# ฟังก์ชันผู้ช่วยสำหรับดึงชีตที่ชื่อ DATA
 def get_ws(wb):
     try: return wb.worksheet("DATA")
     except gspread.exceptions.WorksheetNotFound: return wb.sheet1
@@ -138,34 +138,41 @@ def parse_cell(v):
     try: return float(cleaned) if '.' in cleaned else int(cleaned)
     except Exception: return cleaned
 
+# ฟังก์ชันแปลงข้อมูล AI แบบใหม่ ล็อกโครงสร้างให้อ่านผ่าน JSON
 def clean_raw_data(raw_text):
-    # ล้าง Markdown โค้ดบล็อก
-    text = re.sub(r'```(?:csv|json|text)?\n?', '', raw_text)
-    text = text.replace('`', '').strip()
+    text = raw_text.strip()
+    match = re.search(r'\[(.*)\]', text, re.DOTALL)
+    if not match:
+        raise ValueError("ไม่พบข้อมูลรูปแบบ JSON จาก AI")
+        
+    try:
+        data = json.loads("[" + match.group(1) + "]")
+    except Exception as e:
+        # ลองคลีนคอมม่าเผื่อ AI พิมพ์เกิน
+        cleaned_str = match.group(1).strip()
+        if cleaned_str.endswith(','): cleaned_str = cleaned_str[:-1]
+        try:
+            data = json.loads("[" + cleaned_str + "]")
+        except:
+            raise ValueError(f"รูปแบบข้อมูลผิดพลาด: {e}")
+        
+    if len(data) < 12:
+        raise ValueError(f"ข้อมูลมาไม่ครบ (ได้มา {len(data)} ช่อง จาก 12 ช่องที่ต้องการ)")
+        
+    home = str(data[0]).strip()
+    away = str(data[1]).strip()
     
-    # ดึงเฉพาะบรรทัดที่มีลูกน้ำเยอะสุด (เผื่อ AI พิมพ์น้ำท่วมทุ่งมา)
-    if '\n' in text:
-        lines = text.split('\n')
-        text = max(lines, key=lambda l: l.count(','))
+    numbers = []
+    for i in range(2, 12):
+        val_str = str(data[i]).replace('−', '-').replace(',', '').strip()
+        try: numbers.append(float(val_str))
+        except: numbers.append(0.0)
         
-    # ถ้ายังมีคำนำหน้า เช่น "ข้อมูลคือ: ทีมA,ทีมB..." ให้ตัดออก
-    if ':' in text and text.count(',') >= 11:
-        text = text.split(':', 1)[-1].strip()
-        
-    raw_data = [item.strip().replace('−', '-') for item in text.split(',')]
-    if not 12 <= len(raw_data) <= 13:
-        raise ValueError(f"AI คืนค่ามาผิดรูปแบบ ({len(raw_data)} ช่อง) ข้อมูลดิบ: {text[:50]}")
-        
-    m = re.search(r'\b(MY|HK|ID|EU)\b', raw_data[12].upper()) if len(raw_data) > 12 else None
-    ai_fmt = m.group(1) if m else "UNK"
+    ai_fmt = str(data[12]).strip().upper() if len(data) > 12 else "UNK"
+    if ai_fmt not in ["MY", "HK", "ID", "EU"]: ai_fmt = "UNK"
     
-    row_data = raw_data[:2] + [parse_cell(x) for x in raw_data]
-    
-    # ป้องกันชื่อทีมเหย้ายาวเกินไป (ตัดเอาแค่ 3 คำสุดท้ายถ้าข้อความยาวผิดปกติ)
-    if isinstance(row_data[0], str) and len(row_data[0]) > 35:
-        words = row_data[0].split()
-        row_data[0] = " ".join(words[-3:]) if len(words) >= 3 else row_data[0]
-        
+    # บังคับล็อกแถวให้มี 12 คอลัมน์เป๊ะๆ ป้องกันการไหลไปทับช่อง M, N, O เด็ดขาด
+    row_data = [home, away] + numbers
     return row_data, ai_fmt
 
 def convert_water_to_malay(row, user_fmt, ai_fmt):
@@ -207,7 +214,10 @@ def save_row_to_sheet(ws, row, form5):
         return {"updateCells": {"start": {"sheetId": ws.id, "rowIndex": start_row, "columnIndex": start_col}, "rows": [{"values": cells}], "fields": fields}}
 
     requests.append(update(0, 23, [typed(h) for h in FORM5_HEADERS], "userEnteredValue"))
-    requests.append(update(target_row - 1, 0, [typed(v) for v in row], "userEnteredValue"))
+    
+    # อัปเดตข้อมูลบอล 12 ช่อง ห้ามเกิน ป้องกันการทับคอลัมน์ M
+    requests.append(update(target_row - 1, 0, [typed(v) for v in row[:12]], "userEnteredValue"))
+    
     form_cells = [typed(v) for v in normalized]
     for i, cell in enumerate(form_cells):
         cell["userEnteredFormat"] = {"numberFormat": {"type": "PERCENT" if i in (0, 3) else "NUMBER", "pattern": "0.0%" if i in (0, 3) else "0"}}
@@ -266,12 +276,14 @@ def extract_row(img_bytes, user_fmt, model):
     buf = io.BytesIO()
     img.save(buf, format='JPEG', quality=85)
     
-    # ปรับคำสั่งให้บังคับ AI ห้ามพิมพ์ข้อความบรรยายเด็ดขาด
+    # คำสั่งใหม่: บังคับให้ AI ตอบกลับเป็นโค้ด JSON Array ห้ามอธิบาย
     prompt = (
-        "สกัดข้อมูลจากตารางราคาบอลในภาพนี้ เอาเฉพาะ 1 คู่ที่เด่นที่สุด\n"
-        "คำสั่งสำคัญ: ห้ามพิมพ์ข้อความอธิบาย ห้ามพิมพ์หัวข้อ ห้ามใช้ Markdown ให้พิมพ์แค่ข้อมูลคั่นด้วยลูกน้ำ (,) บรรทัดเดียวจบ\n"
-        "ลำดับ: ชื่อทีมเหย้า,ชื่อทีมเยือน,1X2เหย้า,1X2เสมอ,1X2เยือน,HDPเหย้า,น้ำHDPเหย้า,HDPเยือน,น้ำHDPเยือน,สูงต่ำ,น้ำสูง,น้ำต่ำ,รหัสรูปแบบน้ำ\n"
-        "ตัวอย่าง: Manchester City,Arsenal,1.5,4.0,5.5,-0.5,0.95,0.5,-0.85,2.5,0.80,-0.90,MY"
+        "สกัดข้อมูลจากตารางราคาบอลในภาพนี้ เลือกมา 1 คู่ที่เห็นชัดที่สุด\n"
+        "**คำสั่งสำคัญ: ต้องตอบกลับเป็น JSON Array โค้ดดิบๆ เท่านั้น ห้ามพิมพ์ข้อความอธิบายใดๆ ทั้งสิ้น**\n"
+        "รูปแบบโครงสร้างที่ต้องการ:\n"
+        "[\"ชื่อทีมเหย้า\", \"ชื่อทีมเยือน\", 1X2เหย้า, 1X2เสมอ, 1X2เยือน, HDPเหย้า, น้ำHDPเหย้า, HDPเยือน, น้ำHDPเยือน, โกลสูงต่ำ, น้ำสูง, น้ำต่ำ, \"รูปแบบน้ำเช่น MY\"]\n"
+        "ตัวอย่างผลลัพธ์:\n"
+        "[\"Mardin 1969 Spor\", \"Karagumruk\", 2.10, 3.50, 3.20, -0.5, 0.95, 0.5, -0.85, 2.5, 0.80, -0.90, \"MY\"]"
     )
     
     for attempt in range(3):
@@ -280,7 +292,7 @@ def extract_row(img_bytes, user_fmt, model):
             row, ai_fmt = clean_raw_data(resp.text.strip())
             return convert_water_to_malay(row, user_fmt, ai_fmt)
         except Exception: time.sleep(2)
-    raise RuntimeError("อ่านภาพไม่สำเร็จ (อาจเป็นเพราะ AI ตอบผิดรูปแบบ)")
+    raise RuntimeError("อ่านภาพไม่สำเร็จ (AI ตอบผิดรูปแบบโครงสร้าง)")
 
 def process_job(job_id, workbook, model):
     try:
@@ -297,7 +309,6 @@ def save_confirmed_job(job_id, workbook):
     if not job or job["status"] != "saving": return
     try:
         with JOBS.sheet_lock:
-            # ดึงชีต "DATA" โดยเฉพาะ
             ws = get_ws(workbook)
             target_row, overwritten = save_row_to_sheet(ws, job["row_data"], job["form5"])
         JOBS.bump_version()
@@ -405,7 +416,6 @@ def render_prediction_cards(df_pred, workbook):
                 
                 if submitted:
                     if score_input.strip():
-                        # บันทึกลงหน้าชีต DATA โดยเฉพาะ
                         success = update_match_score_in_sheet(get_ws(workbook), home, away, score_input.strip())
                         if success:
                             st.success(f"บันทึกผลสกอร์ {score_input} ของ {home} vs {away} เรียบร้อยแล้ว!")
