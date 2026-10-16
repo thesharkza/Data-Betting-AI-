@@ -479,9 +479,6 @@ class JobManager:
         with self.lock: self.data_version += 1
     def snapshot(self):
         with self.lock: return sorted((dict(j) for j in self.jobs.values()), key=lambda j: j["created"], reverse=True)
-    def clear_all(self, owner_id):
-        with self.lock:
-            for k in [k for k, j in self.jobs.items() if j.get("owner_id") == owner_id and j["status"] != "saving"]: self.jobs.pop(k)
     def clear_finished(self, owner_id):
         with self.lock:
             for k in [k for k, j in self.jobs.items() if j["status"] in ("done", "error") and j.get("owner_id") == owner_id]: self.jobs.pop(k)
@@ -601,8 +598,14 @@ def render_jobs(polling=False):
                 st.session_state["form5_editing"] = j["id"]
                 st.rerun()
  
+def clear_owner_jobs(owner_id):
+    # ใช้เฉพาะ attribute เดิมของ JobManager (lock, jobs) เพื่อให้ทำงานได้แม้ cache_resource ยังถือ instance เก่าอยู่
+    with JOBS.lock:
+        for k in [k for k, j in JOBS.jobs.items() if j.get("owner_id") == owner_id and j["status"] != "saving"]:
+            JOBS.jobs.pop(k)
+ 
 def clear_upload_page():
-    JOBS.clear_all(st.session_state["form5_owner_id"])
+    clear_owner_jobs(st.session_state["form5_owner_id"])
     st.session_state.pop("form5_editing", None)
     st.session_state["up_n"] = st.session_state.get("up_n", 0) + 1
  
