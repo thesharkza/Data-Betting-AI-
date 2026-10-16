@@ -28,17 +28,18 @@ st.set_page_config(page_title="ระบบวิเคราะห์ราค�
 # ----------------------------------------
 # THEME : Deep Space / Mission Control
 # ----------------------------------------
-VOID = "#040806"
-HULL = "#0a120d"
-EDGE = "#1b3a2a"
+VOID = "#050907"
+HULL = "#0c130f"
+EDGE = "#1b2a22"
 INK = "#e6f2ea"
 DIM = "#7f9a8b"
-DEEP = "#15803d"
-TEAL = "#2dd4bf"
+DEEP = "#16a34a"
+GREEN = "#22c55e"
 EMERALD = "#4ade80"
-LIME = "#a3e635"
-AMBER = "#ffb454"
-CORAL = "#ff5d7a"
+GREEN_SOFT = "#86efac"
+PALE = "#cfe3d6"
+AMBER = "#d9a441"
+CORAL = "#e5484d"
  
  
 def _stars(n, seed, colors):
@@ -59,10 +60,10 @@ html, body, [class*="css"], .stApp, .stMarkdown, button, input, textarea {
  
 /* ---------- Nebula + starfield ---------- */
 .stApp {
-    background-color: #040806;
+    background-color: #050907;
     background-image:
         radial-gradient(1100px 650px at 88% -8%, rgba(34,197,94,0.30), transparent 62%),
-        radial-gradient(900px 600px at -8% 28%, rgba(45,212,191,0.15), transparent 62%),
+        radial-gradient(900px 600px at -8% 28%, rgba(134,239,172,0.15), transparent 62%),
         radial-gradient(800px 520px at 55% 112%, rgba(16,185,129,0.12), transparent 62%);
     background-size: 130% 130%;
     background-attachment: fixed;
@@ -88,89 +89,89 @@ h1, h2, h3, h4 { color: #e6f2ea !important; letter-spacing: -0.01em; }
 p, label, span { color: inherit; }
  
 /* ---------- Tabs ---------- */
-.stTabs [data-baseweb="tab-list"] { gap: 8px; border-bottom: 1px solid #14281d; padding-bottom: 2px; }
+.stTabs [data-baseweb="tab-list"] { gap: 8px; border-bottom: 1px solid #142019; padding-bottom: 2px; }
 .stTabs [data-baseweb="tab"] {
-    background: rgba(10,18,13,0.5); color: #7f9a8b; padding: 10px 20px;
+    background: rgba(12,19,15,0.5); color: #7f9a8b; padding: 10px 20px;
     border-radius: 12px 12px 0 0; font-weight: 500; transition: color .2s, background .2s;
 }
 .stTabs [data-baseweb="tab"]:hover { color: #e6f2ea; background: rgba(34,197,94,0.14); }
 .stTabs [aria-selected="true"] {
     color: #e6f2ea !important;
-    background: linear-gradient(180deg, rgba(34,197,94,0.28), rgba(10,18,13,0.6));
+    background: linear-gradient(180deg, rgba(34,197,94,0.28), rgba(12,19,15,0.6));
 }
 .stTabs [data-baseweb="tab-highlight"] {
-    background: linear-gradient(90deg, #22c55e, #2dd4bf); height: 3px; box-shadow: 0 0 14px #22c55e;
+    background: linear-gradient(90deg, #22c55e, #86efac); height: 3px; box-shadow: 0 0 14px #22c55e;
 }
  
 /* ---------- Buttons ---------- */
 .stButton > button[kind="primary"], [data-testid="stFormSubmitButton"] > button[kind="primary"] {
-    background: linear-gradient(135deg, #22c55e, #2dd4bf); color: #03140a; border: none; font-weight: 600;
+    background: linear-gradient(135deg, #22c55e, #86efac); color: #03140a; border: none; font-weight: 600;
     border-radius: 12px; padding: 0.55rem 1.4rem; box-shadow: 0 8px 28px -10px rgba(34,197,94,0.8);
 }
 .stButton > button:not([kind="primary"]), [data-testid="stFormSubmitButton"] > button:not([kind="primary"]) {
-    background: rgba(10,18,13,0.7); color: #d6eadf; border: 1px solid #1b3a2a; border-radius: 12px;
+    background: rgba(12,19,15,0.7); color: #cfe3d6; border: 1px solid #1b2a22; border-radius: 12px;
     transition: border-color .2s, box-shadow .2s, transform .2s;
 }
 .stButton > button:not([kind="primary"]):hover, [data-testid="stFormSubmitButton"] > button:not([kind="primary"]):hover {
-    border-color: #2dd4bf; color: #86efac; box-shadow: 0 0 22px -6px rgba(45,212,191,0.7); transform: translateY(-1px);
+    border-color: #86efac; color: #86efac; box-shadow: 0 0 22px -6px rgba(134,239,172,0.7); transform: translateY(-1px);
 }
  
 /* ---------- Inputs / upload / alerts / forms ---------- */
 [data-testid="stFileUploader"] section {
-    background: rgba(10,18,13,0.55); border: 1px dashed #2f5a43; border-radius: 18px;
+    background: rgba(12,19,15,0.55); border: 1px dashed #2a4136; border-radius: 18px;
     transition: border-color .2s, box-shadow .2s;
 }
-[data-testid="stFileUploader"] section:hover { border-color: #2dd4bf; box-shadow: 0 0 30px -10px rgba(45,212,191,0.6); }
+[data-testid="stFileUploader"] section:hover { border-color: #86efac; box-shadow: 0 0 30px -10px rgba(134,239,172,0.6); }
 [data-baseweb="input"], [data-baseweb="select"] > div, [data-baseweb="base-input"] {
-    background-color: rgba(10,18,13,0.75) !important; border-color: #1b3a2a !important; border-radius: 10px !important;
+    background-color: rgba(12,19,15,0.75) !important; border-color: #1b2a22 !important; border-radius: 10px !important;
 }
-[data-testid="stAlert"] { background: rgba(10,18,13,0.7); border: 1px solid #1b3a2a; border-radius: 14px; }
+[data-testid="stAlert"] { background: rgba(12,19,15,0.7); border: 1px solid #1b2a22; border-radius: 14px; }
 [data-testid="stForm"] {
-    background: rgba(10,18,13,0.55); border: 1px solid #1b3a2a; border-radius: 16px;
-    backdrop-filter: blur(6px);
+    background: rgba(12,19,15,0.55); border: 1px solid #1b2a22; border-radius: 16px;
+    backdrop-filter: blur(6px); margin-top: -4px;
 }
  
 /* ---------- Headings ---------- */
 .panel-title { font-size: 1.1rem; font-weight: 600; color: #e6f2ea; margin: 0 0 2px 0; display: flex; align-items: center; gap: 10px; }
-.panel-title::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #2dd4bf; box-shadow: 0 0 12px #2dd4bf; flex: none; }
+.panel-title::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #86efac; box-shadow: 0 0 12px #86efac; flex: none; }
 .panel-sub { font-size: 0.86rem; color: #7f9a8b; margin: 0 0 8px 18px; }
  
 /* ---------- Job cards ---------- */
 .job-card {
-    position: relative; overflow: hidden; background: rgba(10,18,13,0.65); border: 1px solid #1b3a2a;
+    position: relative; overflow: hidden; background: rgba(12,19,15,0.65); border: 1px solid #1b2a22;
     border-radius: 16px; padding: 14px 20px 16px; margin-bottom: 10px;
 }
-.job-card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: #ffb454; box-shadow: 0 0 14px #ffb454; }
+.job-card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: #d9a441; box-shadow: 0 0 14px #d9a441; }
 .job-card.ok::before { background: #4ade80; box-shadow: 0 0 14px #4ade80; }
-.job-card.err::before { background: #ff5d7a; box-shadow: 0 0 14px #ff5d7a; }
+.job-card.err::before { background: #e5484d; box-shadow: 0 0 14px #e5484d; }
 .job-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .job-name { color: #7f9a8b; font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .job-pill { font-size: 0.76rem; padding: 3px 11px; border-radius: 999px; white-space: nowrap; font-weight: 500; }
-.job-pill.run { color: #ffd08a; background: rgba(255,180,84,0.14); }
+.job-pill.run { color: #e8bb62; background: rgba(217,164,65,0.14); }
 .job-pill.ok { color: #4ade80; background: rgba(74,222,128,0.14); }
-.job-pill.err { color: #ff8da1; background: rgba(255,93,122,0.14); }
+.job-pill.err { color: #f06b70; background: rgba(229,72,77,0.14); }
 .job-title { color: #e6f2ea; font-size: 1.05rem; font-weight: 600; margin: 8px 0 2px; }
 .job-title .vs { color: #7f9a8b; font-weight: 400; padding: 0 6px; }
 .job-msg { color: #a7c4b5; font-size: 0.9rem; }
 .job-note { color: #7f9a8b; font-size: 0.8rem; margin-top: 6px; }
-.job-bar { height: 3px; border-radius: 3px; margin-top: 12px; background: #12201a; overflow: hidden; }
-.job-bar i { display: block; height: 100%; width: 40%; border-radius: 3px; background: linear-gradient(90deg, transparent, #2dd4bf, #22c55e, transparent); animation: sweep 1.4s ease-in-out infinite; }
+.job-bar { height: 3px; border-radius: 3px; margin-top: 12px; background: #17241d; overflow: hidden; }
+.job-bar i { display: block; height: 100%; width: 40%; border-radius: 3px; background: linear-gradient(90deg, transparent, #86efac, #22c55e, transparent); animation: sweep 1.4s ease-in-out infinite; }
 @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
  
 /* ---------- Pending summary chips ---------- */
 .chips { display: flex; flex-wrap: wrap; gap: 10px; margin: 6px 0 16px; }
-.chip { background: rgba(10,18,13,0.7); border: 1px solid #1b3a2a; border-radius: 999px; padding: 6px 16px; font-size: 0.86rem; color: #a7c4b5; }
+.chip { background: rgba(12,19,15,0.7); border: 1px solid #1b2a22; border-radius: 999px; padding: 6px 16px; font-size: 0.86rem; color: #a7c4b5; }
 .chip b { color: #e6f2ea; font-weight: 600; margin-left: 8px; font-family: 'Space Grotesk', 'Prompt', sans-serif; }
  
 /* ---------- Match cards ---------- */
 .mc {
     position: relative; border-radius: 22px; padding: 20px 24px 22px; margin: 6px 0 10px;
-    background: linear-gradient(160deg, rgba(14,32,22,0.82), rgba(6,12,9,0.82));
+    background: linear-gradient(160deg, rgba(15,42,27,0.82), rgba(12,19,15,0.82));
     box-shadow: 0 24px 60px -34px rgba(34,197,94,0.7); overflow: hidden;
 }
 .mc::before {
     content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none;
-    background: conic-gradient(from var(--a), #1b3a2a 0 62%, #22c55e 80%, #2dd4bf 92%, #1b3a2a 100%);
+    background: conic-gradient(from var(--a), #1b2a22 0 62%, #22c55e 80%, #86efac 92%, #1b2a22 100%);
     -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
     -webkit-mask-composite: xor; mask-composite: exclude;
     animation: spin 7s linear infinite;
@@ -181,37 +182,50 @@ p, label, span { color: inherit; }
 .mc-t.r { text-align: right; }
 .mc-vs {
     position: relative; flex: none; width: 44px; height: 44px; display: grid; place-items: center;
-    font-family: 'Space Grotesk', 'Prompt', sans-serif; font-size: .78rem; font-weight: 700; color: #b7e0c8;
+    font-family: 'Space Grotesk', 'Prompt', sans-serif; font-size: .78rem; font-weight: 700; color: #a7c4b5;
 }
 .mc-vs::before {
-    content: ""; position: absolute; inset: 0; border-radius: 50%; border: 1px dashed #2f7a52;
+    content: ""; position: absolute; inset: 0; border-radius: 50%; border: 1px dashed #1f6b3d;
     animation: rot 12s linear infinite;
 }
 .mc-vs::after {
     content: ""; position: absolute; top: -3px; left: 50%; width: 6px; height: 6px; margin-left: -3px;
-    border-radius: 50%; background: #2dd4bf; box-shadow: 0 0 10px #2dd4bf; transform-origin: 3px 25px;
+    border-radius: 50%; background: #86efac; box-shadow: 0 0 10px #86efac; transform-origin: 3px 25px;
     animation: rot 6s linear infinite;
 }
 @keyframes rot { to { transform: rotate(360deg); } }
 .mc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .mc-mod {
-    display: flex; align-items: center; gap: 16px; padding: 14px 16px; border-radius: 16px;
-    background: rgba(3,8,5,0.62); border: 1px solid #14281d; transition: border-color .25s, box-shadow .25s;
+    padding: 14px 16px 12px; border-radius: 16px;
+    background: rgba(5,9,7,0.62); border: 1px solid #142019; transition: border-color .25s, box-shadow .25s;
 }
 .mc-mod:hover { border-color: var(--c); box-shadow: 0 0 26px -10px var(--c); }
+.mc-row { display: flex; align-items: center; gap: 16px; }
+.mc-meter {
+    --lo: rgba(217,164,65,0.75); --lo2: rgba(217,164,65,0.32); --hi: rgba(34,197,94,0.85); --hi2: rgba(34,197,94,0.38);
+    position: relative; height: 6px; border-radius: 6px; margin: 16px 6px 0;
+    background: linear-gradient(90deg, var(--lo) 0 40%, var(--lo2) 40% 45%, #17241d 45% 55%, var(--hi2) 55% 60%, var(--hi) 60% 100%);
+}
+.mc-meter i {
+    position: absolute; top: 50%; left: calc(var(--p) * 1%); width: 14px; height: 14px; margin: -7px 0 0 -7px;
+    border-radius: 50%; background: #e6f2ea; border: 3px solid var(--c); box-shadow: 0 0 12px var(--c);
+    animation: slide 1.3s cubic-bezier(.2,.8,.2,1) both;
+}
+@keyframes slide { from { left: 0; } }
+.mc-ml { display: flex; justify-content: space-between; font-size: .7rem; color: #7f9a8b; margin: 8px 4px 0; }
 .mc-ring {
     --p: 50; position: relative; flex: none; width: 88px; height: 88px; border-radius: 50%; display: grid; place-items: center;
-    background: conic-gradient(var(--c) calc(var(--p) * 1%), #12201a 0);
+    background: conic-gradient(var(--c) calc(var(--p) * 1%), #17241d 0);
     animation: fillring 1.4s cubic-bezier(.2,.8,.2,1) both;
     filter: drop-shadow(0 0 10px color-mix(in srgb, var(--c) 45%, transparent));
 }
-.mc-ring::before { content: ""; position: absolute; inset: 9px; border-radius: 50%; background: #050a07; }
+.mc-ring::before { content: ""; position: absolute; inset: 9px; border-radius: 50%; background: #070d0a; }
 .mc-ring b { position: relative; font-family: 'Space Grotesk', 'Prompt', sans-serif; font-size: 1.35rem; color: #e6f2ea; font-weight: 700; }
 .mc-ring small { font-size: .7rem; color: #7f9a8b; margin-left: 1px; }
 @keyframes fillring { from { --p: 0; } }
 .mc-info { min-width: 0; }
 .mc-k { display: flex; gap: 10px; align-items: baseline; font-size: .76rem; color: #7f9a8b; letter-spacing: .02em; }
-.mc-k span { color: #d6eadf; font-weight: 500; font-family: 'Space Grotesk', 'Prompt', sans-serif; font-size: .9rem; }
+.mc-k span { color: #cfe3d6; font-weight: 500; font-family: 'Space Grotesk', 'Prompt', sans-serif; font-size: .9rem; }
 .mc-d { font-size: .8rem; color: #7f9a8b; margin: 3px 0 8px; }
 .mc-v {
     display: inline-block; padding: 5px 12px; border-radius: 10px; font-size: .84rem; font-weight: 500; color: var(--c);
@@ -222,7 +236,7 @@ p, label, span { color: inherit; }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
 """.replace("__S1__", _stars(150, 7, ["#ffffff", "#d8ffe8", "#a7f3d0"])) \
-   .replace("__S2__", _stars(45, 21, ["#ffffff", "#99f6e4", "#ffe9a8"]))
+   .replace("__S2__", _stars(45, 21, ["#ffffff", "#bbf7d0", "#e8d9a8"]))
  
 st.markdown(PAGE_CSS, unsafe_allow_html=True)
  
@@ -231,7 +245,7 @@ st.markdown(PAGE_CSS, unsafe_allow_html=True)
 # ----------------------------------------
 _FRAME_CSS = """
 @import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap');
-:root{--void:#040806;--hull:#0a120d;--edge:#1b3a2a;--ink:#e6f2ea;--dim:#7f9a8b;--deep:#15803d;--teal:#2dd4bf;--emer:#4ade80;--amber:#ffb454;--coral:#ff5d7a}
+:root{--void:#050907;--hull:#0c130f;--edge:#1b2a22;--ink:#e6f2ea;--dim:#7f9a8b;--deep:#16a34a;--soft:#86efac;--emer:#4ade80;--amber:#d9a441;--coral:#e5484d}
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{background:transparent;color:var(--ink);font-family:'Prompt','Segoe UI',sans-serif;overflow-x:hidden}
 body::-webkit-scrollbar{width:0}
@@ -270,7 +284,7 @@ def _frame(css, body, js=""):
 # ----------------------------------------
 HERO_CSS = """
 .hero{position:relative;height:176px;border-radius:24px;overflow:hidden;border:1px solid var(--edge);
-  background:linear-gradient(120deg,rgba(14,32,22,.88),rgba(5,10,7,.72) 62%);box-shadow:0 30px 70px -40px rgba(34,197,94,.9)}
+  background:linear-gradient(120deg,rgba(15,42,27,.88),rgba(8,14,11,.72) 62%);box-shadow:0 30px 70px -40px rgba(34,197,94,.9)}
 canvas{position:absolute;inset:0;width:100%;height:100%}
 .in{position:relative;display:flex;align-items:center;gap:28px;height:100%;padding:0 32px}
 .planet{position:relative;flex:none;width:116px;height:116px}
@@ -278,15 +292,15 @@ canvas{position:absolute;inset:0;width:100%;height:100%}
   background:radial-gradient(circle at 32% 28%,#bbf7d0,#22c55e 38%,#0f5132 72%,#03140a);
   box-shadow:0 0 54px rgba(34,197,94,.6),inset -14px -10px 26px rgba(0,0,0,.55)}
 .rb,.rf{position:absolute;left:-16px;right:-16px;top:44px;height:30px;border-radius:50%;border:2px solid rgba(74,222,128,.6);transform:rotate(-18deg)}
-.rb{z-index:0;border-bottom-color:transparent;box-shadow:0 0 14px rgba(45,212,191,.25)}
-.rf{z-index:2;border-top-color:transparent;box-shadow:0 0 14px rgba(45,212,191,.35)}
+.rb{z-index:0;border-bottom-color:transparent;box-shadow:0 0 14px rgba(134,239,172,.25)}
+.rf{z-index:2;border-top-color:transparent;box-shadow:0 0 14px rgba(134,239,172,.35)}
 .moon{position:absolute;inset:0;z-index:3;animation:orb 9s linear infinite}
 .moon i{position:absolute;top:-2px;left:50%;width:10px;height:10px;margin-left:-5px;border-radius:50%;background:var(--amber);box-shadow:0 0 14px var(--amber)}
 @keyframes orb{to{transform:rotate(360deg)}}
 .txt{flex:1;min-width:0}
 h1{font-size:1.65rem;font-weight:600;letter-spacing:-.01em;line-height:1.25}
 .sub{margin-top:8px;color:var(--dim);font-size:.95rem;min-height:1.4em}
-.sub::after{content:"";display:inline-block;width:7px;height:1em;margin-left:3px;vertical-align:-2px;background:var(--teal);animation:blink 1s steps(1) infinite}
+.sub::after{content:"";display:inline-block;width:7px;height:1em;margin-left:3px;vertical-align:-2px;background:var(--soft);animation:blink 1s steps(1) infinite}
 @keyframes blink{50%{opacity:0}}
 .tele{flex:none;text-align:right;display:flex;flex-direction:column;gap:10px;align-items:flex-end}
 .clock{font-size:1.6rem;font-weight:600;letter-spacing:.04em}
@@ -337,16 +351,16 @@ if(REDUCE){el.textContent=T}else{let i=0; (function t(){el.textContent=T.slice(0
 # ----------------------------------------
 STATS_CSS = """
 .row{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding:4px 2px}
-.card{--c:var(--teal);--mx:50%;--my:50%;position:relative;overflow:hidden;border-radius:20px;padding:20px 22px 18px;min-height:138px;
-  background:radial-gradient(260px circle at var(--mx) var(--my),color-mix(in srgb,var(--c) 18%,transparent),transparent 70%),linear-gradient(160deg,rgba(14,32,22,.85),rgba(6,12,9,.85));
-  border:1px solid color-mix(in srgb,var(--c) 38%,#1b3a2a);transition:transform .18s ease-out,box-shadow .25s;
+.card{--c:var(--soft);--mx:50%;--my:50%;position:relative;overflow:hidden;border-radius:20px;padding:20px 22px 18px;min-height:138px;
+  background:radial-gradient(260px circle at var(--mx) var(--my),color-mix(in srgb,var(--c) 18%,transparent),transparent 70%),linear-gradient(160deg,rgba(15,42,27,.85),rgba(12,19,15,.85));
+  border:1px solid color-mix(in srgb,var(--c) 38%,#1b2a22);transition:transform .18s ease-out,box-shadow .25s;
   box-shadow:0 24px 50px -34px var(--c)}
 .card:hover{box-shadow:0 24px 60px -26px var(--c)}
 .lab{font-size:.86rem;color:var(--dim)}
 .val{display:flex;align-items:baseline;gap:6px;margin-top:6px}
 .val b{font-size:2.9rem;font-weight:700;line-height:1.1;color:var(--ink);text-shadow:0 0 24px color-mix(in srgb,var(--c) 60%,transparent)}
 .val em{font-style:normal;color:var(--dim);font-size:1rem}
-.bar{height:6px;border-radius:6px;background:#12201a;margin-top:14px;overflow:hidden}
+.bar{height:6px;border-radius:6px;background:#17241d;margin-top:14px;overflow:hidden}
 .bar i{display:block;height:100%;width:0;border-radius:6px;background:linear-gradient(90deg,var(--deep),var(--c));transition:width 1.4s cubic-bezier(.2,.8,.2,1)}
 .sat{position:absolute;right:12px;top:12px;width:58px;height:58px;color:var(--c);opacity:.9}
 @media(max-width:640px){.val b{font-size:1.8rem}.card{padding:14px 14px 12px;min-height:110px}.lab{font-size:.74rem}.sat{width:36px;height:36px}.row{gap:8px}}
@@ -364,9 +378,9 @@ def _stat_card(label, value, unit, color, pct=None, decimals=1):
  
 def render_stats_strip(hdp_acc, ou_acc, total_train):
     body = ("<div class='row'>"
-            + _stat_card("เรียนรู้จากข้อมูลผลลัพธ์แล้ว", total_train, "คู่", LIME, decimals=0)
-            + _stat_card("ความแม่นยำ AI (แฮนดิแคป)", hdp_acc, "%", EMERALD, pct=hdp_acc)
-            + _stat_card("ความแม่นยำ AI (สูง-ต่ำ)", ou_acc, "%", TEAL, pct=ou_acc)
+            + _stat_card("เรียนรู้จากข้อมูลผลลัพธ์แล้ว", total_train, "คู่", PALE, decimals=0)
+            + _stat_card("ความแม่นยำ AI (แฮนดิแคป)", hdp_acc, "%", GREEN, pct=hdp_acc)
+            + _stat_card("ความแม่นยำ AI (สูง-ต่ำ)", ou_acc, "%", GREEN_SOFT, pct=ou_acc)
             + "</div>")
     components.html(_frame(STATS_CSS, body), height=172)
  
@@ -375,8 +389,8 @@ def render_stats_strip(hdp_acc, ou_acc, total_train):
 # MODEL PANEL : วงแหวนความแม่นยำ + ปัจจัยสำคัญ
 # ----------------------------------------
 PANEL_CSS = """
-.panel{--c:var(--teal);border-radius:22px;padding:20px 24px 18px;background:linear-gradient(160deg,rgba(14,32,22,.8),rgba(6,12,9,.8));
-  border:1px solid #1b3a2a;box-shadow:0 28px 60px -40px var(--c);min-height:330px}
+.panel{--c:var(--soft);border-radius:22px;padding:20px 24px 18px;background:linear-gradient(160deg,rgba(15,42,27,.8),rgba(12,19,15,.8));
+  border:1px solid #1b2a22;box-shadow:0 28px 60px -40px var(--c);min-height:330px}
 .ph{font-size:1.02rem;font-weight:600}
 .ps{font-size:.82rem;color:var(--dim);margin-top:2px}
 .body{display:flex;flex-wrap:wrap;align-items:center;gap:22px;margin-top:14px}
@@ -392,9 +406,9 @@ PANEL_CSS = """
 .bt{font-size:.78rem;color:var(--dim);margin-bottom:-2px}
 .r{display:grid;grid-template-columns:1fr auto;gap:4px 10px;padding:6px 8px;border-radius:10px;transition:background .2s}
 .r:hover{background:rgba(34,197,94,.12)}
-.n{font-size:.86rem;color:#d6eadf}
+.n{font-size:.86rem;color:#cfe3d6}
 .v{font-size:.84rem;color:var(--c);font-weight:600}
-.t{grid-column:1/3;height:6px;border-radius:6px;background:#12201a;overflow:hidden}
+.t{grid-column:1/3;height:6px;border-radius:6px;background:#17241d;overflow:hidden}
 .t i{display:block;height:100%;width:0;border-radius:6px;background:linear-gradient(90deg,var(--deep),var(--c));transition:width 1.2s cubic-bezier(.2,.8,.2,1)}
 """
  
@@ -423,15 +437,15 @@ def render_model_panel(title, sub, color, correct, total, feats, height=372):
     body = (f"<div class='panel' style='--c:{color}'><div class='ph'>{esc(title)}</div><div class='ps'>{esc(sub)}</div>"
             "<div class='body'><div>"
             "<div class='gauge'><svg viewBox='0 0 200 200'>"
-            "<circle cx='100' cy='100' r='92' fill='none' stroke='#2a4a39' stroke-opacity='.55' stroke-dasharray='2 6'/>"
-            "<circle cx='100' cy='100' r='78' fill='none' stroke='#ff5d7a' stroke-opacity='.55' stroke-width='14'/>"
+            "<circle cx='100' cy='100' r='92' fill='none' stroke='#2a4136' stroke-opacity='.55' stroke-dasharray='2 6'/>"
+            "<circle cx='100' cy='100' r='78' fill='none' stroke='#e5484d' stroke-opacity='.55' stroke-width='14'/>"
             f"<circle id='arc' data-l='{arc_len:.2f}' cx='100' cy='100' r='78' fill='none' stroke='{color}' stroke-width='14' "
             "stroke-dasharray='0 999' style='transform:rotate(-90deg);transform-origin:100px 100px;filter:drop-shadow(0 0 8px " + color + ")'/>"
             f"<g><circle cx='100' cy='8' r='4' fill='{color}'/><animateTransform attributeName='transform' type='rotate' from='0 100 100' to='360 100 100' dur='9s' repeatCount='indefinite'/></g>"
             "</svg>"
             f"<div class='center'><b class='num'><span data-v='{acc}' data-d='1'>0</span>%</b><span>ทายถูก</span></div></div>"
             f"<div class='legend'><span><i style='background:{color}'></i>ถูก {correct} คู่</span>"
-            f"<span><i style='background:#ff5d7a'></i>ผิด/เจ๊า {total - correct} คู่</span></div></div>"
+            f"<span><i style='background:#e5484d'></i>ผิด/เจ๊า {total - correct} คู่</span></div></div>"
             f"<div class='bars'><div class='bt'>ปัจจัยที่ AI ใช้ตัดสินใจมากที่สุด 5 อันดับ</div>{rows}</div></div></div>")
     js = "const arc=document.getElementById('arc'); setTimeout(()=>{arc.style.strokeDasharray=arc.dataset.l+' 999'},120);"
     components.html(_frame(PANEL_CSS, body, js), height=height, scrolling=True)
@@ -709,7 +723,7 @@ def render_jobs():
             title = ""
         body = title + f"<div class='job-msg'>{esc(j['msg'])}</div>"
         if j.get("note"): body += f"<div class='job-note'>{esc(str(j['note']))}</div>"
-        if j.get("warn"): body += f"<div class='job-note' style='color:#ffd08a'>{esc(str(j['warn']))}</div>"
+        if j.get("warn"): body += f"<div class='job-note' style='color:#e8bb62'>{esc(str(j['warn']))}</div>"
         if j["status"] in ("queued", "reading", "saving"): body += "<div class='job-bar'><i></i></div>"
         st.markdown(f"<div class='job-card {cls}'>{head}{body}</div>", unsafe_allow_html=True)
         if j["status"] == "ready":
@@ -754,8 +768,8 @@ def _pred_tone(text, kind):
     return "cs" if "มั่นใจ" in text and "ต่ำ" in text else "cf" if "ต่ำ" in text else "gs" if "มั่นใจ" in text else "gf"
  
 _TONE_COLORS = {
-    "hdp": {"gs": EMERALD, "gf": "#a7f3c0", "cs": "#fde047", "cf": "#fef08a", "skip": "#4f6b5c"},
-    "ou": {"gs": TEAL, "gf": "#99f6e4", "cs": AMBER, "cf": "#ffd08a", "skip": "#4f6b5c"},
+    "hdp": {"gs": GREEN, "gf": EMERALD, "cs": "#e8bb62", "cf": "#c9a24d", "skip": "#4f6b5c"},
+    "ou": {"gs": GREEN_SOFT, "gf": "#bbf7d0", "cs": "#e8bb62", "cf": "#c9a24d", "skip": "#4f6b5c"},
 }
  
 def _fmt_num(v, signed=False):
@@ -766,17 +780,19 @@ def _match_card_html(home, away, hdp_line, ou_line, hdp_prob, ou_prob, hdp_verdi
     c1 = _TONE_COLORS["hdp"][_pred_tone(hdp_verdict, "hdp")]
     c2 = _TONE_COLORS["ou"][_pred_tone(ou_verdict, "ou")]
  
-    def mod(kind, line_txt, prob, verdict, color, desc):
-        return (f"<div class='mc-mod' style='--c:{color}'>"
+    def mod(kind, line_txt, prob, verdict, color, desc, lo_lbl, hi_lbl):
+        return (f"<div class='mc-mod' style='--c:{color}'><div class='mc-row'>"
                 f"<div class='mc-ring' style='--p:{prob:g}'><b>{prob:g}<small>%</small></b></div>"
                 f"<div class='mc-info'><div class='mc-k'>{kind}<span>{esc(line_txt)}</span></div>"
-                f"<div class='mc-d'>{desc}</div><span class='mc-v'>{esc(verdict)}</span></div></div>")
+                f"<div class='mc-d'>{desc}</div><span class='mc-v'>{esc(verdict)}</span></div></div>"
+                f"<div class='mc-meter'><i style='--p:{max(0, min(prob, 100)):g}'></i></div>"
+                f"<div class='mc-ml'><span>{lo_lbl}</span><span>ไม่ชัดเจน</span><span>{hi_lbl}</span></div></div>")
  
     return ("<div class='mc'>"
             f"<div class='mc-teams'><span class='mc-t'>{esc(home)}</span><span class='mc-vs'>VS</span><span class='mc-t r'>{esc(away)}</span></div>"
             "<div class='mc-grid'>"
-            + mod("HANDICAP", f"เหย้า {_fmt_num(hdp_line, True)}", hdp_prob, hdp_verdict, c1, "โอกาสเหย้าชนะแฮนดิแคป")
-            + mod("OVER / UNDER", f"ไลน์ {_fmt_num(ou_line)}", ou_prob, ou_verdict, c2, "โอกาสออกสูง")
+            + mod("HANDICAP", f"เหย้า {_fmt_num(hdp_line, True)}", hdp_prob, hdp_verdict, c1, "โอกาสเหย้าชนะแฮนดิแคป", "เยือน", "เหย้า")
+            + mod("OVER / UNDER", f"ไลน์ {_fmt_num(ou_line)}", ou_prob, ou_verdict, c2, "โอกาสออกสูง", "ต่ำ", "สูง")
             + "</div></div>")
  
 def render_prediction_cards(df_pred, workbook):
@@ -918,10 +934,10 @@ with tab2:
                     # --- วงแหวนความแม่นยำ + ปัจจัยสำคัญ (HTML component) ---
                     col_hdp, col_ou = st.columns(2, gap="medium")
                     with col_hdp:
-                        render_model_panel("แฮนดิแคป", "ความแม่นยำจากผลการเรียนรู้ประวัติศาสตร์ทั้งหมด", EMERALD,
+                        render_model_panel("แฮนดิแคป", "ความแม่นยำจากผลการเรียนรู้ประวัติศาสตร์ทั้งหมด", GREEN,
                                            int(hdp_correct), total_train, top_features(model_hdp, X_train.columns))
                     with col_ou:
-                        render_model_panel("สูง-ต่ำ", "ความแม่นยำจากผลการเรียนรู้ประวัติศาสตร์ทั้งหมด", TEAL,
+                        render_model_panel("สูง-ต่ำ", "ความแม่นยำจากผลการเรียนรู้ประวัติศาสตร์ทั้งหมด", GREEN_SOFT,
                                            int(ou_correct), total_train, top_features(model_ou, X_train.columns))
  
                     st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
