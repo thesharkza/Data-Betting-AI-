@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import gspread
 import google.generativeai as genai
 from PIL import Image
@@ -7,9 +6,9 @@ import io
 import os
 import re
 import json
-import random
 import pandas as pd
 import numpy as np
+import plotly.graph_objects as go
 import gc
 import time
 import threading
@@ -23,437 +22,218 @@ from sklearn.ensemble import RandomForestClassifier
 # ----------------------------------------
 # ตั้งค่าหน้าเว็บ
 # ----------------------------------------
-st.set_page_config(page_title="ระบบวิเคราะห์ราคาบอล VIP & AI", page_icon="🪐", layout="wide")
+st.set_page_config(page_title="ระบบวิเคราะห์ราคาบอล VIP & AI", page_icon="⚽", layout="wide")
  
 # ----------------------------------------
-# THEME : Deep Space / Mission Control
+# THEME : Black & Emerald
 # ----------------------------------------
-VOID = "#050907"
-HULL = "#0c130f"
-EDGE = "#1b2a22"
-INK = "#e6f2ea"
-DIM = "#7f9a8b"
-DEEP = "#16a34a"
+BG = "#050907"
+SURFACE = "#0c130f"
+LINE = "#1b2a22"
+TEXT = "#e6f2ea"
+MUTED = "#7f9a8b"
 GREEN = "#22c55e"
-EMERALD = "#4ade80"
 GREEN_SOFT = "#86efac"
-PALE = "#cfe3d6"
 AMBER = "#d9a441"
-CORAL = "#e5484d"
+RED = "#e5484d"
+CYAN = "#0ea5e9"
+CYAN_SOFT = "#7dd3fc"
  
- 
-def _stars(n, seed, colors):
-    rnd = random.Random(seed)
-    return ",".join(f"{rnd.randint(0, 100)}vw {rnd.randint(0, 100)}vh {rnd.choice(colors)}" for _ in range(n))
- 
- 
-PAGE_CSS = """
+st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
- 
-@property --a { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
-@property --p { syntax: '<number>'; inherits: false; initial-value: 0; }
- 
-html, body, [class*="css"], .stApp, .stMarkdown, button, input, textarea {
-    font-family: 'Prompt', 'Segoe UI', sans-serif !important;
-}
- 
-/* ---------- Nebula + starfield ---------- */
-.stApp {
-    background-color: #050907;
-    background-image:
-        radial-gradient(1100px 650px at 88% -8%, rgba(34,197,94,0.30), transparent 62%),
-        radial-gradient(900px 600px at -8% 28%, rgba(134,239,172,0.15), transparent 62%),
-        radial-gradient(800px 520px at 55% 112%, rgba(16,185,129,0.12), transparent 62%);
-    background-size: 130% 130%;
-    background-attachment: fixed;
-    animation: nebula 50s ease-in-out infinite alternate;
-    color: #e6f2ea;
-}
-@keyframes nebula { from { background-position: 0% 0%; } to { background-position: 100% 100%; } }
-.stApp::before {
-    content: ""; position: fixed; top: 0; left: 0; width: 1px; height: 1px;
-    box-shadow: __S1__; opacity: .9; pointer-events: none; z-index: 0;
-    animation: twinkle 4s ease-in-out infinite alternate;
-}
-.stApp::after {
-    content: ""; position: fixed; top: 0; left: 0; width: 2px; height: 2px; border-radius: 50%;
-    box-shadow: __S2__; pointer-events: none; z-index: 0;
-    animation: twinkle 6s ease-in-out -2s infinite alternate;
-}
-@keyframes twinkle { from { opacity: .25; } to { opacity: 1; } }
- 
+@import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+html, body, [class*="css"], .stApp, .stMarkdown, button, input, textarea { font-family: 'Prompt', 'Segoe UI', sans-serif !important; }
+.stApp { background: #050907; color: #e6f2ea; }
 header[data-testid="stHeader"] { background: transparent; }
-.block-container { position: relative; z-index: 1; padding-top: 1.6rem; max-width: 1280px; }
+.block-container { padding-top: 2.2rem; max-width: 1280px; }
 h1, h2, h3, h4 { color: #e6f2ea !important; letter-spacing: -0.01em; }
 p, label, span { color: inherit; }
- 
-/* ---------- Tabs ---------- */
-.stTabs [data-baseweb="tab-list"] { gap: 8px; border-bottom: 1px solid #142019; padding-bottom: 2px; }
-.stTabs [data-baseweb="tab"] {
-    background: rgba(12,19,15,0.5); color: #7f9a8b; padding: 10px 20px;
-    border-radius: 12px 12px 0 0; font-weight: 500; transition: color .2s, background .2s;
-}
-.stTabs [data-baseweb="tab"]:hover { color: #e6f2ea; background: rgba(34,197,94,0.14); }
-.stTabs [aria-selected="true"] {
-    color: #e6f2ea !important;
-    background: linear-gradient(180deg, rgba(34,197,94,0.28), rgba(12,19,15,0.6));
-}
-.stTabs [data-baseweb="tab-highlight"] {
-    background: linear-gradient(90deg, #22c55e, #86efac); height: 3px; box-shadow: 0 0 14px #22c55e;
-}
- 
-/* ---------- Buttons ---------- */
-.stButton > button[kind="primary"], [data-testid="stFormSubmitButton"] > button[kind="primary"] {
-    background: linear-gradient(135deg, #22c55e, #86efac); color: #03140a; border: none; font-weight: 600;
-    border-radius: 12px; padding: 0.55rem 1.4rem; box-shadow: 0 8px 28px -10px rgba(34,197,94,0.8);
-}
+.stTabs [data-baseweb="tab-list"] { gap: 6px; border-bottom: 1px solid #1b2a22; }
+.stTabs [data-baseweb="tab"] { background: transparent; color: #7f9a8b; padding: 10px 18px; border-radius: 10px 10px 0 0; font-weight: 500; }
+.stTabs [aria-selected="true"] { color: #22c55e !important; background: #0c130f; }
+.stTabs [data-baseweb="tab-highlight"] { background-color: #22c55e; }
+.stButton > button[kind="primary"], [data-testid="stFormSubmitButton"] > button[kind="primary"] { background: #22c55e; color: #03140a; border: none; font-weight: 600; border-radius: 10px; padding: 0.55rem 1.4rem; }
+.stButton > button[kind="primary"]:hover, [data-testid="stFormSubmitButton"] > button[kind="primary"]:hover { background: #4ade80; color: #03140a; }
 .stButton > button:not([kind="primary"]), [data-testid="stFormSubmitButton"] > button:not([kind="primary"]) {
-    background: rgba(12,19,15,0.7); color: #cfe3d6; border: 1px solid #1b2a22; border-radius: 12px;
-    transition: border-color .2s, box-shadow .2s, transform .2s;
+    background: #0c130f; color: #cfe3d6; border: 1px solid #1b2a22; border-radius: 10px; transition: border-color .2s, box-shadow .2s;
 }
 .stButton > button:not([kind="primary"]):hover, [data-testid="stFormSubmitButton"] > button:not([kind="primary"]):hover {
-    border-color: #86efac; color: #86efac; box-shadow: 0 0 22px -6px rgba(134,239,172,0.7); transform: translateY(-1px);
+    border-color: #22c55e; color: #4ade80; box-shadow: 0 0 20px -8px rgba(34,197,94,0.7);
 }
+[data-testid="stFileUploader"] section { background: #0c130f; border: 1px dashed #2a4136; border-radius: 14px; transition: border-color .2s, box-shadow .2s; }
+[data-testid="stFileUploader"] section:hover { border-color: #22c55e; box-shadow: 0 0 28px -12px rgba(34,197,94,0.6); }
+[data-testid="stAlert"] { background: #0c130f; border: 1px solid #1b2a22; border-radius: 12px; }
+.page-title { font-size: 1.9rem; font-weight: 600; margin: 0; color: #e6f2ea; }
+.page-sub { color: #7f9a8b; margin: 4px 0 22px 0; font-size: 0.95rem; }
  
-/* ---------- Inputs / upload / alerts / forms ---------- */
-[data-testid="stFileUploader"] section {
-    background: rgba(12,19,15,0.55); border: 1px dashed #2a4136; border-radius: 18px;
-    transition: border-color .2s, box-shadow .2s;
+/* ================= INPUTS (ช่องกรอกข้อมูล) ================= */
+label[data-testid="stWidgetLabel"] p { color: #a7c4b5; font-size: 0.85rem; font-weight: 400; }
+[data-baseweb="input"], [data-baseweb="base-input"] { background-color: #080e0b !important; border-radius: 10px !important; }
+[data-baseweb="input"] { border: 1px solid #1b2a22 !important; transition: border-color .2s, box-shadow .2s; }
+[data-baseweb="input"]:focus-within {
+    border-color: #22c55e !important;
+    box-shadow: 0 0 0 1px rgba(34,197,94,0.55), 0 0 22px -6px rgba(34,197,94,0.65);
 }
-[data-testid="stFileUploader"] section:hover { border-color: #86efac; box-shadow: 0 0 30px -10px rgba(134,239,172,0.6); }
-[data-baseweb="input"], [data-baseweb="select"] > div, [data-baseweb="base-input"] {
-    background-color: rgba(12,19,15,0.75) !important; border-color: #1b2a22 !important; border-radius: 10px !important;
-}
-[data-testid="stAlert"] { background: rgba(12,19,15,0.7); border: 1px solid #1b2a22; border-radius: 14px; }
+[data-testid="stNumberInput"] input { font-family: 'JetBrains Mono', monospace !important; font-weight: 500; color: #e6f2ea; }
+[data-testid="stNumberInput"] button { background: #0c130f !important; color: #7f9a8b !important; border: none !important; transition: background .2s, color .2s; }
+[data-testid="stNumberInput"] button:hover { background: rgba(34,197,94,0.14) !important; color: #4ade80 !important; }
+[data-baseweb="select"] > div { background-color: #080e0b !important; border: 1px solid #1b2a22 !important; border-radius: 10px !important; }
+[data-baseweb="select"] > div:focus-within { border-color: #22c55e !important; box-shadow: 0 0 22px -8px rgba(34,197,94,0.6); }
+ 
+/* ฟอร์ม = แผงควบคุม */
 [data-testid="stForm"] {
-    background: rgba(12,19,15,0.55); border: 1px solid #1b2a22; border-radius: 16px;
-    backdrop-filter: blur(6px); margin-top: -4px;
+    position: relative; background: linear-gradient(180deg, #0b120e, #080e0b); border: 1px solid #1b2a22;
+    border-radius: 16px; padding: 18px 20px 10px;
+}
+[data-testid="stForm"]::before {
+    content: ""; position: absolute; left: 20px; right: 20px; top: -1px; height: 2px;
+    background: linear-gradient(90deg, transparent, #22c55e, transparent); opacity: .7;
 }
  
-/* ---------- Headings ---------- */
-.panel-title { font-size: 1.1rem; font-weight: 600; color: #e6f2ea; margin: 0 0 2px 0; display: flex; align-items: center; gap: 10px; }
-.panel-title::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #86efac; box-shadow: 0 0 12px #86efac; flex: none; }
-.panel-sub { font-size: 0.86rem; color: #7f9a8b; margin: 0 0 8px 18px; }
- 
-/* ---------- Job cards ---------- */
-.job-card {
-    position: relative; overflow: hidden; background: rgba(12,19,15,0.65); border: 1px solid #1b2a22;
-    border-radius: 16px; padding: 14px 20px 16px; margin-bottom: 10px;
+/* ช่องกรอกผลสกอร์ = สกอร์บอร์ด */
+[class*="st-key-score_input_"] input {
+    font-family: 'JetBrains Mono', monospace !important; font-size: 1.55rem !important; font-weight: 700 !important;
+    text-align: center; letter-spacing: .32em; color: #4ade80 !important; text-shadow: 0 0 14px rgba(74,222,128,0.5);
 }
-.job-card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: #d9a441; box-shadow: 0 0 14px #d9a441; }
-.job-card.ok::before { background: #4ade80; box-shadow: 0 0 14px #4ade80; }
-.job-card.err::before { background: #e5484d; box-shadow: 0 0 14px #e5484d; }
+[class*="st-key-score_input_"] input::placeholder { color: #2a4136 !important; text-shadow: none; }
+[class*="st-key-score_form_"] [data-testid="stForm"], [data-testid="stForm"][class*="st-key-score_form_"] {
+    border-radius: 0 0 18px 18px; border-top: 1px dashed #1b2a22; background: #080e0b; padding: 16px 20px 8px;
+}
+[class*="st-key-score_form_"] [data-testid="stForm"]::before, [data-testid="stForm"][class*="st-key-score_form_"]::before { display: none; }
+.sc-hint { color: #5d7a69; font-size: 0.78rem; margin-top: 30px; }
+.sc-hint b { color: #a7c4b5; font-family: 'JetBrains Mono', monospace; font-weight: 500; }
+ 
+/* หัวฟอร์ม 5 นัด */
+.fx-side {
+    --c: #22c55e; display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 12px; margin-bottom: 10px;
+    border: 1px solid color-mix(in srgb, var(--c) 45%, #1b2a22); background: color-mix(in srgb, var(--c) 9%, transparent);
+    font-weight: 500; color: #e6f2ea;
+}
+.fx-side.away { --c: #d9a441; }
+.fx-side small { font-family: 'JetBrains Mono', monospace; color: var(--c); letter-spacing: .1em; font-size: .72rem; }
+ 
+/* ================= KPI ================= */
+.kpi-wrap { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 22px; }
+.kpi { background: #0c130f; border: 1px solid #1b2a22; border-radius: 16px; padding: 22px 26px; }
+.kpi.hero { background: linear-gradient(160deg, #0f2a1b 0%, #0c130f 70%); border-color: #1f6b3d; box-shadow: 0 0 40px -12px rgba(34,197,94,0.35); }
+.kpi.hero-cyan { background: linear-gradient(160deg, #082f49 0%, #0c130f 70%); border-color: #0284c7; box-shadow: 0 0 40px -12px rgba(14,165,233,0.35); }
+.kpi-label { color: #7f9a8b; font-size: 0.9rem; margin-bottom: 6px; }
+.kpi-value { font-size: 2.6rem; font-weight: 600; line-height: 1.15; color: #e6f2ea; }
+.kpi.hero .kpi-value { font-size: 3.6rem; color: #4ade80; }
+.kpi.hero-cyan .kpi-value { font-size: 3.6rem; color: #38bdf8; }
+.kpi-unit { font-size: 1rem; color: #7f9a8b; font-weight: 400; margin-left: 4px; }
+.kpi-bar { height: 6px; background: #17241d; border-radius: 6px; margin-top: 14px; overflow: hidden; }
+.kpi-bar > div { height: 100%; background: linear-gradient(90deg, #16a34a, #4ade80); border-radius: 6px; animation: grow 1.4s cubic-bezier(.2,.8,.2,1); }
+.kpi.hero-cyan .kpi-bar > div { background: linear-gradient(90deg, #0284c7, #38bdf8); }
+@keyframes grow { from { width: 0; } }
+.panel-title { font-size: 1.05rem; font-weight: 500; color: #e6f2ea; margin: 0 0 2px 0; }
+.panel-sub { font-size: 0.85rem; color: #7f9a8b; margin: 0 0 6px 0; }
+ 
+/* ================= JOB CARDS ================= */
+.job-card { position: relative; overflow: hidden; background: #0c130f; border: 1px solid #1b2a22; border-left: 4px solid #1b2a22; border-radius: 14px; padding: 14px 20px 16px; margin-bottom: 10px; }
+.job-card.ok { border-left-color: #22c55e; }
+.job-card.err { border-left-color: #e5484d; }
+.job-card.run { border-left-color: #d9a441; }
 .job-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .job-name { color: #7f9a8b; font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .job-pill { font-size: 0.76rem; padding: 3px 11px; border-radius: 999px; white-space: nowrap; font-weight: 500; }
 .job-pill.run { color: #e8bb62; background: rgba(217,164,65,0.14); }
-.job-pill.ok { color: #4ade80; background: rgba(74,222,128,0.14); }
+.job-pill.ok { color: #4ade80; background: rgba(34,197,94,0.15); }
 .job-pill.err { color: #f06b70; background: rgba(229,72,77,0.14); }
 .job-title { color: #e6f2ea; font-size: 1.05rem; font-weight: 600; margin: 8px 0 2px; }
 .job-title .vs { color: #7f9a8b; font-weight: 400; padding: 0 6px; }
 .job-msg { color: #a7c4b5; font-size: 0.9rem; }
 .job-note { color: #7f9a8b; font-size: 0.8rem; margin-top: 6px; }
 .job-bar { height: 3px; border-radius: 3px; margin-top: 12px; background: #17241d; overflow: hidden; }
-.job-bar i { display: block; height: 100%; width: 40%; border-radius: 3px; background: linear-gradient(90deg, transparent, #86efac, #22c55e, transparent); animation: sweep 1.4s ease-in-out infinite; }
+.job-bar i { display: block; height: 100%; width: 40%; border-radius: 3px; background: linear-gradient(90deg, transparent, #22c55e, #86efac, transparent); animation: sweep 1.4s ease-in-out infinite; }
 @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
  
-/* ---------- Pending summary chips ---------- */
-.chips { display: flex; flex-wrap: wrap; gap: 10px; margin: 6px 0 16px; }
-.chip { background: rgba(12,19,15,0.7); border: 1px solid #1b2a22; border-radius: 999px; padding: 6px 16px; font-size: 0.86rem; color: #a7c4b5; }
-.chip b { color: #e6f2ea; font-weight: 600; margin-left: 8px; font-family: 'Space Grotesk', 'Prompt', sans-serif; }
+/* ================= MONITOR ================= */
+.led { display: inline-block; flex: none; width: 9px; height: 9px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 0 0 rgba(34,197,94,0.7); animation: ping 1.8s infinite; }
+@keyframes ping { 70% { box-shadow: 0 0 0 9px rgba(34,197,94,0); } 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); } }
+.mon-status {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding: 11px 18px; margin: 6px 0 10px;
+    background: #0a110d; border: 1px solid #1b2a22; border-radius: 14px;
+    font-family: 'JetBrains Mono', monospace; font-size: .8rem; color: #7f9a8b;
+}
+.mon-status b { color: #4ade80; letter-spacing: .1em; font-weight: 700; }
+.mon-status em { font-style: normal; color: #e6f2ea; margin-left: 6px; }
+.ticker {
+    overflow: hidden; border-top: 1px solid #14211a; border-bottom: 1px solid #14211a; background: #080e0b; margin-bottom: 16px;
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+}
+.ticker-track { display: flex; width: max-content; padding: 9px 0; animation: marquee var(--dur, 40s) linear infinite; }
+.ticker:hover .ticker-track { animation-play-state: paused; }
+@keyframes marquee { to { transform: translateX(-50%); } }
+.tk { white-space: nowrap; font-size: .84rem; color: #a7c4b5; margin-right: 38px; }
+.tk b { color: #e6f2ea; font-weight: 500; margin-right: 6px; }
+.tk .d { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin: 0 6px 0 12px; background: var(--c); box-shadow: 0 0 8px var(--c); }
  
-/* ---------- Match cards ---------- */
-.mc {
-    position: relative; border-radius: 22px; padding: 20px 24px 22px; margin: 6px 0 10px;
-    background: linear-gradient(160deg, rgba(15,42,27,0.82), rgba(12,19,15,0.82));
-    box-shadow: 0 24px 60px -34px rgba(34,197,94,0.7); overflow: hidden;
+.mon {
+    position: relative; overflow: hidden; border-radius: 18px 18px 0 0; padding: 14px 22px 22px; margin-bottom: -14px;
+    background:
+        linear-gradient(rgba(34,197,94,0.045) 1px, transparent 1px) 0 0 / 100% 26px,
+        linear-gradient(90deg, rgba(34,197,94,0.045) 1px, transparent 1px) 0 0 / 26px 100%,
+        linear-gradient(180deg, #0e1712, #0b110e);
+    border: 1px solid #1b2a22; border-bottom: none; transition: border-color .25s, box-shadow .25s;
 }
-.mc::before {
-    content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none;
-    background: conic-gradient(from var(--a), #1b2a22 0 62%, #22c55e 80%, #86efac 92%, #1b2a22 100%);
-    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-    -webkit-mask-composite: xor; mask-composite: exclude;
-    animation: spin 7s linear infinite;
+.mon:hover { border-color: #1f6b3d; box-shadow: 0 0 40px -18px rgba(34,197,94,0.6); }
+.mon::after {
+    content: ""; position: absolute; left: 0; right: 0; top: -40%; height: 40%; pointer-events: none;
+    background: linear-gradient(180deg, transparent, rgba(74,222,128,0.07), transparent); animation: scan 5.5s linear infinite;
 }
-@keyframes spin { to { --a: 360deg; } }
-.mc-teams { display: flex; align-items: center; gap: 16px; margin-bottom: 18px; }
-.mc-t { flex: 1; font-size: 1.08rem; font-weight: 600; color: #e6f2ea; line-height: 1.3; }
-.mc-t.r { text-align: right; }
-.mc-vs {
-    position: relative; flex: none; width: 44px; height: 44px; display: grid; place-items: center;
-    font-family: 'Space Grotesk', 'Prompt', sans-serif; font-size: .78rem; font-weight: 700; color: #a7c4b5;
-}
-.mc-vs::before {
-    content: ""; position: absolute; inset: 0; border-radius: 50%; border: 1px dashed #1f6b3d;
-    animation: rot 12s linear infinite;
-}
-.mc-vs::after {
-    content: ""; position: absolute; top: -3px; left: 50%; width: 6px; height: 6px; margin-left: -3px;
-    border-radius: 50%; background: #86efac; box-shadow: 0 0 10px #86efac; transform-origin: 3px 25px;
-    animation: rot 6s linear infinite;
-}
-@keyframes rot { to { transform: rotate(360deg); } }
-.mc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.mc-mod {
-    padding: 14px 16px 12px; border-radius: 16px;
-    background: rgba(5,9,7,0.62); border: 1px solid #142019; transition: border-color .25s, box-shadow .25s;
-}
-.mc-mod:hover { border-color: var(--c); box-shadow: 0 0 26px -10px var(--c); }
-.mc-row { display: flex; align-items: center; gap: 16px; }
-.mc-meter {
-    --lo: rgba(217,164,65,0.75); --lo2: rgba(217,164,65,0.32); --hi: rgba(34,197,94,0.85); --hi2: rgba(34,197,94,0.38);
-    position: relative; height: 6px; border-radius: 6px; margin: 16px 6px 0;
-    background: linear-gradient(90deg, var(--lo) 0 40%, var(--lo2) 40% 45%, #17241d 45% 55%, var(--hi2) 55% 60%, var(--hi) 60% 100%);
-}
-.mc-meter i {
-    position: absolute; top: 50%; left: calc(var(--p) * 1%); width: 14px; height: 14px; margin: -7px 0 0 -7px;
-    border-radius: 50%; background: #e6f2ea; border: 3px solid var(--c); box-shadow: 0 0 12px var(--c);
-    animation: slide 1.3s cubic-bezier(.2,.8,.2,1) both;
-}
-@keyframes slide { from { left: 0; } }
-.mc-ml { display: flex; justify-content: space-between; font-size: .7rem; color: #7f9a8b; margin: 8px 4px 0; }
-.mc-ring {
-    --p: 50; position: relative; flex: none; width: 88px; height: 88px; border-radius: 50%; display: grid; place-items: center;
-    background: conic-gradient(var(--c) calc(var(--p) * 1%), #17241d 0);
-    animation: fillring 1.4s cubic-bezier(.2,.8,.2,1) both;
-    filter: drop-shadow(0 0 10px color-mix(in srgb, var(--c) 45%, transparent));
-}
-.mc-ring::before { content: ""; position: absolute; inset: 9px; border-radius: 50%; background: #070d0a; }
-.mc-ring b { position: relative; font-family: 'Space Grotesk', 'Prompt', sans-serif; font-size: 1.35rem; color: #e6f2ea; font-weight: 700; }
-.mc-ring small { font-size: .7rem; color: #7f9a8b; margin-left: 1px; }
-@keyframes fillring { from { --p: 0; } }
-.mc-info { min-width: 0; }
-.mc-k { display: flex; gap: 10px; align-items: baseline; font-size: .76rem; color: #7f9a8b; letter-spacing: .02em; }
-.mc-k span { color: #cfe3d6; font-weight: 500; font-family: 'Space Grotesk', 'Prompt', sans-serif; font-size: .9rem; }
-.mc-d { font-size: .8rem; color: #7f9a8b; margin: 3px 0 8px; }
-.mc-v {
-    display: inline-block; padding: 5px 12px; border-radius: 10px; font-size: .84rem; font-weight: 500; color: var(--c);
-    background: color-mix(in srgb, var(--c) 14%, transparent);
-}
+@keyframes scan { to { transform: translateY(350%); } }
+.cn { position: absolute; width: 12px; height: 12px; border: 2px solid #22c55e; opacity: .65; pointer-events: none; }
+.cn.tl { top: 8px; left: 8px; border-right: none; border-bottom: none; }
+.cn.tr { top: 8px; right: 8px; border-left: none; border-bottom: none; }
+.cn.bl { bottom: 8px; left: 8px; border-right: none; border-top: none; }
+.cn.br { bottom: 8px; right: 8px; border-left: none; border-top: none; }
+.mon-bar { display: flex; align-items: center; gap: 12px; font-family: 'JetBrains Mono', monospace; font-size: .74rem; color: #7f9a8b; padding: 0 6px; }
+.mon-id { color: #cfe3d6; letter-spacing: .1em; }
+.mon-st { padding: 2px 10px; border-radius: 999px; border: 1px solid #1b2a22; font-family: 'Prompt', sans-serif; }
+.mon-st.on { color: #4ade80; border-color: rgba(34,197,94,0.45); background: rgba(34,197,94,0.1); }
+.sig { margin-left: auto; display: flex; align-items: flex-end; gap: 3px; height: 14px; }
+.sig i { width: 4px; border-radius: 1px; background: #1f2e26; }
+.sig i:nth-child(1) { height: 5px; } .sig i:nth-child(2) { height: 8px; } .sig i:nth-child(3) { height: 11px; } .sig i:nth-child(4) { height: 14px; }
+.sig i.on { background: #4ade80; box-shadow: 0 0 6px rgba(74,222,128,0.7); }
+.mon-teams { display: flex; align-items: center; gap: 16px; margin: 16px 0 14px; padding: 0 6px; }
+.mon-t { flex: 0 1 auto; max-width: 34%; font-weight: 600; font-size: 1.1rem; color: #e6f2ea; line-height: 1.3; }
+.mon-t.r { text-align: right; }
+.ecg { flex: 1; min-width: 60px; height: 30px; }
+.ecg .pulse { stroke-dasharray: 22 78; animation: ecg 2.6s linear infinite; filter: drop-shadow(0 0 4px #4ade80); }
+@keyframes ecg { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+.mon-ch { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.ch { --c: #22c55e; padding: 14px 16px 14px; border-radius: 14px; background: rgba(5,9,7,0.72); border: 1px solid #14211a; transition: border-color .25s, box-shadow .25s; }
+.ch:hover { border-color: var(--c); box-shadow: 0 0 26px -12px var(--c); }
+.ch-h { display: flex; align-items: baseline; gap: 8px; font-family: 'JetBrains Mono', monospace; font-size: .72rem; color: #7f9a8b; letter-spacing: .04em; }
+.ch-k { color: var(--c); font-weight: 700; }
+.ch-l { margin-left: auto; color: #cfe3d6; font-size: .82rem; }
+.ch-body { display: flex; align-items: center; gap: 14px; margin-top: 6px; }
+.dial { flex: none; width: 132px; overflow: visible; }
+.dial-arc { animation: arcdraw 1.3s cubic-bezier(.2,.8,.2,1) both; filter: drop-shadow(0 0 5px var(--c)); }
+@keyframes arcdraw { from { stroke-dasharray: 0 200; } }
+.needle { transform-origin: 60px 62px; transform: rotate(var(--rot)); animation: needle 1.3s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes needle { from { transform: rotate(-90deg); } }
+.ch-val { font-family: 'JetBrains Mono', monospace; font-size: 2.1rem; font-weight: 700; line-height: 1; color: var(--c); text-shadow: 0 0 18px color-mix(in srgb, var(--c) 55%, transparent); }
+.ch-val small { font-size: .9rem; color: #7f9a8b; margin-left: 2px; }
+.ch-d { font-size: .78rem; color: #7f9a8b; margin: 6px 0 9px; }
+.ch-v { display: inline-block; padding: 4px 11px; border-radius: 8px; font-size: .82rem; font-weight: 500; color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); }
+.vu { display: grid; grid-template-columns: repeat(20, 1fr); gap: 3px; margin-top: 12px; }
+.vu i { height: 9px; border-radius: 2px; background: #17241d; }
+.vu i.on { background: var(--c); box-shadow: 0 0 8px color-mix(in srgb, var(--c) 60%, transparent); animation: vuon .35s calc(var(--i) * 40ms) both; }
+@keyframes vuon { from { background: #17241d; box-shadow: none; } }
+.vu-l { display: flex; justify-content: space-between; font-family: 'JetBrains Mono', monospace; font-size: .66rem; color: #5d7a69; margin-top: 5px; }
  
-@media (max-width: 900px) { .mc-grid { grid-template-columns: 1fr; } }
+@media (max-width: 900px) {
+    .kpi-wrap { grid-template-columns: 1fr; }
+    .mon-ch { grid-template-columns: 1fr; }
+    .mon-t { max-width: 40%; font-size: .98rem; }
+    .dial { width: 108px; }
+}
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
-""".replace("__S1__", _stars(150, 7, ["#ffffff", "#d8ffe8", "#a7f3d0"])) \
-   .replace("__S2__", _stars(45, 21, ["#ffffff", "#bbf7d0", "#e8d9a8"]))
- 
-st.markdown(PAGE_CSS, unsafe_allow_html=True)
- 
-# ----------------------------------------
-# กรอบ HTML สำหรับ Dashboard component (iframe)
-# ----------------------------------------
-_FRAME_CSS = """
-@import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap');
-:root{--void:#050907;--hull:#0c130f;--edge:#1b2a22;--ink:#e6f2ea;--dim:#7f9a8b;--deep:#16a34a;--soft:#86efac;--emer:#4ade80;--amber:#d9a441;--coral:#e5484d}
-*{box-sizing:border-box;margin:0;padding:0}
-html,body{background:transparent;color:var(--ink);font-family:'Prompt','Segoe UI',sans-serif;overflow-x:hidden}
-body::-webkit-scrollbar{width:0}
-.num{font-family:'Space Grotesk','Prompt',sans-serif;font-variant-numeric:tabular-nums}
-@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
-"""
- 
-_FRAME_JS = """
-const REDUCE = matchMedia('(prefers-reduced-motion:reduce)').matches;
-function countUp(el){
-  const v=parseFloat(el.dataset.v), d=parseInt(el.dataset.d||0), t0=performance.now(), D=1300;
-  if(REDUCE){el.textContent=v.toFixed(d);return}
-  (function f(t){const p=Math.min(1,(t-t0)/D), e=1-Math.pow(1-p,3); el.textContent=(v*e).toFixed(d); if(p<1) requestAnimationFrame(f)})(t0);
-}
-document.querySelectorAll('[data-v]').forEach(countUp);
-document.querySelectorAll('[data-w]').forEach((e,i)=>setTimeout(()=>{e.style.width=e.dataset.w+'%'},150+i*90));
-document.querySelectorAll('.tilt').forEach(card=>{
-  card.addEventListener('mousemove',e=>{
-    const r=card.getBoundingClientRect(), x=(e.clientX-r.left)/r.width-.5, y=(e.clientY-r.top)/r.height-.5;
-    card.style.transform='perspective(700px) rotateX('+(-y*8)+'deg) rotateY('+(x*10)+'deg) translateY(-2px)';
-    card.style.setProperty('--mx',(x+.5)*100+'%'); card.style.setProperty('--my',(y+.5)*100+'%');
-  });
-  card.addEventListener('mouseleave',()=>{card.style.transform=''});
-});
-"""
- 
- 
-def _frame(css, body, js=""):
-    return ("<!doctype html><html><head><meta charset='utf-8'>"
-            "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-            f"<style>{_FRAME_CSS}{css}</style></head><body>{body}<script>{_FRAME_JS}{js}</script></body></html>")
- 
- 
-# ----------------------------------------
-# HERO : ดาวเคราะห์ + starfield warp + นาฬิกา
-# ----------------------------------------
-HERO_CSS = """
-.hero{position:relative;height:176px;border-radius:24px;overflow:hidden;border:1px solid var(--edge);
-  background:linear-gradient(120deg,rgba(15,42,27,.88),rgba(8,14,11,.72) 62%);box-shadow:0 30px 70px -40px rgba(34,197,94,.9)}
-canvas{position:absolute;inset:0;width:100%;height:100%}
-.in{position:relative;display:flex;align-items:center;gap:28px;height:100%;padding:0 32px}
-.planet{position:relative;flex:none;width:116px;height:116px}
-.sphere{position:absolute;inset:16px;border-radius:50%;z-index:1;
-  background:radial-gradient(circle at 32% 28%,#bbf7d0,#22c55e 38%,#0f5132 72%,#03140a);
-  box-shadow:0 0 54px rgba(34,197,94,.6),inset -14px -10px 26px rgba(0,0,0,.55)}
-.rb,.rf{position:absolute;left:-16px;right:-16px;top:44px;height:30px;border-radius:50%;border:2px solid rgba(74,222,128,.6);transform:rotate(-18deg)}
-.rb{z-index:0;border-bottom-color:transparent;box-shadow:0 0 14px rgba(134,239,172,.25)}
-.rf{z-index:2;border-top-color:transparent;box-shadow:0 0 14px rgba(134,239,172,.35)}
-.moon{position:absolute;inset:0;z-index:3;animation:orb 9s linear infinite}
-.moon i{position:absolute;top:-2px;left:50%;width:10px;height:10px;margin-left:-5px;border-radius:50%;background:var(--amber);box-shadow:0 0 14px var(--amber)}
-@keyframes orb{to{transform:rotate(360deg)}}
-.txt{flex:1;min-width:0}
-h1{font-size:1.65rem;font-weight:600;letter-spacing:-.01em;line-height:1.25}
-.sub{margin-top:8px;color:var(--dim);font-size:.95rem;min-height:1.4em}
-.sub::after{content:"";display:inline-block;width:7px;height:1em;margin-left:3px;vertical-align:-2px;background:var(--soft);animation:blink 1s steps(1) infinite}
-@keyframes blink{50%{opacity:0}}
-.tele{flex:none;text-align:right;display:flex;flex-direction:column;gap:10px;align-items:flex-end}
-.clock{font-size:1.6rem;font-weight:600;letter-spacing:.04em}
-.clock small{display:block;font-size:.72rem;color:var(--dim);font-family:'Prompt',sans-serif;letter-spacing:0;font-weight:400}
-.live{display:inline-flex;align-items:center;gap:8px;padding:5px 13px;border-radius:999px;font-size:.8rem;color:#bbf7d0;background:rgba(74,222,128,.1);border:1px solid rgba(74,222,128,.3)}
-.live i{width:8px;height:8px;border-radius:50%;background:var(--emer);box-shadow:0 0 0 0 rgba(74,222,128,.7);animation:ping 1.8s infinite}
-@keyframes ping{70%{box-shadow:0 0 0 9px rgba(74,222,128,0)}100%{box-shadow:0 0 0 0 rgba(74,222,128,0)}}
-@media(max-width:700px){.tele{display:none}.planet{width:84px;height:84px}.sphere{inset:12px}.rb,.rf{top:30px;height:22px}h1{font-size:1.2rem}.in{padding:0 18px;gap:16px}.sub{font-size:.8rem}}
-"""
- 
-HERO_BODY = """
-<div class="hero">
-  <canvas id="sky"></canvas>
-  <div class="in">
-    <div class="planet"><div class="rb"></div><div class="sphere"></div><div class="rf"></div><div class="moon"><i></i></div></div>
-    <div class="txt"><h1>ระบบวิเคราะห์ราคาบอล VIP &amp; AI</h1><div class="sub" id="typed"></div></div>
-    <div class="tele"><div class="clock num" id="clock">--:--:--<small>เวลาประเทศไทย</small></div><span class="live"><i></i>ระบบออนไลน์</span></div>
-  </div>
-</div>
-"""
- 
-HERO_JS = """
-const c=document.getElementById('sky'), x=c.getContext('2d'); let W,H,mx=.72,my=.5,d=1;
-function fit(){const r=c.getBoundingClientRect(); d=window.devicePixelRatio||1; W=c.width=r.width*d; H=c.height=r.height*d}
-fit(); addEventListener('resize',fit);
-const S=Array.from({length:130},()=>({a:Math.random()*6.283,r:Math.random(),z:Math.random()*.9+.1,k:Math.random()<.25}));
-document.addEventListener('mousemove',e=>{const r=c.getBoundingClientRect(); mx=(e.clientX-r.left)/r.width; my=(e.clientY-r.top)/r.height});
-function pos(s,r,cx,cy){return [cx+Math.cos(s.a)*r*W*.85, cy+Math.sin(s.a)*r*H*1.5]}
-function draw(){
-  x.clearRect(0,0,W,H); const cx=W*mx, cy=H*my;
-  for(const s of S){
-    if(!REDUCE){s.r+=.0035*s.z; if(s.r>1.15){s.r=.02;s.a=Math.random()*6.283}}
-    const p=pos(s,s.r,cx,cy), q=pos(s,Math.max(0,s.r-.05*s.z),cx,cy);
-    x.strokeStyle=(s.k?'rgba(134,239,172,':'rgba(220,255,235,')+Math.min(1,s.r*1.5)*s.z+')';
-    x.lineWidth=Math.max(.6,s.z*1.6)*d; x.beginPath(); x.moveTo(q[0],q[1]); x.lineTo(p[0],p[1]); x.stroke();
-  }
-  if(!REDUCE) requestAnimationFrame(draw);
-}
-draw();
-function tick(){document.getElementById('clock').firstChild.nodeValue=new Date().toLocaleTimeString('th-TH',{timeZone:'Asia/Bangkok',hour12:false})}
-tick(); setInterval(tick,1000);
-const T='สกัดราคาจากภาพ · วิเคราะห์ · ติดตามผล · พยากรณ์ด้วย Machine Learning แบบเรียลไทม์', el=document.getElementById('typed');
-if(REDUCE){el.textContent=T}else{let i=0; (function t(){el.textContent=T.slice(0,++i); if(i<T.length) setTimeout(t,32)})()}
-"""
- 
-# ----------------------------------------
-# STAT CARDS
-# ----------------------------------------
-STATS_CSS = """
-.row{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding:4px 2px}
-.card{--c:var(--soft);--mx:50%;--my:50%;position:relative;overflow:hidden;border-radius:20px;padding:20px 22px 18px;min-height:138px;
-  background:radial-gradient(260px circle at var(--mx) var(--my),color-mix(in srgb,var(--c) 18%,transparent),transparent 70%),linear-gradient(160deg,rgba(15,42,27,.85),rgba(12,19,15,.85));
-  border:1px solid color-mix(in srgb,var(--c) 38%,#1b2a22);transition:transform .18s ease-out,box-shadow .25s;
-  box-shadow:0 24px 50px -34px var(--c)}
-.card:hover{box-shadow:0 24px 60px -26px var(--c)}
-.lab{font-size:.86rem;color:var(--dim)}
-.val{display:flex;align-items:baseline;gap:6px;margin-top:6px}
-.val b{font-size:2.9rem;font-weight:700;line-height:1.1;color:var(--ink);text-shadow:0 0 24px color-mix(in srgb,var(--c) 60%,transparent)}
-.val em{font-style:normal;color:var(--dim);font-size:1rem}
-.bar{height:6px;border-radius:6px;background:#17241d;margin-top:14px;overflow:hidden}
-.bar i{display:block;height:100%;width:0;border-radius:6px;background:linear-gradient(90deg,var(--deep),var(--c));transition:width 1.4s cubic-bezier(.2,.8,.2,1)}
-.sat{position:absolute;right:12px;top:12px;width:58px;height:58px;color:var(--c);opacity:.9}
-@media(max-width:640px){.val b{font-size:1.8rem}.card{padding:14px 14px 12px;min-height:110px}.lab{font-size:.74rem}.sat{width:36px;height:36px}.row{gap:8px}}
-"""
- 
- 
-def _stat_card(label, value, unit, color, pct=None, decimals=1):
-    bar = f"<div class='bar'><i data-w='{min(float(pct), 100):g}'></i></div>" if pct is not None else ""
-    return (f"<div class='card tilt' style='--c:{color}'><span class='lab'>{esc(label)}</span>"
-            f"<div class='val'><b class='num' data-v='{value}' data-d='{decimals}'>0</b><em>{esc(unit)}</em></div>{bar}"
-            "<svg class='sat' viewBox='0 0 60 60'><circle cx='30' cy='30' r='24' fill='none' stroke='currentColor' "
-            "stroke-opacity='.3' stroke-dasharray='2 5'/><circle r='3.2' fill='currentColor'>"
-            "<animateMotion dur='6s' repeatCount='indefinite' path='M30,6 A24,24 0 1,1 29.99,6'/></circle></svg></div>")
- 
- 
-def render_stats_strip(hdp_acc, ou_acc, total_train):
-    body = ("<div class='row'>"
-            + _stat_card("เรียนรู้จากข้อมูลผลลัพธ์แล้ว", total_train, "คู่", PALE, decimals=0)
-            + _stat_card("ความแม่นยำ AI (แฮนดิแคป)", hdp_acc, "%", GREEN, pct=hdp_acc)
-            + _stat_card("ความแม่นยำ AI (สูง-ต่ำ)", ou_acc, "%", GREEN_SOFT, pct=ou_acc)
-            + "</div>")
-    components.html(_frame(STATS_CSS, body), height=172)
- 
- 
-# ----------------------------------------
-# MODEL PANEL : วงแหวนความแม่นยำ + ปัจจัยสำคัญ
-# ----------------------------------------
-PANEL_CSS = """
-.panel{--c:var(--soft);border-radius:22px;padding:20px 24px 18px;background:linear-gradient(160deg,rgba(15,42,27,.8),rgba(12,19,15,.8));
-  border:1px solid #1b2a22;box-shadow:0 28px 60px -40px var(--c);min-height:330px}
-.ph{font-size:1.02rem;font-weight:600}
-.ps{font-size:.82rem;color:var(--dim);margin-top:2px}
-.body{display:flex;flex-wrap:wrap;align-items:center;gap:22px;margin-top:14px}
-.gauge{position:relative;flex:none;width:188px;height:188px;margin:0 auto}
-.gauge svg{width:100%;height:100%;overflow:visible}
-.center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
-.center b{font-size:2.3rem;font-weight:700;text-shadow:0 0 22px color-mix(in srgb,var(--c) 60%,transparent)}
-.center span{font-size:.78rem;color:var(--dim)}
-#arc{transition:stroke-dasharray 1.4s cubic-bezier(.2,.8,.2,1)}
-.legend{display:flex;gap:16px;justify-content:center;margin-top:10px;font-size:.78rem;color:var(--dim)}
-.legend i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:0}
-.bars{flex:1;min-width:230px;display:flex;flex-direction:column;gap:12px}
-.bt{font-size:.78rem;color:var(--dim);margin-bottom:-2px}
-.r{display:grid;grid-template-columns:1fr auto;gap:4px 10px;padding:6px 8px;border-radius:10px;transition:background .2s}
-.r:hover{background:rgba(34,197,94,.12)}
-.n{font-size:.86rem;color:#cfe3d6}
-.v{font-size:.84rem;color:var(--c);font-weight:600}
-.t{grid-column:1/3;height:6px;border-radius:6px;background:#17241d;overflow:hidden}
-.t i{display:block;height:100%;width:0;border-radius:6px;background:linear-gradient(90deg,var(--deep),var(--c));transition:width 1.2s cubic-bezier(.2,.8,.2,1)}
-"""
- 
-FEATURE_LABELS = {
-    'Expected_Total_Goals': 'ประตูรวมที่คาดหวัง', 'OU_Goal_Diff': 'ส่วนต่างโกลที่คาด', 'Total_Goals_Conceded_Last5': 'เสียประตู 5 นัดรวม',
-    'H_GoalsFor_Last5': 'เหย้ายิงได้ 5 นัด', 'H_GoalsAgainst_Last5': 'เหย้าเสีย 5 นัด', 'A_GoalsFor_Last5': 'เยือนยิงได้ 5 นัด', 'A_GoalsAgainst_Last5': 'เยือนเสีย 5 นัด',
-    'H_WinRate_Last5': 'WinRate เหย้า 5 นัด', 'A_WinRate_Last5': 'WinRate เยือน 5 นัด', '1X2 เหย้า': 'ราคา 1X2 เหย้า', '1X2 เยือน': 'ราคา 1X2 เยือน',
-    'แฮนดิแคป (เหย้า)': 'แต้มต่อ HDP', 'ค่าน้ำ HDP (เหย้า)': 'ค่าน้ำ HDP', 'โกลสูง/ต่ำ': 'ไลน์สูง-ต่ำ', 'ค่าน้ำ (สูง)': 'ค่าน้ำสูง', 'ค่าน้ำ (ต่ำ)': 'ค่าน้ำต่ำ'
-}
- 
- 
-def top_features(model, feature_names, n=5):
-    df_imp = pd.DataFrame({'Feature': feature_names, 'Importance': model.feature_importances_}).sort_values('Importance', ascending=True).tail(n)
-    df_imp['Feature'] = df_imp['Feature'].replace(FEATURE_LABELS)
-    return list(zip(df_imp['Feature'], df_imp['Importance']))[::-1]
- 
- 
-def render_model_panel(title, sub, color, correct, total, feats, height=372):
-    acc = round((correct / total) * 100, 1) if total > 0 else 0
-    circ = 490.088
-    arc_len = circ * (correct / total) if total > 0 else 0
-    top = max((float(v) for _, v in feats), default=1) or 1
-    rows = "".join(
-        f"<div class='r'><span class='n'>{esc(str(name))}</span><span class='v num'>{float(v) * 100:.1f}%</span>"
-        f"<div class='t'><i data-w='{float(v) / top * 100:.1f}'></i></div></div>" for name, v in feats)
-    body = (f"<div class='panel' style='--c:{color}'><div class='ph'>{esc(title)}</div><div class='ps'>{esc(sub)}</div>"
-            "<div class='body'><div>"
-            "<div class='gauge'><svg viewBox='0 0 200 200'>"
-            "<circle cx='100' cy='100' r='92' fill='none' stroke='#2a4136' stroke-opacity='.55' stroke-dasharray='2 6'/>"
-            "<circle cx='100' cy='100' r='78' fill='none' stroke='#e5484d' stroke-opacity='.55' stroke-width='14'/>"
-            f"<circle id='arc' data-l='{arc_len:.2f}' cx='100' cy='100' r='78' fill='none' stroke='{color}' stroke-width='14' "
-            "stroke-dasharray='0 999' style='transform:rotate(-90deg);transform-origin:100px 100px;filter:drop-shadow(0 0 8px " + color + ")'/>"
-            f"<g><circle cx='100' cy='8' r='4' fill='{color}'/><animateTransform attributeName='transform' type='rotate' from='0 100 100' to='360 100 100' dur='9s' repeatCount='indefinite'/></g>"
-            "</svg>"
-            f"<div class='center'><b class='num'><span data-v='{acc}' data-d='1'>0</span>%</b><span>ทายถูก</span></div></div>"
-            f"<div class='legend'><span><i style='background:{color}'></i>ถูก {correct} คู่</span>"
-            f"<span><i style='background:#e5484d'></i>ผิด/เจ๊า {total - correct} คู่</span></div></div>"
-            f"<div class='bars'><div class='bt'>ปัจจัยที่ AI ใช้ตัดสินใจมากที่สุด 5 อันดับ</div>{rows}</div></div></div>")
-    js = "const arc=document.getElementById('arc'); setTimeout(()=>{arc.style.strokeDasharray=arc.dataset.l+' 999'},120);"
-    components.html(_frame(PANEL_CSS, body, js), height=height, scrolling=True)
- 
- 
-def render_hero():
-    components.html(_frame(HERO_CSS, HERO_BODY, HERO_JS), height=182)
- 
+""", unsafe_allow_html=True)
  
 # ----------------------------------------
 # การตั้งค่า API และ Google Sheets
@@ -735,19 +515,19 @@ def render_form5_editor():
     job_id = st.session_state.get("form5_editing")
     job = JOBS.get(job_id) if job_id else None
     if not job or job["status"] != "ready": return
-    panel_header("ฟอร์ม 5 นัดล่าสุด", f"{esc(str(job['row_data'][0]))} vs {esc(str(job['row_data'][1]))}")
+    panel_header("ฟอร์ม 5 นัดล่าสุด", "Win Rate กรอกเป็นเปอร์เซ็นต์ (เช่น 60) ส่วนประตูกรอกเป็นยอดรวม 5 นัด")
     with st.form(f"form5_{job_id}"):
         left, right = st.columns(2, gap="large")
         with left:
-            st.markdown(f"**เหย้า** · {job['row_data'][0]}")
-            h_win = st.number_input('Win H', step=20.)
-            h_for = st.number_input('GF H', step=1)
-            h_ag = st.number_input('GA H', step=1)
+            st.markdown(f"<div class='fx-side'><small>HOME</small>{esc(str(job['row_data'][0]))}</div>", unsafe_allow_html=True)
+            h_win = st.number_input('Win Rate เหย้า (%)', step=20., key=f"{job_id}_h_win")
+            h_for = st.number_input('ประตูได้ (รวม 5 นัด)', step=1, key=f"{job_id}_h_for")
+            h_ag = st.number_input('ประตูเสีย (รวม 5 นัด)', step=1, key=f"{job_id}_h_ag")
         with right:
-            st.markdown(f"**เยือน** · {job['row_data'][1]}")
-            a_win = st.number_input('Win A', step=20.)
-            a_for = st.number_input('GF A', step=1)
-            a_ag = st.number_input('GA A', step=1)
+            st.markdown(f"<div class='fx-side away'><small>AWAY</small>{esc(str(job['row_data'][1]))}</div>", unsafe_allow_html=True)
+            a_win = st.number_input('Win Rate เยือน (%)', step=20., key=f"{job_id}_a_win")
+            a_for = st.number_input('ประตูได้ (รวม 5 นัด)', step=1, key=f"{job_id}_a_for")
+            a_ag = st.number_input('ประตูเสีย (รวม 5 นัด)', step=1, key=f"{job_id}_a_ag")
         if st.form_submit_button('บันทึก', type="primary"):
             submit_form5(job_id, [h_win, h_for, h_ag, a_win, a_for, a_ag], st.session_state["form5_owner_id"])
             st.session_state.pop("form5_editing", None)
@@ -758,8 +538,12 @@ def load_dashboard_data(_workbook, version=0):
     ws = get_ws(_workbook)
     return pd.DataFrame(ws.get_all_records())
  
+def base_layout(fig, height=380):
+    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(family="Prompt, sans-serif", color=MUTED, size=13), margin=dict(l=10, r=10, t=10, b=10), height=height)
+    return fig
+ 
 # ----------------------------------------
-# UI ฟันธง + ช่องกรอกผลสกอร์
+# UI ฟันธง : การ์ดแบบ Monitor + ช่องกรอกผลสกอร์
 # ----------------------------------------
 def _pred_tone(text, kind):
     text = str(text)
@@ -768,35 +552,74 @@ def _pred_tone(text, kind):
     return "cs" if "มั่นใจ" in text and "ต่ำ" in text else "cf" if "ต่ำ" in text else "gs" if "มั่นใจ" in text else "gf"
  
 _TONE_COLORS = {
-    "hdp": {"gs": GREEN, "gf": EMERALD, "cs": "#e8bb62", "cf": "#c9a24d", "skip": "#4f6b5c"},
-    "ou": {"gs": GREEN_SOFT, "gf": "#bbf7d0", "cs": "#e8bb62", "cf": "#c9a24d", "skip": "#4f6b5c"},
+    "hdp": {"gs": GREEN, "gf": "#4ade80", "cs": "#e8bb62", "cf": AMBER, "skip": "#4f6b5c"},
+    "ou": {"gs": "#38bdf8", "gf": CYAN_SOFT, "cs": "#e8bb62", "cf": AMBER, "skip": "#4f6b5c"},
 }
+_TONE_STRENGTH = {"gs": 4, "cs": 4, "gf": 2, "cf": 2, "skip": 0}
  
 def _fmt_num(v, signed=False):
     try: return f"{float(v):+g}" if signed else f"{float(v):g}"
     except (TypeError, ValueError): return "-"
  
-def _match_card_html(home, away, hdp_line, ou_line, hdp_prob, ou_prob, hdp_verdict, ou_verdict):
-    c1 = _TONE_COLORS["hdp"][_pred_tone(hdp_verdict, "hdp")]
-    c2 = _TONE_COLORS["ou"][_pred_tone(ou_verdict, "ou")]
+_ECG_PATH = "M0 15 H58 L64 15 L70 5 L78 25 L84 15 H128 L134 10 L140 15 H200"
  
-    def mod(kind, line_txt, prob, verdict, color, desc, lo_lbl, hi_lbl):
-        return (f"<div class='mc-mod' style='--c:{color}'><div class='mc-row'>"
-                f"<div class='mc-ring' style='--p:{prob:g}'><b>{prob:g}<small>%</small></b></div>"
-                f"<div class='mc-info'><div class='mc-k'>{kind}<span>{esc(line_txt)}</span></div>"
-                f"<div class='mc-d'>{desc}</div><span class='mc-v'>{esc(verdict)}</span></div></div>"
-                f"<div class='mc-meter'><i style='--p:{max(0, min(prob, 100)):g}'></i></div>"
-                f"<div class='mc-ml'><span>{lo_lbl}</span><span>ไม่ชัดเจน</span><span>{hi_lbl}</span></div></div>")
+def _channel_html(ch, name, line_txt, prob, verdict, color, desc, lo_lbl, hi_lbl):
+    p = max(0.0, min(float(prob), 100.0))
+    arc = 157.08 * p / 100
+    rot = -90 + p * 1.8
+    lit = int(round(p / 5))
+    vu = "".join(f"<i class='{'on' if i < lit else ''}' style='--i:{i}'></i>" for i in range(20))
+    return (f"<div class='ch' style='--c:{color}'>"
+            f"<div class='ch-h'><span class='ch-k'>{ch}</span><span>{name}</span><span class='ch-l'>{esc(line_txt)}</span></div>"
+            "<div class='ch-body'>"
+            "<svg class='dial' viewBox='0 0 120 72'>"
+            "<path d='M10 62 A50 50 0 0 1 110 62' fill='none' stroke='#17241d' stroke-width='9' stroke-linecap='round'/>"
+            f"<path class='dial-arc' d='M10 62 A50 50 0 0 1 110 62' fill='none' stroke='{color}' stroke-width='9' stroke-linecap='round' stroke-dasharray='{arc:.2f} 200'/>"
+            f"<g class='needle' style='--rot:{rot:.1f}deg'><line x1='60' y1='62' x2='60' y2='27' stroke='#e6f2ea' stroke-width='2' stroke-linecap='round'/></g>"
+            f"<circle cx='60' cy='62' r='5' fill='#0c130f' stroke='{color}' stroke-width='2'/></svg>"
+            f"<div><div class='ch-val'>{p:g}<small>%</small></div><div class='ch-d'>{desc}</div><span class='ch-v'>{esc(verdict)}</span></div>"
+            "</div>"
+            f"<div class='vu'>{vu}</div><div class='vu-l'><span>{lo_lbl}</span><span>50%</span><span>{hi_lbl}</span></div></div>")
  
-    return ("<div class='mc'>"
-            f"<div class='mc-teams'><span class='mc-t'>{esc(home)}</span><span class='mc-vs'>VS</span><span class='mc-t r'>{esc(away)}</span></div>"
-            "<div class='mc-grid'>"
-            + mod("HANDICAP", f"เหย้า {_fmt_num(hdp_line, True)}", hdp_prob, hdp_verdict, c1, "โอกาสเหย้าชนะแฮนดิแคป", "เยือน", "เหย้า")
-            + mod("OVER / UNDER", f"ไลน์ {_fmt_num(ou_line)}", ou_prob, ou_verdict, c2, "โอกาสออกสูง", "ต่ำ", "สูง")
+def _match_card_html(n, home, away, hdp_line, ou_line, hdp_prob, ou_prob, hdp_verdict, ou_verdict):
+    t1, t2 = _pred_tone(hdp_verdict, "hdp"), _pred_tone(ou_verdict, "ou")
+    strength = max(_TONE_STRENGTH[t1], _TONE_STRENGTH[t2])
+    bars = "".join(f"<i class='{'on' if k < strength else ''}'></i>" for k in range(4))
+    status = "<span class='mon-st on'>มีสัญญาณ</span>" if strength > 0 else "<span class='mon-st'>ข้าม</span>"
+    ecg = (f"<svg class='ecg' viewBox='0 0 200 30' preserveAspectRatio='none'>"
+           f"<path d='{_ECG_PATH}' fill='none' stroke='#1f3a2c' stroke-width='1.5' vector-effect='non-scaling-stroke'/>"
+           f"<path class='pulse' pathLength='100' d='{_ECG_PATH}' fill='none' stroke='#4ade80' stroke-width='2' vector-effect='non-scaling-stroke'/></svg>")
+    return ("<div class='mon'><span class='cn tl'></span><span class='cn tr'></span><span class='cn bl'></span><span class='cn br'></span>"
+            f"<div class='mon-bar'><span class='led'></span><span class='mon-id'>MATCH #{n:02d}</span>{status}<span>รอผลสกอร์</span><span class='sig'>{bars}</span></div>"
+            f"<div class='mon-teams'><span class='mon-t'>{esc(home)}</span>{ecg}<span class='mon-t r'>{esc(away)}</span></div>"
+            "<div class='mon-ch'>"
+            + _channel_html("CH1", "HANDICAP", f"เหย้า {_fmt_num(hdp_line, True)}", hdp_prob, hdp_verdict,
+                            _TONE_COLORS["hdp"][t1], "โอกาสเหย้าชนะแฮนดิแคป", "เยือน", "เหย้า")
+            + _channel_html("CH2", "OVER / UNDER", f"ไลน์ {_fmt_num(ou_line)}", ou_prob, ou_verdict,
+                            _TONE_COLORS["ou"][t2], "โอกาสออกสูง", "ต่ำ", "สูง")
             + "</div></div>")
  
+def render_monitor_header(df_pred):
+    n_hdp = sum(1 for v in df_pred['AI_ฟันธง_HDP'] if _pred_tone(v, "hdp") != "skip")
+    n_ou = sum(1 for v in df_pred['AI_ฟันธง_สูงต่ำ'] if _pred_tone(v, "ou") != "skip")
+    st.markdown(f"<div class='mon-status'><span class='led'></span><b>MONITORING</b>"
+                f"<span>แมตช์ที่รอทำนาย<em>{len(df_pred)}</em></span>"
+                f"<span>สัญญาณแฮนดิแคป<em>{n_hdp}</em></span>"
+                f"<span>สัญญาณสูง-ต่ำ<em>{n_ou}</em></span></div>", unsafe_allow_html=True)
+    items = []
+    for _, r in df_pred.iterrows():
+        v1, v2 = str(r.get('AI_ฟันธง_HDP', '-')), str(r.get('AI_ฟันธง_สูงต่ำ', '-'))
+        c1 = _TONE_COLORS["hdp"][_pred_tone(v1, "hdp")]
+        c2 = _TONE_COLORS["ou"][_pred_tone(v2, "ou")]
+        items.append(f"<span class='tk'><b>{esc(str(r.get('ทีมเหย้า', '-')))} vs {esc(str(r.get('ทีมเยือน', '-')))}</b>"
+                     f"<span class='d' style='--c:{c1}'></span>HDP {float(r.get('AI_โอกาสเหย้าชนะHDP(%)', 50)):g}%"
+                     f"<span class='d' style='--c:{c2}'></span>O/U {float(r.get('AI_โอกาสออกสูง(%)', 50)):g}%</span>")
+    track = "".join(items) * 2
+    st.markdown(f"<div class='ticker'><div class='ticker-track' style='--dur:{max(24, len(items) * 7)}s'>{track}</div></div>",
+                unsafe_allow_html=True)
+ 
 def render_prediction_cards(df_pred, workbook):
-    for idx, r in df_pred.iterrows():
+    for n, (idx, r) in enumerate(df_pred.iterrows(), start=1):
         home = str(r.get('ทีมเหย้า', '-'))
         away = str(r.get('ทีมเยือน', '-'))
         hdp_prob = float(r.get('AI_โอกาสเหย้าชนะHDP(%)', 50))
@@ -807,12 +630,13 @@ def render_prediction_cards(df_pred, workbook):
         ou_line = r.get('โกลสูง/ต่ำ', 0)
  
         with st.container():
-            st.markdown(_match_card_html(home, away, hdp_line, ou_line, hdp_prob, ou_prob, hdp_verdict, ou_verdict),
+            st.markdown(_match_card_html(n, home, away, hdp_line, ou_line, hdp_prob, ou_prob, hdp_verdict, ou_verdict),
                         unsafe_allow_html=True)
  
             with st.form(key=f"score_form_{idx}_{home}_{away}"):
                 sc1, sc2, sc3 = st.columns([2, 1, 1])
-                with sc1: score_input = st.text_input("กรอกผลสกอร์ (เช่น 2-1)", placeholder="ทีมเหย้า-ทีมเยือน", key=f"score_input_{idx}")
+                with sc1: score_input = st.text_input("กรอกผลสกอร์ (เช่น 2-1)", placeholder="0-0", key=f"score_input_{idx}")
+                with sc2: st.markdown("<div class='sc-hint'>รูปแบบ <b>เหย้า-เยือน</b></div>", unsafe_allow_html=True)
                 with sc3:
                     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
                     submitted = st.form_submit_button("💾 บันทึกผลลงชีต")
@@ -826,17 +650,17 @@ def render_prediction_cards(df_pred, workbook):
                             st.rerun()
                         else: st.error("ไม่พบคู่นี้ใน Google Sheets กรุณาตรวจสอบชื่อทีม")
                     else: st.warning("กรุณากรอกผลสกอร์ก่อนกดบันทึก")
-            st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+            st.markdown("<div style='height: 18px;'></div>", unsafe_allow_html=True)
  
 # ----------------------------------------
 # หัวข้อหลัก
 # ----------------------------------------
-render_hero()
+st.markdown("<h1 class='page-title'>⚽ ระบบวิเคราะห์ราคาบอล VIP & AI</h1>", unsafe_allow_html=True)
+st.markdown("<p class='page-sub'>สกัดราคาจากภาพ วิเคราะห์ ติดตามผล และพยากรณ์ด้วย Machine Learning แบบเรียลไทม์</p>", unsafe_allow_html=True)
  
 tab1, tab2 = st.tabs(["📸 อัปโหลดราคาบอล", "🧠 AI Dashboard (สถิติ & ทำนาย)"])
  
 with tab1:
-    panel_header("สกัดราคาบอลจากภาพ", "ลากรูปตารางราคามาวางได้หลายรูป AI จะอ่านราคาแล้วรอให้กรอกฟอร์ม 5 นัดก่อนบันทึก")
     fmt_choice = st.selectbox("รูปแบบค่าน้ำ", list(FMT_CHOICES.keys()))
     up_n = st.session_state.get("up_n", 0)
     uploaded_files = st.file_uploader("เลือกไฟล์รูปภาพตารางราคาบอล", type=['png', 'jpg', 'jpeg'], accept_multiple_files=True, key=f"uploader_{up_n}")
@@ -928,20 +752,78 @@ with tab2:
                     hdp_acc = round((hdp_correct / total_train) * 100, 1) if total_train > 0 else 0
                     ou_acc = round((ou_correct / total_train) * 100, 1) if total_train > 0 else 0
  
-                    # --- แถบสรุปตัวเลข (HTML component) ---
-                    render_stats_strip(hdp_acc, ou_acc, total_train)
+                    st.markdown(f"""<div class="kpi-wrap">
+                    <div class="kpi hero">
+                        <div class="kpi-label">ความแม่นยำ AI (แฮนดิแคป)</div>
+                        <div class="kpi-value">{hdp_acc}<span class="kpi-unit">%</span></div>
+                        <div class="kpi-bar"><div style="width:{min(hdp_acc, 100)}%"></div></div>
+                    </div>
+                    <div class="kpi hero-cyan">
+                        <div class="kpi-label">ความแม่นยำ AI (สูง-ต่ำ)</div>
+                        <div class="kpi-value">{ou_acc}<span class="kpi-unit">%</span></div>
+                        <div class="kpi-bar"><div style="width:{min(ou_acc, 100)}%"></div></div>
+                    </div>
+                    <div class="kpi">
+                        <div class="kpi-label">เรียนรู้จากข้อมูลผลลัพธ์แล้ว</div>
+                        <div class="kpi-value">{total_train}<span class="kpi-unit">คู่</span></div>
+                    </div>
+                    </div>""", unsafe_allow_html=True)
  
-                    # --- วงแหวนความแม่นยำ + ปัจจัยสำคัญ (HTML component) ---
-                    col_hdp, col_ou = st.columns(2, gap="medium")
-                    with col_hdp:
-                        render_model_panel("แฮนดิแคป", "ความแม่นยำจากผลการเรียนรู้ประวัติศาสตร์ทั้งหมด", GREEN,
-                                           int(hdp_correct), total_train, top_features(model_hdp, X_train.columns))
-                    with col_ou:
-                        render_model_panel("สูง-ต่ำ", "ความแม่นยำจากผลการเรียนรู้ประวัติศาสตร์ทั้งหมด", GREEN_SOFT,
-                                           int(ou_correct), total_train, top_features(model_ou, X_train.columns))
+                    def plot_ai_donut(correct, total, color_hex):
+                        incorrect = total - correct
+                        fig = go.Figure(go.Pie(
+                            labels=['ทายถูก (Win)', 'ทายผิด/เจ๊า (Loss/Draw)'], values=[correct, incorrect],
+                            hole=0.72, sort=False, direction='clockwise',
+                            marker=dict(colors=[color_hex, RED], line=dict(color=BG, width=3)),
+                            textinfo='none', hovertemplate='%{label}: %{value} คู่ (%{percent})<extra></extra>'
+                        ))
+                        base_layout(fig, 320)
+                        acc = round((correct/total)*100, 1) if total > 0 else 0
+                        fig.update_layout(
+                            showlegend=True, legend=dict(orientation='h', yanchor='top', y=-0.05, xanchor='center', x=0.5, font=dict(color=TEXT, size=13)),
+                            annotations=[dict(text=f"<b>{acc}%</b>", x=0.5, y=0.55, showarrow=False, font=dict(size=34, color=TEXT)), dict(text="Accuracy", x=0.5, y=0.43, showarrow=False, font=dict(size=13, color=MUTED))],
+                            margin=dict(l=10, r=10, t=10, b=10)
+                        )
+                        return fig
  
-                    st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-                    panel_header("แมตช์ที่รอทำนาย (AI Predictions)", "ระบบวิเคราะห์ความน่าจะเป็นและช่องกรอกผลสกอร์อัปเดต Google Sheets")
+                    def plot_ai_feature_importance(model, feature_names, color_hex):
+                        df_imp = pd.DataFrame({'Feature': feature_names, 'Importance': model.feature_importances_}).sort_values('Importance', ascending=True).tail(5)
+                        df_imp['Feature'] = df_imp['Feature'].replace({
+                            'Expected_Total_Goals': 'ประตูรวมที่คาดหวัง', 'OU_Goal_Diff': 'ส่วนต่างโกลที่คาด', 'Total_Goals_Conceded_Last5': 'เสียประตู 5 นัดรวม',
+                            'H_GoalsFor_Last5': 'เหย้ายิงได้ 5 นัด', 'H_GoalsAgainst_Last5': 'เหย้าเสีย 5 นัด', 'A_GoalsFor_Last5': 'เยือนยิงได้ 5 นัด', 'A_GoalsAgainst_Last5': 'เยือนเสีย 5 นัด',
+                            'H_WinRate_Last5': 'WinRate เหย้า 5 นัด', 'A_WinRate_Last5': 'WinRate เยือน 5 นัด', '1X2 เหย้า': 'ราคา 1X2 เหย้า', '1X2 เยือน': 'ราคา 1X2 เยือน',
+                            'แฮนดิแคป (เหย้า)': 'แต้มต่อ HDP', 'ค่าน้ำ HDP (เหย้า)': 'ค่าน้ำ HDP', 'โกลสูง/ต่ำ': 'ไลน์สูง-ต่ำ', 'ค่าน้ำ (สูง)': 'ค่าน้ำสูง', 'ค่าน้ำ (ต่ำ)': 'ค่าน้ำต่ำ'
+                        })
+                        fig = go.Figure(go.Bar(
+                            x=df_imp['Importance'], y=df_imp['Feature'], orientation='h',
+                            marker=dict(color=color_hex, cornerradius=6),
+                            text=[f"{v*100:.1f}%" for v in df_imp['Importance']], textposition='outside',
+                            textfont=dict(color=TEXT, size=13), cliponaxis=False, hovertemplate='%{y}: น้ำหนัก %{x:.1%}<extra></extra>'
+                        ))
+                        base_layout(fig, 320)
+                        fig.update_layout(xaxis=dict(visible=False), yaxis=dict(showgrid=False, title="", tickfont=dict(size=13, color=TEXT)), bargap=0.45, showlegend=False, margin=dict(l=10, r=40, t=10, b=10))
+                        return fig
+ 
+                    col_hdp1, col_hdp2 = st.columns([1, 1.25], gap="large")
+                    with col_hdp1:
+                        panel_header("สัดส่วนความแม่นยำ (แฮนดิแคป)", "เทียบจากผลการเรียนรู้ประวัติศาสตร์ทั้งหมด")
+                        st.plotly_chart(plot_ai_donut(hdp_correct, total_train, GREEN), use_container_width=True, config={'displayModeBar': False})
+                    with col_hdp2:
+                        panel_header("ปัจจัยที่มีผลต่อ HDP สูงสุด 5 อันดับ", "น้ำหนักความสำคัญที่ AI ใช้ตัดสินใจ")
+                        st.plotly_chart(plot_ai_feature_importance(model_hdp, X_train.columns, GREEN), use_container_width=True, config={'displayModeBar': False})
+ 
+                    st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
+                    
+                    col_ou1, col_ou2 = st.columns([1, 1.25], gap="large")
+                    with col_ou1:
+                        panel_header("สัดส่วนความแม่นยำ (สูง-ต่ำ)", "เทียบจากผลการเรียนรู้ประวัติศาสตร์ทั้งหมด")
+                        st.plotly_chart(plot_ai_donut(ou_correct, total_train, CYAN), use_container_width=True, config={'displayModeBar': False})
+                    with col_ou2:
+                        panel_header("ปัจจัยที่มีผลต่อสูง-ต่ำ สูงสุด 5 อันดับ", "น้ำหนักความสำคัญที่ AI ใช้ตัดสินใจ")
+                        st.plotly_chart(plot_ai_feature_importance(model_ou, X_train.columns, CYAN), use_container_width=True, config={'displayModeBar': False})
+ 
+                    st.markdown("<div style='height:36px'></div>", unsafe_allow_html=True)
+                    panel_header("🤖 แมตช์ที่รอทำนาย (AI Predictions)", "ระบบวิเคราะห์ความน่าจะเป็นและช่องกรอกผลสกอร์อัปเดต Google Sheets")
                     
                     if len(df_predict) > 0:
                         X_pred = df_predict[features].fillna(train_medians)
@@ -972,11 +854,7 @@ with tab2:
                         df_predict['AI_ฟันธง_HDP'] = df_predict['AI_โอกาสเหย้าชนะHDP(%)'].apply(hdp_decision)
                         df_predict['AI_ฟันธง_สูงต่ำ'] = df_predict['AI_โอกาสออกสูง(%)'].apply(ou_decision)
                         
-                        n_hdp = sum(1 for v in df_predict['AI_ฟันธง_HDP'] if _pred_tone(v, "hdp") != "skip")
-                        n_ou = sum(1 for v in df_predict['AI_ฟันธง_สูงต่ำ'] if _pred_tone(v, "ou") != "skip")
-                        st.markdown(f"<div class='chips'><span class='chip'>แมตช์ที่รอทำนาย<b>{len(df_predict)}</b></span>"
-                                    f"<span class='chip'>สัญญาณแฮนดิแคป<b>{n_hdp}</b></span>"
-                                    f"<span class='chip'>สัญญาณสูง-ต่ำ<b>{n_ou}</b></span></div>", unsafe_allow_html=True)
+                        render_monitor_header(df_predict)
                         render_prediction_cards(df_predict, workbook)
                     else:
                         st.success("🎉 ไม่มีคู่ค้างที่ยังไม่ลงผลสกอร์ ทุกคู่ใน Google Sheets บันทึกผลครบถ้วนแล้ว!")
@@ -984,3 +862,4 @@ with tab2:
                     st.info("ℹ️ ต้องการข้อมูลที่มีผลการแข่งขันในอดีตอย่างน้อย 5 แถวขึ้นไป เพื่อให้ AI เริ่มประมวลผลสถิติ")
         else:
             st.warning("⚠️ ไม่พบคอลัมน์ 'ผล HDP' หรือ 'ผลสูง/ต่ำ' ใน Google Sheets สำหรับเทรน AI")
+ 
