@@ -686,7 +686,6 @@ def compute_ai(df_in):
         
         df['Bookie_Margin'] = df['Implied_Home_Prob'] + df['Implied_Draw_Prob'] + df['Implied_Away_Prob'] - 1
         
-        # 🚀 [FIX 1] คำนวณ Variance เป็นสมการคณิตศาสตร์ตรงๆ (หลีกเลี่ยงบั๊ก Window ใน Pandas .var อย่างเด็ดขาด)
         m = (df['1X2 เหย้า'] + df['1X2 เสมอ'] + df['1X2 เยือน']) / 3.0
         df['1X2_Variance'] = ((df['1X2 เหย้า'] - m)**2 + (df['1X2 เสมอ'] - m)**2 + (df['1X2 เยือน'] - m)**2) / 2.0
         df['1X2_Variance'] = df['1X2_Variance'].fillna(0)
@@ -736,7 +735,6 @@ def compute_ai(df_in):
     if len(df_train_hdp) <= 5 or len(df_train_ou) <= 5:
         return {"status": "few", "level": "info", "msg": "ℹ️ ต้องการข้อมูลที่มีผลการแข่งขันในอดีตอย่างน้อย 5 แถวขึ้นไป เพื่อให้ AI เริ่มเรียนรู้"}
 
-    # 🚀 [FIX 2] ดักจับกรณีข้อมูลผลลัพธ์มีแค่หน้าเดียว (แพ้หมด หรือ ชนะหมด)
     if len(df_train_hdp['Target_HDP'].unique()) < 2 or len(df_train_ou['Target_OU'].unique()) < 2:
         return {"status": "few", "level": "info", "msg": "ℹ️ ข้อมูลผลลัพธ์ที่บันทึกไว้ในอดีตมีเพียงหน้าเดียว (เช่น มีแต่ข้อมูลแทงชนะ) AI ต้องการข้อมูลทั้งคู่ที่ชนะและแพ้เพื่อหาความต่าง"}
 
@@ -748,20 +746,32 @@ def compute_ai(df_in):
     
     all_features = odds_features + stats_features
 
-    X_train_hdp = df_train_hdp[all_features]
+    # 🚀 [FIX] กรองคอลัมน์ที่ข้อมูลเหมือนกันหมดทุกแถวทิ้ง (Zero-Variance) แก้ปัญหา AI แครชตอนทำ Binning
+    valid_features_hdp = [f for f in all_features if df_train_hdp[f].nunique(dropna=True) > 1]
+    valid_features_ou = [f for f in all_features if df_train_ou[f].nunique(dropna=True) > 1]
+
+    if not valid_features_hdp or not valid_features_ou:
+        return {"status": "few", "level": "info", "msg": "ℹ️ ข้อมูลราคายังไม่มีความหลากหลายพอ (ข้อมูลมีค่าซ้ำกันหมดทุกคอลัมน์) ให้เพิ่มข้อมูลคู่อื่นๆ อีกสักนิด"}
+
+    X_train_hdp = df_train_hdp[valid_features_hdp]
     y_train_hdp = df_train_hdp['Target_HDP']
-    
-    # 🚀 [FIX 3] ปิด early_stopping (early_stopping=False) เพื่อตัดปัญหา Window เล็กเกินไปของ Scikit-Learn
     model_hdp = HistGradientBoostingClassifier(max_iter=200, max_leaf_nodes=31, learning_rate=0.05, random_state=42, early_stopping=False)
     model_hdp.fit(X_train_hdp, y_train_hdp)
     
-    X_train_ou = df_train_ou[all_features]
+    X_train_ou = df_train_ou[valid_features_ou]
     y_train_ou = df_train_ou['Target_OU']
     model_ou = HistGradientBoostingClassifier(max_iter=200, max_leaf_nodes=31, learning_rate=0.05, random_state=42, early_stopping=False)
     model_ou.fit(X_train_ou, y_train_ou)
 
-    rf_hdp = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42).fit(df_train_hdp[odds_features].fillna(0), y_train_hdp)
-    rf_ou = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42).fit(df_train_ou[odds_features].fillna(0), y_train_ou)
+    # จัดการ RandomForest สำหรับแสดง Feature Importance Dashboard
+    rf_hdp_feats = [f for f in odds_features if f in valid_features_hdp]
+    rf_ou_feats = [f for f in odds_features if f in valid_features_ou]
+    
+    if not rf_hdp_feats: rf_hdp_feats = valid_features_hdp[:1] # กันเหนียว
+    if not rf_ou_feats: rf_ou_feats = valid_features_ou[:1]
+
+    rf_hdp = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42).fit(df_train_hdp[rf_hdp_feats].fillna(0), y_train_hdp)
+    rf_ou = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42).fit(df_train_ou[rf_ou_feats].fillna(0), y_train_ou)
 
     hdp_correct = int((model_hdp.predict(X_train_hdp) == y_train_hdp).sum())
     ou_correct = int((model_ou.predict(X_train_ou) == y_train_ou).sum())
@@ -773,10 +783,8 @@ def compute_ai(df_in):
     ou_acc = round((ou_correct / total_ou_train) * 100, 1) if total_ou_train > 0 else 0
 
     if len(df_predict) > 0:
-        X_predict = df_predict[all_features]
-        
-        probs_hdp = model_hdp.predict_proba(X_predict)[:, 1]
-        probs_ou = model_ou.predict_proba(X_predict)[:, 1]
+        probs_hdp = model_hdp.predict_proba(df_predict[valid_features_hdp])[:, 1]
+        probs_ou = model_ou.predict_proba(df_predict[valid_features_ou])[:, 1]
 
         df_predict['AI_โอกาสเหย้าชนะHDP(%)'] = (np.array(probs_hdp) * 100).round(1)
         df_predict['AI_โอกาสออกสูง(%)'] = (np.array(probs_ou) * 100).round(1)
@@ -799,7 +807,7 @@ def compute_ai(df_in):
 
     return {"status": "ok", "df_predict": df_predict, "hdp_acc": hdp_acc, "ou_acc": ou_acc,
             "hdp_correct": hdp_correct, "ou_correct": ou_correct, "total_train": max(total_hdp_train, total_ou_train),
-            "hdp_feats": top_features(rf_hdp, odds_features), "ou_feats": top_features(rf_ou, odds_features)}
+            "hdp_feats": top_features(rf_hdp, rf_hdp_feats), "ou_feats": top_features(rf_ou, rf_ou_feats)}
 
 def get_ai():
     if not workbook: return None
