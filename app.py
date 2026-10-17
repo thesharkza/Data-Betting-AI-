@@ -687,8 +687,10 @@ def compute_ai(df_in):
         # [NEW] คำนวณ Margin จาก 3 หน้า
         df['Bookie_Margin'] = df['Implied_Home_Prob'] + df['Implied_Draw_Prob'] + df['Implied_Away_Prob'] - 1
         
-        # [NEW] วัดความห่างชั้นของทีม
-        df['1X2_Variance'] = df[['1X2 เหย้า', '1X2 เสมอ', '1X2 เยือน']].var(axis=1)
+        # [FIX] วัดความห่างชั้นของทีม (ใช้ apply เพื่อเลี่ยงบั๊ก Pandas Bottleneck กับแถวที่มีค่าว่าง)
+        df['1X2_Variance'] = df[['1X2 เหย้า', '1X2 เสมอ', '1X2 เยือน']].apply(
+            lambda x: np.var(x.dropna()) if len(x.dropna()) > 1 else 0.0, axis=1
+        )
         
         df['HDP_vs_1X2_Diff'] = df['Implied_Home_Prob'] - (0.5 - df['แฮนดิแคป (เหย้า)'] * 0.1)
 
