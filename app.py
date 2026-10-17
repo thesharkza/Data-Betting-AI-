@@ -1042,5 +1042,3 @@ with tab3:
             _show_ai_message(AI)
         else:
             render_dashboard(AI)
-```<ElicitationsGroup>
-</ElicitationsGroup>
