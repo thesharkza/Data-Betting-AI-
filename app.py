@@ -782,19 +782,29 @@ def compute_ai(df_in):
         df_predict['AI_โอกาสเหย้าชนะHDP(%)'] = (np.array(probs_hdp) * 100).round(1)
         df_predict['AI_โอกาสออกสูง(%)'] = (np.array(probs_ou) * 100).round(1)
 
-        # 🚀 4. Reverse Engineering Thresholds (HDP)
-        # ตรรกะใหม่: โต๊ะมักล่อให้ต่อเจ้าบ้าน ให้สวนไฟแดงไป "รองทีมเยือน" เมื่อ Margin และหน้าเสมอชี้เป้าว่าเจ้าบ้านโอกาสต่ำ
+        # 🚀 4. ระบบคัดกรอง แฮนดิแคป (HDP) แบบระดับดาวอิงสถิติ ROI
         def hdp_decision(prob):
-            if prob < 45: return "⭐⭐⭐ ไม้หนัก VIP (รองทีมเยือน)"
-            elif prob < 50: return "⭐ น่าลงทุนรอง"
-            else: return "⚠️ ข้าม (ราคาเสี่ยง/หลอก)"
+            if prob <= 40: 
+                return "⭐⭐⭐ VIP ไม้หนัก (รองทีมเยือน)" 
+            elif prob <= 46: 
+                return "⭐⭐ น่าลงทุน (รองทีมเยือน)"
+            elif prob >= 60: 
+                return "🚨 อันตราย (ราคาหลอกให้ต่อ)"
+            elif prob >= 52: 
+                return "⭐ น่าลงทุน (ต่อเจ้าบ้าน)" 
+            else: 
+                return "⚠️ ข้าม (ราคาก้ำกึ่ง 50/50)"
 
-        # 🚀 5. One-Way Filter (O/U)
-        # ตรรกะใหม่: AI แม่นยำเรื่องบอลสูง แต่ทายบอลต่ำเสียบ่อย -> บังคับให้แจกดาวเฉพาะตอนเข้าระบบบอลสูง (Over) เท่านั้น
+        # 🚀 5. ระบบคัดกรอง สูง-ต่ำ (O/U) เน้นบอลสูงเป็นหลัก
         def ou_decision(prob):
-            if prob >= 55: return "🔥 สูง (Over) มั่นใจมาก"
-            elif prob >= 52: return "📈 น่าลงทุนสูง"
-            else: return "⚠️ ข้าม (O/U ทรงไม่ชัดเจน)"
+            if prob >= 60: 
+                return "⭐⭐⭐ VIP สูง (Over) โคตรมั่นใจ" 
+            elif prob >= 55: 
+                return "⭐⭐ สูง (Over) มั่นใจมาก" 
+            elif prob >= 52: 
+                return "⭐ น่าลงทุน (สูง Over)" 
+            else: 
+                return "⚠️ ข้าม (O/U ทรงไม่ชัดเจน)"
 
         df_predict['AI_ฟันธง_HDP'] = df_predict['AI_โอกาสเหย้าชนะHDP(%)'].apply(hdp_decision)
         df_predict['AI_ฟันธง_สูงต่ำ'] = df_predict['AI_โอกาสออกสูง(%)'].apply(ou_decision)
@@ -817,18 +827,19 @@ def _show_ai_message(ai):
 # ชิ้นส่วนภาพแบบ Monitor (เกจ, VU meter, ECG)
 # ----------------------------------------
 def _pred_tone(text, kind):
-    # ปรับจูนสีให้เข้ากับตรรกะใหม่: VIP/มั่นใจ/สูง/รอง ได้ไฟเขียวทั้งหมด
     text = str(text)
+    if "อันตราย" in text: return "err"
     if "ข้าม" in text: return "skip"
-    if "VIP" in text or "มั่นใจ" in text: return "gs"
-    if "น่าลงทุน" in text: return "gf"
+    if "VIP" in text: return "gs"
+    if "⭐⭐" in text: return "gf"
+    if "⭐" in text: return "cs"
     return "cf"
 
 _TONE_COLORS = {
-    "hdp": {"gs": GREEN, "gf": "#4ade80", "cs": "#e8bb62", "cf": AMBER, "skip": "#4f6b5c"},
-    "ou": {"gs": "#38bdf8", "gf": CYAN_SOFT, "cs": "#e8bb62", "cf": AMBER, "skip": "#4f6b5c"},
+    "hdp": {"gs": GREEN, "gf": "#4ade80", "cs": "#e8bb62", "cf": AMBER, "err": RED, "skip": "#4f6b5c"},
+    "ou": {"gs": "#38bdf8", "gf": CYAN_SOFT, "cs": "#e8bb62", "cf": AMBER, "err": RED, "skip": "#4f6b5c"},
 }
-_TONE_STRENGTH = {"gs": 4, "cs": 4, "gf": 2, "cf": 2, "skip": 0}
+_TONE_STRENGTH = {"gs": 4, "gf": 3, "cs": 2, "cf": 1, "err": 4, "skip": 0}
 
 def _fmt_num(v, signed=False):
     try: return f"{float(v):+g}" if signed else f"{float(v):g}"
