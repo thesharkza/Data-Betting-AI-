@@ -362,22 +362,31 @@ def parse_cell(v):
 
 def clean_raw_data(raw_text):
     text = raw_text.strip()
+    
+    # 1. ทำความสะอาดข้อความ ตัด Markdown (```json) ที่ AI ชอบแถมมาออก
+    text = re.sub(r'^```(?:json)?', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'```$', '', text).strip()
+    
+    # 2. ดึงเฉพาะข้อมูลที่อยู่ในวงเล็บ [...]
     match = re.search(r'\[(.*)\]', text, re.DOTALL)
-    if not match:
-        raise ValueError("ไม่พบข้อมูลรูปแบบ JSON จาก AI")
+    if match:
+        json_str = "[" + match.group(1).strip() + "]"
+    else:
+        json_str = "[" + text + "]"
         
+    # 3. ลบเครื่องหมายลูกน้ำ (,) ตัวสุดท้ายทิ้ง เผื่อ AI พิมพ์เกินมา
+    json_str = re.sub(r',\s*\]$', ']', json_str)
+    
     try:
-        data = json.loads("[" + match.group(1) + "]")
+        data = json.loads(json_str)
     except Exception as e:
-        cleaned_str = match.group(1).strip()
-        if cleaned_str.endswith(','): cleaned_str = cleaned_str[:-1]
-        try:
-            data = json.loads("[" + cleaned_str + "]")
-        except:
-            raise ValueError(f"รูปแบบข้อมูลผิดพลาด: {e}")
+        raise ValueError(f"รูปแบบ JSON ผิดพลาด: {e}")
+        
+    if not isinstance(data, list):
+        raise ValueError("ข้อมูลที่ได้ไม่ใช่รูปแบบ Array List")
         
     if len(data) < 12:
-        raise ValueError(f"ข้อมูลมาไม่ครบ (ได้มา {len(data)} ช่อง จาก 12 ช่องที่ต้องการ)")
+        raise ValueError(f"ข้อมูลมาไม่ครบ (ได้มาเพียง {len(data)} ช่อง จาก 12 ช่องที่ต้องการ)")
         
     home = str(data[0]).strip()
     away = str(data[1]).strip()
@@ -496,20 +505,45 @@ def extract_row(img_bytes, user_fmt, model):
     
     prompt = (
         "สกัดข้อมูลจากตารางราคาบอลในภาพนี้ เลือกมา 1 คู่ที่เห็นชัดที่สุด\n"
-        "**คำสั่งสำคัญ: ต้องตอบกลับเป็น JSON Array โค้ดดิบๆ เท่านั้น ห้ามพิมพ์ข้อความอธิบายใดๆ ทั้งสิ้น**\n"
-        "รูปแบบโครงสร้างที่ต้องการ:\n"
+        "**คำสั่งสำคัญ: ตอบกลับเป็น JSON Array โค้ดดิบๆ เท่านั้น ห้ามมี Markdown และห้ามมีคำอธิบายใดๆ เด็ดขาด**\n"
+        "โครงสร้างที่ต้องการ:\n"
         "[\"ชื่อทีมเหย้า\", \"ชื่อทีมเยือน\", 1X2เหย้า, 1X2เสมอ, 1X2เยือน, HDPเหย้า, น้ำHDPเหย้า, HDPเยือน, น้ำHDPเยือน, โกลสูงต่ำ, น้ำสูง, น้ำต่ำ, \"รูปแบบน้ำเช่น MY\"]\n"
-        "ตัวอย่างผลลัพธ์:\n"
+        "ตัวอย่าง:\n"
         "[\"Mardin 1969 Spor\", \"Karagumruk\", 2.10, 3.50, 3.20, -0.5, 0.95, 0.5, -0.85, 2.5, 0.80, -0.90, \"MY\"]"
     )
     
+    # 🚀 ปลดล็อค Safety Settings ป้องกัน AI มองภาพราคาบอลเป็นการพนันแล้วบล็อคคำตอบ
+    safety_settings = [
+        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"}
+    ]
+    
+    last_error = ""
     for attempt in range(3):
         try:
-            resp = model.generate_content([{"mime_type": "image/jpeg", "data": buf.getvalue()}, prompt])
-            row, ai_fmt = clean_raw_data(resp.text.strip())
+            # 🚀 บังคับให้ AI ต้องตอบกลับด้วย mime_type JSON เท่านั้น
+            resp = model.generate_content(
+                [{"mime_type": "image/jpeg", "data": buf.getvalue()}, prompt],
+                safety_settings=safety_settings,
+                generation_config={"response_mime_type": "application/json"} 
+            )
+            
+            # ตรวจสอบการโดนบล็อค
+            if getattr(resp, 'prompt_feedback', None) and resp.prompt_feedback.block_reason:
+                raise ValueError("ถูกบล็อคโดย Safety Filter ของ Google API")
+                
+            raw_text = resp.text.strip()
+            row, ai_fmt = clean_raw_data(raw_text)
             return convert_water_to_malay(row, user_fmt, ai_fmt)
-        except Exception: time.sleep(2)
-    raise RuntimeError("อ่านภาพไม่สำเร็จ (AI ตอบผิดรูปแบบโครงสร้าง)")
+            
+        except Exception as e:
+            last_error = str(e)
+            time.sleep(2)
+            
+    # แจ้งเตือนข้อผิดพลาดที่ชัดเจนขึ้นเพื่อให้รู้สาเหตุที่แท้จริง
+    raise RuntimeError(f"อ่านภาพไม่สำเร็จ ข้อผิดพลาดล่าสุด: {last_error}")
 
 def process_job(job_id, workbook, model):
     try:
@@ -814,7 +848,7 @@ def get_ai():
     try:
         return compute_ai(load_dashboard_data(workbook, JOBS.data_version))
     except Exception as e:
-        # 🚀 [FIX 4] ดึงรายละเอียด Error ลึกสุดใจมาแสดง หากมีจุดอื่นบั๊กอีกจะได้ตามถูก
+        # 🚀 ดึงรายละเอียด Error ลึกสุดใจมาแสดง หากมีจุดอื่นบั๊กอีกจะได้ตามถูก
         err_detail = traceback.format_exc()
         return {"status": "error", "level": "error", "msg": f"โหลดข้อมูลไม่สำเร็จ: {e}", "trace": err_detail}
 
