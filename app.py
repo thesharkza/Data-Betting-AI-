@@ -839,11 +839,25 @@ def compute_ai(df_in):
         df_predict['AI_โอกาสเหย้าชนะHDP(%)'] = (np.array(probs_hdp) * 100).round(1)
         df_predict['AI_โอกาสออกสูง(%)'] = (np.array(probs_ou) * 100).round(1)
 
-        def hdp_decision(prob):
-            if prob <= 42: return "⭐⭐⭐ VIP ไม้หนัก (รองทีมเยือน)" 
-            elif prob <= 47: return "⭐⭐ น่าลงทุน (รองทีมเยือน)"
-            elif prob >= 60: return "🚨 อันตราย (ราคาหลอกให้ต่อ)"
-            elif prob >= 53: return "⭐ น่าลงทุน (ต่อเจ้าบ้าน)" 
+        # --- อัปเกรด: ระบบพลิกคำใบ้ ต่อ/รอง ตามสถานะแต้มต่อจริงแบบอัตโนมัติ ---
+        def get_hdp_decision(row):
+            prob = row['AI_โอกาสเหย้าชนะHDP(%)']
+            try: hdp = float(row['แฮนดิแคป (เหย้า)'])
+            except: hdp = 0.0
+            
+            # ตรวจสอบว่าใครคือทีมต่อ ใครคือทีมรอง จากเครื่องหมาย +/-
+            if hdp < 0:    # เจ้าบ้านราคาติดลบ แปลว่า "เจ้าบ้านต่อ"
+                home_txt, away_txt = "ต่อเจ้าบ้าน", "รองทีมเยือน"
+            elif hdp > 0:  # เจ้าบ้านราคาเป็นบวก แปลว่า "เจ้าบ้านรอง"
+                home_txt, away_txt = "รองเจ้าบ้าน", "ต่อทีมเยือน"
+            else:          # ราคาเสมอ
+                home_txt, away_txt = "แทงเจ้าบ้าน", "แทงทีมเยือน"
+                
+            # ให้คำแนะนำโดยอิงจากโอกาสชนะของ "เจ้าบ้าน"
+            if prob >= 60: return f"⭐⭐⭐ VIP ไม้หนัก ({home_txt})"
+            elif prob >= 53: return f"⭐⭐ น่าลงทุน ({home_txt})"
+            elif prob <= 42: return f"⭐⭐⭐ VIP ไม้หนัก ({away_txt})"
+            elif prob <= 47: return f"⭐⭐ น่าลงทุน ({away_txt})"
             else: return "⚠️ ข้าม (ราคาก้ำกึ่ง 50/50)"
 
         def ou_decision(prob):
@@ -852,7 +866,8 @@ def compute_ai(df_in):
             elif prob >= 52: return "⭐ น่าลงทุน (สูง Over)" 
             else: return "⚠️ ข้าม (O/U ทรงไม่ชัดเจน)"
 
-        df_predict['AI_ฟันธง_HDP'] = df_predict['AI_โอกาสเหย้าชนะHDP(%)'].apply(hdp_decision)
+        # เรียกใช้ฟังก์ชันใหม่ โดยส่งข้อมูลไปประมวลผลทั้งแถว (เพื่อเช็คราคา HDP)
+        df_predict['AI_ฟันธง_HDP'] = df_predict.apply(get_hdp_decision, axis=1)
         df_predict['AI_ฟันธง_สูงต่ำ'] = df_predict['AI_โอกาสออกสูง(%)'].apply(ou_decision)
 
     return {"status": "ok", "df_predict": df_predict, "hdp_acc": hdp_acc, "ou_acc": ou_acc,
