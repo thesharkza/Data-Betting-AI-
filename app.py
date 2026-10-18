@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 from html import escape as esc
 
-# 🚀 นำเข้า Machine Learning Model
+# 🚀 นำเข้า Machine Learning Model (ใช้ v3.0 The Ultimate Model)
 from sklearn.ensemble import RandomForestClassifier, HistGradientBoostingClassifier
 
 # ----------------------------------------
@@ -336,7 +336,8 @@ def get_ws(wb):
     try: return wb.worksheet("DATA")
     except gspread.exceptions.WorksheetNotFound: return wb.sheet1
 
-model = genai.GenerativeModel('gemini-3.7-flash')
+# 🚀 โหลดโมเดล Flash ตัวใหม่ล่าสุด ซึ่งเก่งเรื่องการสกัดข้อมูลไวและแม่นยำ
+model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
 WATER_IDX = [6, 8, 10, 11]
 FMT_LABELS = {"MY": "มาเลเซีย", "HK": "ฮ่องกง", "ID": "อินโดนีเซีย", "EU": "ยุโรป (Decimal)"}
@@ -360,33 +361,47 @@ def parse_cell(v):
     try: return float(cleaned) if '.' in cleaned else int(cleaned)
     except Exception: return cleaned
 
+# 🚀 [อัปเกรด] ฟังก์ชันแปลงข้อมูล AI แบบใหม่ ใช้ Regex ดึงข้อมูลโดยไม่ต้องบังคับ JSON MIME type
 def clean_raw_data(raw_text):
     text = raw_text.strip()
     
-    # 1. ทำความสะอาดข้อความ ตัด Markdown (```json) ที่ AI ชอบแถมมาออก
-    text = re.sub(r'^```(?:json)?', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'```$', '', text).strip()
+    # 1. ลบ Markdown ออก
+    text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\s*```$', '', text).strip()
     
-    # 2. ดึงเฉพาะข้อมูลที่อยู่ในวงเล็บ [...]
-    match = re.search(r'\[(.*)\]', text, re.DOTALL)
-    if match:
-        json_str = "[" + match.group(1).strip() + "]"
+    # 2. ค้นหาเฉพาะก้อนข้อมูลที่อยู่ในวงเล็บ [...] หรือ {...}
+    match_array = re.search(r'\[(.*)\]', text, re.DOTALL)
+    match_obj = re.search(r'\{.*\}', text, re.DOTALL)
+    
+    if match_array:
+        json_str = "[" + match_array.group(1).strip() + "]"
+    elif match_obj:
+        json_str = match_obj.group(0).strip()
     else:
-        json_str = "[" + text + "]"
+        json_str = text
         
-    # 3. ลบเครื่องหมายลูกน้ำ (,) ตัวสุดท้ายทิ้ง เผื่อ AI พิมพ์เกินมา
+    # เคลียร์ comma เกินตัวสุดท้ายทิ้ง
     json_str = re.sub(r',\s*\]$', ']', json_str)
+    json_str = re.sub(r',\s*\}$', '}', json_str)
     
     try:
         data = json.loads(json_str)
-    except Exception as e:
-        raise ValueError(f"รูปแบบ JSON ผิดพลาด: {e}")
+    except Exception:
+        raise ValueError(f"รูปแบบข้อมูลผิดพลาด -> สิ่งที่ AI ตอบมาคือ: {text[:80]}...")
+        
+    # หาก AI ส่งมาเป็น Object/Dict ให้ดึงเฉพาะค่า Values ออกมาเรียง
+    if isinstance(data, dict):
+        data = list(data.values())
+        
+    # หาก AI ส่งมาเป็น List ซ้อน List (เช่น [["ทีม", ...]]) ให้ดึงชั้นแรกออกมา
+    if isinstance(data, list) and len(data) > 0 and isinstance(data[0], list):
+        data = data[0]
         
     if not isinstance(data, list):
-        raise ValueError("ข้อมูลที่ได้ไม่ใช่รูปแบบ Array List")
+        raise ValueError(f"ข้อมูลไม่ใช่ Array -> สิ่งที่ AI ตอบมาคือ: {str(data)[:80]}...")
         
     if len(data) < 12:
-        raise ValueError(f"ข้อมูลมาไม่ครบ (ได้มาเพียง {len(data)} ช่อง จาก 12 ช่องที่ต้องการ)")
+        raise ValueError(f"ข้อมูลมาไม่ครบ (ได้ {len(data)} ช่อง จาก 12) -> ข้อมูลที่ได้: {str(data)[:80]}...")
         
     home = str(data[0]).strip()
     away = str(data[1]).strip()
@@ -443,6 +458,7 @@ def save_row_to_sheet(ws, row, form5):
 
     requests.append(update(0, 23, [typed(h) for h in FORM5_HEADERS], "userEnteredValue"))
     
+    # อัปเดตข้อมูลบอล 12 ช่อง ห้ามเกิน ป้องกันการทับคอลัมน์ M
     requests.append(update(target_row - 1, 0, [typed(v) for v in row[:12]], "userEnteredValue"))
     
     form_cells = [typed(v) for v in normalized]
@@ -497,6 +513,7 @@ def get_job_manager(): return JobManager()
 JOBS = get_job_manager()
 if "form5_owner_id" not in st.session_state: st.session_state["form5_owner_id"] = uuid.uuid4().hex
 
+# 🚀 [อัปเกรด] นำ Prompt และ Safety Settings จากเวอร์ชัน Tab แรกที่ทำงานได้สมบูรณ์แบบมาใช้
 def extract_row(img_bytes, user_fmt, model):
     img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
     img.thumbnail((1600, 1600))
@@ -504,15 +521,13 @@ def extract_row(img_bytes, user_fmt, model):
     img.save(buf, format='JPEG', quality=85)
     
     prompt = (
-        "สกัดข้อมูลจากตารางราคาบอลในภาพนี้ เลือกมา 1 คู่ที่เห็นชัดที่สุด\n"
-        "**คำสั่งสำคัญ: ตอบกลับเป็น JSON Array โค้ดดิบๆ เท่านั้น ห้ามมี Markdown และห้ามมีคำอธิบายใดๆ เด็ดขาด**\n"
-        "โครงสร้างที่ต้องการ:\n"
-        "[\"ชื่อทีมเหย้า\", \"ชื่อทีมเยือน\", 1X2เหย้า, 1X2เสมอ, 1X2เยือน, HDPเหย้า, น้ำHDPเหย้า, HDPเยือน, น้ำHDPเยือน, โกลสูงต่ำ, น้ำสูง, น้ำต่ำ, \"รูปแบบน้ำเช่น MY\"]\n"
-        "ตัวอย่าง:\n"
-        "[\"Mardin 1969 Spor\", \"Karagumruk\", 2.10, 3.50, 3.20, -0.5, 0.95, 0.5, -0.85, 2.5, 0.80, -0.90, \"MY\"]"
+        "กรุณาดึงข้อมูลจากตารางราคาบอลในภาพนี้ เลือกมา 1 คู่ที่เห็นชัดที่สุด\n"
+        "**สำคัญมาก: ตอบกลับเฉพาะข้อมูลแบบ JSON Array เท่านั้น ห้ามพิมพ์คำอธิบายหรือตัวหนังสืออื่นๆ เด็ดขาด**\n"
+        "[\"ทีมเหย้า\", \"ทีมเยือน\", 1X2เหย้า, 1X2เสมอ, 1X2เยือน, HDPเหย้า, น้ำHDPเหย้า, HDPเยือน, น้ำHDPเยือน, โกลสูงต่ำ, น้ำสูง, น้ำต่ำ, \"รูปแบบน้ำเช่น MY\"]\n"
+        "ตัวอย่างที่ต้องการ:\n"
+        "[\"Arsenal\", \"Chelsea\", 2.10, 3.50, 3.20, -0.5, 0.95, 0.5, -0.85, 2.5, 0.80, -0.90, \"MY\"]"
     )
     
-    # 🚀 ปลดล็อค Safety Settings ป้องกัน AI มองภาพราคาบอลเป็นการพนันแล้วบล็อคคำตอบ
     safety_settings = [
         {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
         {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
@@ -523,18 +538,19 @@ def extract_row(img_bytes, user_fmt, model):
     last_error = ""
     for attempt in range(3):
         try:
-            # 🚀 บังคับให้ AI ต้องตอบกลับด้วย mime_type JSON เท่านั้น
+            # 🚀 ปล่อยอิสระ ไม่บังคับ MIME Type เพื่อป้องกัน AI ตอบ [] เวลามันลังเล
             resp = model.generate_content(
                 [{"mime_type": "image/jpeg", "data": buf.getvalue()}, prompt],
-                safety_settings=safety_settings,
-                generation_config={"response_mime_type": "application/json"} 
+                safety_settings=safety_settings
             )
             
-            # ตรวจสอบการโดนบล็อค
             if getattr(resp, 'prompt_feedback', None) and resp.prompt_feedback.block_reason:
-                raise ValueError("ถูกบล็อคโดย Safety Filter ของ Google API")
+                raise ValueError("ภาพถูกเซ็นเซอร์โดยระบบ Safety ของ Google")
                 
             raw_text = resp.text.strip()
+            if not raw_text:
+                raise ValueError("AI ตอบกลับเป็นค่าว่าง (Empty Response)")
+                
             row, ai_fmt = clean_raw_data(raw_text)
             return convert_water_to_malay(row, user_fmt, ai_fmt)
             
@@ -542,8 +558,7 @@ def extract_row(img_bytes, user_fmt, model):
             last_error = str(e)
             time.sleep(2)
             
-    # แจ้งเตือนข้อผิดพลาดที่ชัดเจนขึ้นเพื่อให้รู้สาเหตุที่แท้จริง
-    raise RuntimeError(f"อ่านภาพไม่สำเร็จ ข้อผิดพลาดล่าสุด: {last_error}")
+    raise RuntimeError(f"{last_error}")
 
 def process_job(job_id, workbook, model):
     try:
@@ -582,6 +597,7 @@ STATUS_UI = {"queued": ("รอคิว", "run"), "reading": ("กำลัง�
 def panel_header(title, sub): st.markdown(f"<p class='panel-title'>{title}</p><p class='panel-sub'>{sub}</p>", unsafe_allow_html=True)
 
 def _render_job_signal(res):
+    """แสดงการ์ดสัญญาณของคู่ที่เพิ่งบันทึกสำเร็จ"""
     ai = get_ai()
     if ai is None: return
     if ai["status"] != "ok":
@@ -601,7 +617,7 @@ def render_jobs(polling=False):
     jobs = [j for j in JOBS.snapshot() if j.get("owner_id") == st.session_state["form5_owner_id"]]
     if not jobs: return
     if polling and not any(j["status"] in ("queued", "reading", "saving") for j in jobs):
-        st.rerun()  
+        st.rerun()  # งานเสร็จหมดแล้ว: รีเฟรชทั้งหน้าเพื่อหยุดการดึงสถานะ
     for j in jobs:
         cls = "ok" if j["status"] == "done" else "err" if j["status"] == "error" else "run"
         label, pill_cls = STATUS_UI.get(j["status"], (j["status"], "run"))
@@ -667,7 +683,7 @@ def load_dashboard_data(_workbook, version=0):
     return pd.DataFrame(ws.get_all_records())
 
 # ----------------------------------------
-# AI : เทรนโมเดล + ทำนาย (Hybrid ML v3.0)
+# AI : เทรนโมเดล + ทำนาย (🚀 ใช้งาน HistGradientBoosting ML v3.0 The Ultimate Model 🚀)
 # ----------------------------------------
 FEATURE_LABELS = {
     'Implied_Home_Prob': 'โอกาสชนะ 1X2 เหย้า',
@@ -780,7 +796,7 @@ def compute_ai(df_in):
     
     all_features = odds_features + stats_features
 
-    # 🚀 [FIX] กรองคอลัมน์ที่ข้อมูลเหมือนกันหมดทุกแถวทิ้ง (Zero-Variance) แก้ปัญหา AI แครชตอนทำ Binning
+    # 🚀 [FIX v3.0] กรองคอลัมน์ที่ข้อมูลเหมือนกันหมดทุกแถวทิ้ง (Zero-Variance)
     valid_features_hdp = [f for f in all_features if df_train_hdp[f].nunique(dropna=True) > 1]
     valid_features_ou = [f for f in all_features if df_train_ou[f].nunique(dropna=True) > 1]
 
@@ -801,7 +817,7 @@ def compute_ai(df_in):
     rf_hdp_feats = [f for f in odds_features if f in valid_features_hdp]
     rf_ou_feats = [f for f in odds_features if f in valid_features_ou]
     
-    if not rf_hdp_feats: rf_hdp_feats = valid_features_hdp[:1] # กันเหนียว
+    if not rf_hdp_feats: rf_hdp_feats = valid_features_hdp[:1]
     if not rf_ou_feats: rf_ou_feats = valid_features_ou[:1]
 
     rf_hdp = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42).fit(df_train_hdp[rf_hdp_feats].fillna(0), y_train_hdp)
@@ -848,7 +864,6 @@ def get_ai():
     try:
         return compute_ai(load_dashboard_data(workbook, JOBS.data_version))
     except Exception as e:
-        # 🚀 ดึงรายละเอียด Error ลึกสุดใจมาแสดง หากมีจุดอื่นบั๊กอีกจะได้ตามถูก
         err_detail = traceback.format_exc()
         return {"status": "error", "level": "error", "msg": f"โหลดข้อมูลไม่สำเร็จ: {e}", "trace": err_detail}
 
