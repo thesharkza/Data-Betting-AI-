@@ -337,7 +337,7 @@ def get_ws(wb):
     except gspread.exceptions.WorksheetNotFound: return wb.sheet1
 
 # 🚀 โหลดโมเดล Flash ตัวใหม่ล่าสุด ซึ่งเก่งเรื่องการสกัดข้อมูลไวและแม่นยำ
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-3.7-flash')
 
 WATER_IDX = [6, 8, 10, 11]
 FMT_LABELS = {"MY": "มาเลเซีย", "HK": "ฮ่องกง", "ID": "อินโดนีเซีย", "EU": "ยุโรป (Decimal)"}
