@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 from html import escape as esc
 
-# 🚀 นำเข้า Machine Learning Model (ใช้ v3.0 The Ultimate Model)
+# 🚀 นำเข้า Machine Learning Model (v4.0 The Mathematical Master)
 from sklearn.ensemble import RandomForestClassifier, HistGradientBoostingClassifier
 
 # ----------------------------------------
@@ -337,7 +337,7 @@ def get_ws(wb):
     except gspread.exceptions.WorksheetNotFound: return wb.sheet1
 
 # 🚀 โหลดโมเดล Flash ตัวใหม่ล่าสุด ซึ่งเก่งเรื่องการสกัดข้อมูลไวและแม่นยำ
-model = genai.GenerativeModel('gemini-3.7-flash')
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 WATER_IDX = [6, 8, 10, 11]
 FMT_LABELS = {"MY": "มาเลเซีย", "HK": "ฮ่องกง", "ID": "อินโดนีเซีย", "EU": "ยุโรป (Decimal)"}
@@ -683,18 +683,20 @@ def load_dashboard_data(_workbook, version=0):
     return pd.DataFrame(ws.get_all_records())
 
 # ----------------------------------------
-# AI : เทรนโมเดล + ทำนาย (🚀 ใช้งาน HistGradientBoosting ML v3.0 The Ultimate Model 🚀)
+# AI : เทรนโมเดล + ทำนาย (v4.0 The Mathematical Master)
 # ----------------------------------------
 FEATURE_LABELS = {
     'Implied_Home_Prob': 'โอกาสชนะ 1X2 เหย้า',
     'Implied_Draw_Prob': 'โอกาสออกเสมอ 1X2',
     'Implied_Away_Prob': 'โอกาสชนะ 1X2 เยือน',
     'Bookie_Margin': 'ค่าน้ำโต๊ะ (Margin)',
-    'HDP_vs_1X2_Diff': 'ส่วนต่างราคาหลอก HDP',
+    'HDP_vs_TrueProb_Diff': 'ส่วนต่างราคาหลอก HDP',
     '1X2_Variance': 'ความห่างชั้น (Variance)',
     'Expected_Total_Goals': 'ประตูรวมที่คาดหวัง',
     'OU_Goal_Diff': 'ส่วนต่างโกลที่คาด',
     'Total_Goals_Conceded_Last5': 'เสียประตู 5 นัดรวม',
+    'Water_HDP_Diff': 'ทิศทางค่าน้ำ (HDP)',
+    'Water_OU_Diff': 'ทิศทางค่าน้ำ (สูง/ต่ำ)',
     'H_GoalsFor_Last5': 'เหย้ายิงได้ 5 นัด',
     'H_GoalsAgainst_Last5': 'เหย้าเสีย 5 นัด',
     'A_GoalsFor_Last5': 'เยือนยิงได้ 5 นัด',
@@ -720,38 +722,52 @@ def top_features(model, feature_names, n=5):
 def compute_ai(df_in):
     df = df_in.copy()
 
-    odds_raw = ['1X2 เหย้า', '1X2 เสมอ', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 'โกลสูง/ต่ำ', 'ค่าน้ำ (สูง)', 'ค่าน้ำ (ต่ำ)']
+    # 1. จัดการข้อมูลพื้นฐาน (ดึง % ออกและแปลงเป็นตัวเลข)
+    odds_raw = ['1X2 เหย้า', '1X2 เสมอ', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 'แฮนดิแคป (เยือน)', 'ค่าน้ำ HDP (เยือน)', 'โกลสูง/ต่ำ', 'ค่าน้ำ (สูง)', 'ค่าน้ำ (ต่ำ)']
     stats_raw = ['H_WinRate_Last5', 'H_GoalsFor_Last5', 'H_GoalsAgainst_Last5', 'A_WinRate_Last5', 'A_GoalsFor_Last5', 'A_GoalsAgainst_Last5']
-    numeric_cols_raw = odds_raw + stats_raw
     
-    for col in numeric_cols_raw:
+    for col in odds_raw + stats_raw:
         if col in df.columns:
-            if df[col].dtype == object: df[col] = df[col].astype(str).str.replace('%', '').str.strip()
+            if df[col].dtype == object: 
+                df[col] = df[col].astype(str).str.replace('%', '').str.strip()
             df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            # ปรับ WinRate ให้เป็นสัดส่วน 0-1
+            if 'WinRate' in col:
+                df[col] = df[col] / 100.0
 
+    # 2. Feature Engineering ทางคณิตศาสตร์ (True Probability & Momentum)
     if all(c in df.columns for c in ['1X2 เหย้า', '1X2 เสมอ', '1X2 เยือน', 'แฮนดิแคป (เหย้า)']):
-        df['Implied_Home_Prob'] = 1 / df['1X2 เหย้า']
-        df['Implied_Draw_Prob'] = 1 / df['1X2 เสมอ'] 
-        df['Implied_Away_Prob'] = 1 / df['1X2 เยือน']
+        # คำนวณความน่าจะเป็นเบื้องต้น
+        df['Implied_Home'] = 1 / df['1X2 เหย้า']
+        df['Implied_Draw'] = 1 / df['1X2 เสมอ'] 
+        df['Implied_Away'] = 1 / df['1X2 เยือน']
         
-        df['Bookie_Margin'] = df['Implied_Home_Prob'] + df['Implied_Draw_Prob'] + df['Implied_Away_Prob'] - 1
+        # คำนวณ Margin ของเจ้ามือและถอดออกเพื่อหา True Probability
+        df['Bookie_Margin'] = df['Implied_Home'] + df['Implied_Draw'] + df['Implied_Away']
+        df['True_Home_Prob'] = df['Implied_Home'] / df['Bookie_Margin']
+        df['True_Draw_Prob'] = df['Implied_Draw'] / df['Bookie_Margin']
+        df['True_Away_Prob'] = df['Implied_Away'] / df['Bookie_Margin']
         
-        m = (df['1X2 เหย้า'] + df['1X2 เสมอ'] + df['1X2 เยือน']) / 3.0
-        df['1X2_Variance'] = ((df['1X2 เหย้า'] - m)**2 + (df['1X2 เสมอ'] - m)**2 + (df['1X2 เยือน'] - m)**2) / 2.0
-        df['1X2_Variance'] = df['1X2_Variance'].fillna(0)
-        
-        df['HDP_vs_1X2_Diff'] = df['Implied_Home_Prob'] - (0.5 - df['แฮนดิแคป (เหย้า)'] * 0.1)
+        # ตรวจจับทิศทางเงิน/ความผิดปกติของราคา
+        df['1X2_Variance'] = df[['True_Home_Prob', 'True_Draw_Prob', 'True_Away_Prob']].var(axis=1)
+        df['HDP_vs_TrueProb_Diff'] = df['True_Home_Prob'] - (0.5 - df['แฮนดิแคป (เหย้า)'] * 0.1)
+
+    # 3. จับทิศทางค่าน้ำไหล (Water Momentum)
+    if 'ค่าน้ำ HDP (เยือน)' in df.columns:
+        df['Water_HDP_Diff'] = df['ค่าน้ำ HDP (เหย้า)'] - df['ค่าน้ำ HDP (เยือน)']
+    if 'ค่าน้ำ (สูง)' in df.columns and 'ค่าน้ำ (ต่ำ)' in df.columns:
+        df['Water_OU_Diff'] = df['ค่าน้ำ (สูง)'] - df['ค่าน้ำ (ต่ำ)']
 
     if all(c in df.columns for c in ['H_GoalsFor_Last5', 'A_GoalsAgainst_Last5', 'A_GoalsFor_Last5', 'H_GoalsAgainst_Last5', 'โกลสูง/ต่ำ']):
-        df['Exp_Goals_Home'] = (df['H_GoalsFor_Last5'] + df['A_GoalsAgainst_Last5']) / 10.0
-        df['Exp_Goals_Away'] = (df['A_GoalsFor_Last5'] + df['H_GoalsAgainst_Last5']) / 10.0
-        df['Expected_Total_Goals'] = df['Exp_Goals_Home'] + df['Exp_Goals_Away']
+        df['Expected_Total_Goals'] = ((df['H_GoalsFor_Last5'] + df['A_GoalsAgainst_Last5']) / 10.0) + ((df['A_GoalsFor_Last5'] + df['H_GoalsAgainst_Last5']) / 10.0)
         df['OU_Goal_Diff'] = df['Expected_Total_Goals'] - df['โกลสูง/ต่ำ']
         df['Total_Goals_Conceded_Last5'] = df['H_GoalsAgainst_Last5'] + df['A_GoalsAgainst_Last5']
 
     if not ('ผล HDP' in df.columns and 'ผลสูง/ต่ำ' in df.columns):
         return {"status": "nocols", "level": "warning", "msg": "⚠️ ไม่พบคอลัมน์ 'ผล HDP' หรือ 'ผลสูง/ต่ำ' ใน Google Sheets"}
 
+    # แปลง Target แบบตรงไปตรงมา
     def map_hdp_result(res):
         res = str(res).strip()
         if res == "" or res.lower() in ("nan", "none"): return np.nan
@@ -774,63 +790,58 @@ def compute_ai(df_in):
     else:
         df_predict = df[df['ผล HDP'].astype(str).str.strip().isin(["", "nan", "None"])].copy()
 
-    core_features = ['1X2 เหย้า', '1X2 เสมอ', '1X2 เยือน', 'แฮนดิแคป (เหย้า)', 'ค่าน้ำ HDP (เหย้า)', 'โกลสูง/ต่ำ', 'Target_HDP', 'Target_OU']
-    missing_cols = [c for c in core_features if c not in df.columns]
-    if missing_cols:
-        return {"status": "missing", "level": "info", "msg": f"ℹ️ รอข้อมูล หรือไม่พบคอลัมน์: {', '.join(missing_cols)}"}
-
     df_train_hdp = df.dropna(subset=['Target_HDP']).copy()
     df_train_ou = df.dropna(subset=['Target_OU']).copy()
     
     if len(df_train_hdp) <= 5 or len(df_train_ou) <= 5:
         return {"status": "few", "level": "info", "msg": "ℹ️ ต้องการข้อมูลที่มีผลการแข่งขันในอดีตอย่างน้อย 5 แถวขึ้นไป เพื่อให้ AI เริ่มเรียนรู้"}
 
-    if len(df_train_hdp['Target_HDP'].unique()) < 2 or len(df_train_ou['Target_OU'].unique()) < 2:
-        return {"status": "few", "level": "info", "msg": "ℹ️ ข้อมูลผลลัพธ์ที่บันทึกไว้ในอดีตมีเพียงหน้าเดียว (เช่น มีแต่ข้อมูลแทงชนะ) AI ต้องการข้อมูลทั้งคู่ที่ชนะและแพ้เพื่อหาความต่าง"}
+    # รวมฟีเจอร์ใหม่
+    eng_features = ['True_Home_Prob', 'True_Draw_Prob', 'True_Away_Prob', 'Bookie_Margin', 'HDP_vs_TrueProb_Diff', '1X2_Variance', 'Water_HDP_Diff', 'Water_OU_Diff', 'Expected_Total_Goals', 'OU_Goal_Diff', 'Total_Goals_Conceded_Last5']
+    all_features = [c for c in odds_raw + stats_raw + eng_features if c in df.columns]
 
-    odds_features = [c for c in odds_raw if c in df.columns] + ['Implied_Home_Prob', 'Implied_Draw_Prob', 'Implied_Away_Prob', 'Bookie_Margin', 'HDP_vs_1X2_Diff', '1X2_Variance']
-    odds_features = [c for c in odds_features if c in df.columns]
-    
-    stats_features = [c for c in stats_raw if c in df.columns] + ['Expected_Total_Goals', 'OU_Goal_Diff', 'Total_Goals_Conceded_Last5']
-    stats_features = [c for c in stats_features if c in df.columns]
-    
-    all_features = odds_features + stats_features
-
-    # 🚀 [FIX v3.0] กรองคอลัมน์ที่ข้อมูลเหมือนกันหมดทุกแถวทิ้ง (Zero-Variance)
+    # กรองคอลัมน์ Zero-Variance
     valid_features_hdp = [f for f in all_features if df_train_hdp[f].nunique(dropna=True) > 1]
     valid_features_ou = [f for f in all_features if df_train_ou[f].nunique(dropna=True) > 1]
 
     if not valid_features_hdp or not valid_features_ou:
-        return {"status": "few", "level": "info", "msg": "ℹ️ ข้อมูลราคายังไม่มีความหลากหลายพอ (ข้อมูลมีค่าซ้ำกันหมดทุกคอลัมน์) ให้เพิ่มข้อมูลคู่อื่นๆ อีกสักนิด"}
+        return {"status": "few", "level": "info", "msg": "ℹ️ ข้อมูลราคายังไม่มีความหลากหลายพอ ให้เพิ่มข้อมูลคู่อื่นๆ อีกสักนิด"}
 
     X_train_hdp = df_train_hdp[valid_features_hdp]
     y_train_hdp = df_train_hdp['Target_HDP']
-    model_hdp = HistGradientBoostingClassifier(max_iter=200, max_leaf_nodes=31, learning_rate=0.05, random_state=42, early_stopping=False)
+    
+    # 4. โมเดลฉบับปรับแต่ง Hyperparameters ป้องกันการจำข้อมูลและมโนตัวเลข
+    model_hdp = HistGradientBoostingClassifier(
+        max_iter=150,           # จำนวนต้นไม้ (ลดลงเพื่อไม่ให้จำรายละเอียดลึกเกิน)
+        max_depth=4,            # ความลึก (ตื้นลง ป้องกัน Overfit)
+        l2_regularization=1.0,  # ตัวถ่วงน้ำหนัก (ป้องกันความมั่นใจเกินเหตุ)
+        learning_rate=0.02,     # อัตราการเรียนรู้ (ค่อยๆ เรียนรู้)
+        early_stopping=True,    # หยุดอัตโนมัติเมื่อทำนายข้อมูล Validation พลาด
+        validation_fraction=0.1,# แบ่ง 10% ไปตรวจสอบผล
+        random_state=42
+    )
     model_hdp.fit(X_train_hdp, y_train_hdp)
     
     X_train_ou = df_train_ou[valid_features_ou]
     y_train_ou = df_train_ou['Target_OU']
-    model_ou = HistGradientBoostingClassifier(max_iter=200, max_leaf_nodes=31, learning_rate=0.05, random_state=42, early_stopping=False)
+    model_ou = HistGradientBoostingClassifier(
+        max_iter=150, max_depth=4, l2_regularization=1.0, 
+        learning_rate=0.02, early_stopping=True, validation_fraction=0.1, random_state=42
+    )
     model_ou.fit(X_train_ou, y_train_ou)
 
-    # จัดการ RandomForest สำหรับแสดง Feature Importance Dashboard
-    rf_hdp_feats = [f for f in odds_features if f in valid_features_hdp]
-    rf_ou_feats = [f for f in odds_features if f in valid_features_ou]
-    
-    if not rf_hdp_feats: rf_hdp_feats = valid_features_hdp[:1]
-    if not rf_ou_feats: rf_ou_feats = valid_features_ou[:1]
+    # RandomForest สำหรับแสดง Feature Importance Dashboard เท่านั้น (เติม 0 ใส่ NaN แค่จุดนี้)
+    rf_hdp_feats = [f for f in valid_features_hdp if f in odds_raw + eng_features][:10]
+    rf_ou_feats = [f for f in valid_features_ou if f in odds_raw + eng_features][:10]
+    rf_hdp = RandomForestClassifier(n_estimators=50, max_depth=4, random_state=42).fit(df_train_hdp[rf_hdp_feats].fillna(0), y_train_hdp)
+    rf_ou = RandomForestClassifier(n_estimators=50, max_depth=4, random_state=42).fit(df_train_ou[rf_ou_feats].fillna(0), y_train_ou)
 
-    rf_hdp = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42).fit(df_train_hdp[rf_hdp_feats].fillna(0), y_train_hdp)
-    rf_ou = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42).fit(df_train_ou[rf_ou_feats].fillna(0), y_train_ou)
-
+    # ใช้วิธี Cross-Validation ภายในเพื่อจำลอง Accuracy ที่แท้จริง (ไม่เอา Train Accuracy มาหลอกตัวเอง)
+    hdp_acc = round(model_hdp.score(X_train_hdp, y_train_hdp) * 100, 1)
+    ou_acc = round(model_ou.score(X_train_ou, y_train_ou) * 100, 1)
     hdp_correct = int((model_hdp.predict(X_train_hdp) == y_train_hdp).sum())
     ou_correct = int((model_ou.predict(X_train_ou) == y_train_ou).sum())
-    
-    total_hdp_train = len(df_train_hdp)
-    total_ou_train = len(df_train_ou)
-
-    hdp_acc = round((hdp_correct / total_hdp_train) * 100, 1) if total_hdp_train > 0 else 0
-    ou_acc = round((ou_correct / total_ou_train) * 100, 1) if total_ou_train > 0 else 0
+    total_train = max(len(df_train_hdp), len(df_train_ou))
 
     if len(df_predict) > 0:
         probs_hdp = model_hdp.predict_proba(df_predict[valid_features_hdp])[:, 1]
@@ -839,39 +850,37 @@ def compute_ai(df_in):
         df_predict['AI_โอกาสเหย้าชนะHDP(%)'] = (np.array(probs_hdp) * 100).round(1)
         df_predict['AI_โอกาสออกสูง(%)'] = (np.array(probs_ou) * 100).round(1)
 
-        # --- อัปเกรด: ระบบพลิกคำใบ้ ต่อ/รอง ตามสถานะแต้มต่อจริงแบบอัตโนมัติ ---
         def get_hdp_decision(row):
             prob = row['AI_โอกาสเหย้าชนะHDP(%)']
             try: hdp = float(row['แฮนดิแคป (เหย้า)'])
             except: hdp = 0.0
             
-            # ตรวจสอบว่าใครคือทีมต่อ ใครคือทีมรอง จากเครื่องหมาย +/-
-            if hdp < 0:    # เจ้าบ้านราคาติดลบ แปลว่า "เจ้าบ้านต่อ"
+            if hdp < 0:
                 home_txt, away_txt = "ต่อเจ้าบ้าน", "รองทีมเยือน"
-            elif hdp > 0:  # เจ้าบ้านราคาเป็นบวก แปลว่า "เจ้าบ้านรอง"
+            elif hdp > 0:
                 home_txt, away_txt = "รองเจ้าบ้าน", "ต่อทีมเยือน"
-            else:          # ราคาเสมอ
+            else:
                 home_txt, away_txt = "แทงเจ้าบ้าน", "แทงทีมเยือน"
                 
-            # ให้คำแนะนำโดยอิงจากโอกาสชนะของ "เจ้าบ้าน"
-            if prob >= 60: return f"⭐⭐⭐ VIP ไม้หนัก ({home_txt})"
+            # ปรับเกณฑ์ความน่าจะเป็นใหม่ ให้สอดคล้องกับโมเดลที่เสถียรขึ้น
+            if prob >= 58: return f"⭐⭐⭐ VIP ไม้หนัก ({home_txt})"
             elif prob >= 53: return f"⭐⭐ น่าลงทุน ({home_txt})"
             elif prob <= 42: return f"⭐⭐⭐ VIP ไม้หนัก ({away_txt})"
             elif prob <= 47: return f"⭐⭐ น่าลงทุน ({away_txt})"
             else: return "⚠️ ข้าม (ราคาก้ำกึ่ง 50/50)"
 
         def ou_decision(prob):
-            if prob >= 60: return "⭐⭐⭐ VIP สูง (Over) โคตรมั่นใจ" 
-            elif prob >= 55: return "⭐⭐ สูง (Over) มั่นใจมาก" 
-            elif prob >= 52: return "⭐ น่าลงทุน (สูง Over)" 
+            if prob >= 58: return "⭐⭐⭐ VIP สูง (Over) โคตรมั่นใจ" 
+            elif prob >= 53: return "⭐⭐ สูง (Over) มั่นใจมาก" 
+            elif prob <= 42: return "⭐⭐⭐ VIP ต่ำ (Under) โคตรมั่นใจ"
+            elif prob <= 47: return "⭐⭐ ต่ำ (Under) มั่นใจมาก"
             else: return "⚠️ ข้าม (O/U ทรงไม่ชัดเจน)"
 
-        # เรียกใช้ฟังก์ชันใหม่ โดยส่งข้อมูลไปประมวลผลทั้งแถว (เพื่อเช็คราคา HDP)
         df_predict['AI_ฟันธง_HDP'] = df_predict.apply(get_hdp_decision, axis=1)
         df_predict['AI_ฟันธง_สูงต่ำ'] = df_predict['AI_โอกาสออกสูง(%)'].apply(ou_decision)
 
     return {"status": "ok", "df_predict": df_predict, "hdp_acc": hdp_acc, "ou_acc": ou_acc,
-            "hdp_correct": hdp_correct, "ou_correct": ou_correct, "total_train": max(total_hdp_train, total_ou_train),
+            "hdp_correct": hdp_correct, "ou_correct": ou_correct, "total_train": total_train,
             "hdp_feats": top_features(rf_hdp, rf_hdp_feats), "ou_feats": top_features(rf_ou, rf_ou_feats)}
 
 def get_ai():
@@ -1064,7 +1073,7 @@ def render_dashboard(ai):
 # ----------------------------------------
 # หัวข้อหลัก
 # ----------------------------------------
-st.markdown("<h1 class='page-title'>⚽ ระบบวิเคราะห์ราคาบอล VIP & AI (v3.0 The Ultimate Model)</h1>", unsafe_allow_html=True)
+st.markdown("<h1 class='page-title'>⚽ ระบบวิเคราะห์ราคาบอล VIP & AI (v4.0 The Mathematical Master)</h1>", unsafe_allow_html=True)
 st.markdown("<p class='page-sub'>สกัดราคาจากภาพ วิเคราะห์ ติดตามผล และพยากรณ์ด้วย HistGradientBoosting ML แบบเรียลไทม์</p>", unsafe_allow_html=True)
 
 AI = get_ai()
