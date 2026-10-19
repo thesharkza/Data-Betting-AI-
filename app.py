@@ -805,12 +805,13 @@ def compute_ai(df_in):
 
     X_train_hdp = df_train_hdp[valid_features_hdp]
     y_train_hdp = df_train_hdp['Target_HDP']
-    model_hdp = HistGradientBoostingClassifier(max_iter=200, max_leaf_nodes=31, learning_rate=0.05, random_state=42, early_stopping=False)
+    # 🚀 [อัปเกรด] ปลดเบรก max_leaf_nodes ให้ AI สวิงเกจความมั่นใจได้เต็มที่ (เหมือนเวอร์ชันที่คุณชอบ)
+    model_hdp = HistGradientBoostingClassifier(max_iter=200, max_leaf_nodes=127, learning_rate=0.05, random_state=42, early_stopping=False)
     model_hdp.fit(X_train_hdp, y_train_hdp)
     
     X_train_ou = df_train_ou[valid_features_ou]
     y_train_ou = df_train_ou['Target_OU']
-    model_ou = HistGradientBoostingClassifier(max_iter=200, max_leaf_nodes=31, learning_rate=0.05, random_state=42, early_stopping=False)
+    model_ou = HistGradientBoostingClassifier(max_iter=200, max_leaf_nodes=127, learning_rate=0.05, random_state=42, early_stopping=False)
     model_ou.fit(X_train_ou, y_train_ou)
 
     # จัดการ RandomForest สำหรับแสดง Feature Importance Dashboard
@@ -835,8 +836,23 @@ def compute_ai(df_in):
     if len(df_predict) > 0:
         probs_hdp = model_hdp.predict_proba(df_predict[valid_features_hdp])[:, 1]
         probs_ou = model_ou.predict_proba(df_predict[valid_features_ou])[:, 1]
+        
+        # 🚀 [อัปเกรด] ตัวกรองราคาหลอกและค่าน้ำล้น (Trap & Vig Filter)
+        def apply_filters(row, prob):
+            try:
+                margin = float(row.get('Bookie_Margin', 0))
+                diff = float(row.get('HDP_vs_1X2_Diff', 0))
+                # ถ้าโต๊ะหักค่าน้ำเยอะผิดปกติ (> 12%) หรือ ราคา 1X2 ขัดแย้งกับแฮนดิแคปมากๆ ให้กดเปอร์เซ็นต์ลงมาที่ 50%
+                if margin > 0.12 or abs(diff) > 0.35:
+                    return 50.0 # บังคับให้เป็น "ข้าม"
+            except:
+                pass
+            return prob
 
-        df_predict['AI_โอกาสเหย้าชนะHDP(%)'] = (np.array(probs_hdp) * 100).round(1)
+        # กรองความเสี่ยงก่อนแสดงผลเปอร์เซ็นต์
+        filtered_probs_hdp = [apply_filters(row, p * 100) for (idx, row), p in zip(df_predict.iterrows(), probs_hdp)]
+
+        df_predict['AI_โอกาสเหย้าชนะHDP(%)'] = np.array(filtered_probs_hdp).round(1)
         df_predict['AI_โอกาสออกสูง(%)'] = (np.array(probs_ou) * 100).round(1)
 
         # --- อัปเกรด: ระบบพลิกคำใบ้ ต่อ/รอง ตามสถานะแต้มต่อจริงแบบอัตโนมัติ ---
@@ -854,16 +870,17 @@ def compute_ai(df_in):
                 home_txt, away_txt = "แทงเจ้าบ้าน", "แทงทีมเยือน"
                 
             # ให้คำแนะนำโดยอิงจากโอกาสชนะของ "เจ้าบ้าน"
-            if prob >= 60: return f"⭐⭐⭐ VIP ไม้หนัก ({home_txt})"
-            elif prob >= 53: return f"⭐⭐ น่าลงทุน ({home_txt})"
-            elif prob <= 42: return f"⭐⭐⭐ VIP ไม้หนัก ({away_txt})"
-            elif prob <= 47: return f"⭐⭐ น่าลงทุน ({away_txt})"
-            else: return "⚠️ ข้าม (ราคาก้ำกึ่ง 50/50)"
+            if prob >= 75: return f"⭐⭐⭐ VIP ไม้หนัก ({home_txt})"
+            elif prob >= 60: return f"⭐⭐ น่าลงทุน ({home_txt})"
+            elif prob <= 25: return f"⭐⭐⭐ VIP ไม้หนัก ({away_txt})"
+            elif prob <= 40: return f"⭐⭐ น่าลงทุน ({away_txt})"
+            else: return "⚠️ ข้าม (ราคาก้ำกึ่ง 50/50 หรือ ราคาหลอก)"
 
         def ou_decision(prob):
-            if prob >= 60: return "⭐⭐⭐ VIP สูง (Over) โคตรมั่นใจ" 
-            elif prob >= 55: return "⭐⭐ สูง (Over) มั่นใจมาก" 
-            elif prob >= 52: return "⭐ น่าลงทุน (สูง Over)" 
+            if prob >= 75: return "⭐⭐⭐ VIP สูง (Over) โคตรมั่นใจ" 
+            elif prob >= 60: return "⭐⭐ สูง (Over) มั่นใจมาก" 
+            elif prob <= 25: return "⭐⭐⭐ VIP ต่ำ (Under) โคตรมั่นใจ"
+            elif prob <= 40: return "⭐⭐ ต่ำ (Under) มั่นใจมาก"
             else: return "⚠️ ข้าม (O/U ทรงไม่ชัดเจน)"
 
         # เรียกใช้ฟังก์ชันใหม่ โดยส่งข้อมูลไปประมวลผลทั้งแถว (เพื่อเช็คราคา HDP)
