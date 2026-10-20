@@ -232,6 +232,10 @@ label[data-testid="stWidgetLabel"] p { color: #a7c4b5; font-size: 0.85rem; font-
     .ch-val { font-size: 1.8rem; }
     .scope-dial { width: 180px; }
     .sd-val { font-size: 2.3rem; }
+    
+    /* 📱 ส่วนที่เพิ่มใหม่เพื่อแก้มือถือสเกลเพี้ยน */
+    .mon-ch { grid-template-columns: 1fr; gap: 16px; } /* บังคับให้ CH1 และ CH2 เรียงบน-ล่าง */
+    .ch-h { font-size: 0.8rem; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
