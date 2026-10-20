@@ -834,8 +834,29 @@ def _ml_fit_market(df, X, market):
     }
     return report, pending_probs
 
-def _ml_verdict(market, side, ev, stress_ev, line, valid, report, kelly):
+def _ml_verdict(market, side, ev, stress_ev, line, valid, report, kelly, row_data):
     if not valid: return "⚠️ ข้าม (ราคาผิด/ไม่ครบ)"
+    
+    # -----------------------------------------------------
+    # นำ Insight จาก Data ล่าสุดมาสร้าง Guardrails (จุดดักจับ)
+    # -----------------------------------------------------
+    if market == "HDP":
+        home_1x2 = row_data["1X2 เหย้า"]
+        hdp_line = row_data["แฮนดิแคป (เหย้า)"]
+        
+        # 1. ดักจับ Trap "ราคาล่อแมงเม่า" (อิงจาก R14)
+        if 1.95 <= home_1x2 <= 2.20 and line in [-0.25, -0.50]:
+            if side == 0: # ถ้า AI กำลังจะเชียร์เจ้าบ้าน
+                # บังคับ EV ต้องสูงมากๆ ไม่งั้นให้ข้าม เพราะเป็นราคาล่อหลอก
+                if ev < 0.05: 
+                    return "⚠️ ข้าม (เข้าข่ายราคาล่อแมงเม่า HDP)"
+                    
+        # 2. ปลดล็อค "บอลต่อสั่งตาย" (อิงจาก R15)
+        if home_1x2 <= 1.47 and line <= -1.25:
+            if side == 0 and ev > 0.01: # ถ้าเป็นเจ้าบ้าน ลดเกณฑ์ EV ลงเพราะสถิติชนะสูงมาก
+                kelly = min(kelly * 1.5, 0.05) # เพิ่มไม้ลงทุนให้หนักขึ้น
+    # -----------------------------------------------------
+
     family = int(round(float(line) * 4)) % 4
     if report["family_counts"].get(family, 0) < ML_CONFIG["min_line_examples"]: return "⚠️ ข้าม (ตัวอย่างชนิดไลน์นี้น้อยไป)"
     if not np.isfinite(ev) or ev < ML_CONFIG["min_ev"] or stress_ev <= 0: return f"⚠️ ข้าม (ความได้เปรียบไม่ผ่านเกณฑ์; EV {ev:+.1%})"
