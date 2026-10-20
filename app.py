@@ -194,30 +194,7 @@ label[data-testid="stWidgetLabel"] p { color: #a7c4b5; font-size: 0.85rem; font-
 .vu-l { display: flex; justify-content: space-between; font-family: 'JetBrains Mono', monospace; font-size: .66rem; color: #5d7a69; margin-top: 5px; }
 .mon.solo { border-radius: 18px; border-bottom: 1px solid #1b2a22; margin-bottom: 10px; }
 
-/* ===== Dashboard scope panels ===== */
-.scope-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 430px), 1fr)); gap: 16px; margin-bottom: 8px; }
-.scope { --c: #22c55e; --k: var(--c); position: relative; overflow: hidden; border-radius: 18px; padding: 16px 22px 24px; border: 1px solid #1b2a22; background-color: #0b110e; background-image: linear-gradient(rgba(34,197,94,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(34,197,94,0.04) 1px, transparent 1px); background-size: 100% 26px, 26px 100%; transition: border-color .25s, box-shadow .25s; }
-.scope:hover { border-color: color-mix(in srgb, var(--c) 55%, #1b2a22); box-shadow: 0 0 40px -20px var(--c); }
-.scope::after { content: ""; position: absolute; left: 0; right: 0; top: -40%; height: 40%; pointer-events: none; background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--c) 9%, transparent), transparent); animation: scan 6.5s linear infinite; }
-.scope-h { display: flex; align-items: center; gap: 10px; font-family: 'JetBrains Mono', monospace; font-size: .74rem; color: #7f9a8b; }
-.scope-h b { color: var(--c); }
-.scope-h .ecg { flex: 1; height: 22px; }
-.scope-body { display: flex; flex-wrap: wrap; align-items: center; gap: 22px; margin-top: 14px; }
-.scope-dial { flex: none; width: 210px; margin: 0 auto; text-align: center; }
-.dial.big { width: 100%; max-width: 210px; }
-.sd-val { font-family: 'JetBrains Mono', monospace; font-size: 2.7rem; font-weight: 700; line-height: 1.1; margin-top: -4px; color: var(--c); text-shadow: 0 0 22px color-mix(in srgb, var(--c) 55%, transparent); }
-.sd-val small { font-size: 1rem; color: #7f9a8b; margin-left: 2px; }
-.sd-lab { font-size: .8rem; color: #7f9a8b; }
-.scope-side { flex: 1; min-width: 240px; }
-.cnt { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: .82rem; color: #7f9a8b; }
-.cnt b { font-family: 'JetBrains Mono', monospace; color: #e6f2ea; margin: 0 3px; }
-.cnt .bad b { color: #f06b70; }
-.fh { font-size: .76rem; color: #7f9a8b; margin: 18px 0 4px; }
-.fr { display: grid; grid-template-columns: 1fr auto; gap: 3px 10px; padding: 6px 0; }
-.fn { font-size: .86rem; color: #cfe3d6; }
-.fv { font-family: 'JetBrains Mono', monospace; font-size: .82rem; color: var(--c); font-weight: 700; }
-.fr .vu { grid-column: 1 / 3; }
-
+/* 📱 Responsive Mobile Layout Fix */
 @media (max-width: 640px) {
     .block-container { padding: 1rem .75rem 3rem; }
     .page-title { font-size: 1.45rem; }
@@ -230,11 +207,9 @@ label[data-testid="stWidgetLabel"] p { color: #a7c4b5; font-size: 0.85rem; font-
     .ecg { display: none; }
     .dial { width: 100px; }
     .ch-val { font-size: 1.8rem; }
-    .scope-dial { width: 180px; }
-    .sd-val { font-size: 2.3rem; }
     
-    /* 📱 ส่วนที่เพิ่มใหม่เพื่อแก้มือถือสเกลเพี้ยน */
-    .mon-ch { grid-template-columns: 1fr; gap: 16px; } /* บังคับให้ CH1 และ CH2 เรียงบน-ล่าง */
+    /* บังคับเรียงซ้อนบน-ล่างบนหน้าจอมือถือ ไม่บีบอัดสเกล */
+    .mon-ch { grid-template-columns: 1fr !important; gap: 16px !important; }
     .ch-h { font-size: 0.8rem; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
@@ -274,7 +249,7 @@ def get_ws(wb):
     except gspread.exceptions.WorksheetNotFound: return wb.sheet1
 
 # ----------------------------------------
-# การจัดการ Data Extraction & Google Sheets (ดั้งเดิม 100%)
+# การจัดการ Data Extraction & Google Sheets
 # ----------------------------------------
 model = genai.GenerativeModel('gemini-3.7-flash')
 
@@ -395,7 +370,7 @@ def update_match_score_in_sheet(ws, home_team, away_team, score_text):
     return False
 
 # ----------------------------------------
-# ระบบคิวงาน Job Manager (ที่หายไป)
+# Job Manager (คิวงานเบื้องหลัง)
 # ----------------------------------------
 class JobManager:
     def __init__(self):
@@ -419,9 +394,6 @@ class JobManager:
         with self.lock: self.data_version += 1
     def snapshot(self):
         with self.lock: return sorted((dict(j) for j in self.jobs.values()), key=lambda j: j["created"], reverse=True)
-    def clear_finished(self, owner_id):
-        with self.lock:
-            for k in [k for k, j in self.jobs.items() if j["status"] in ("done", "error") and j.get("owner_id") == owner_id]: self.jobs.pop(k)
 
 @st.cache_resource
 def get_job_manager(): return JobManager()
@@ -497,7 +469,7 @@ def submit_form5(job_id, values, owner_id):
         JOBS.pool.submit(save_confirmed_job, job_id, workbook)
 
 # ----------------------------------------
-# UI: ฟังก์ชันเรนเดอร์ Upload & Tasks
+# UI: Upload & Tasks
 # ----------------------------------------
 STATUS_UI = {"queued": ("รอคิว", "run"), "reading": ("กำลังอ่านภาพ", "run"), "ready": ("อ่านราคาแล้ว", "ok"),
              "saving": ("กำลังบันทึก", "run"), "done": ("บันทึกแล้ว", "ok"), "error": ("ไม่สำเร็จ", "err")}
@@ -580,14 +552,13 @@ def render_form5_editor():
 ML_PATCH_VERSION = "V5.0-Ultimate-Hybrid"
 ML_CONFIG = {
     "seed": 42, "min_rows": 100, 
-    "min_ev": 0.02,                   # ลดเกณฑ์ EV ลงมาที่ 2% เพื่อหาโอกาสทำกำไรมากขึ้น
+    "min_ev": 0.02,                   # เกณฑ์ EV ขั้นต่ำ 2%
     "probability_stress": 0.03,       # เผื่อความคลาดเคลื่อนทางสถิติ 3%
     "min_line_examples": 15,
 }
 ML_STATES = ("FL", "HL", "PUSH", "HW", "FW")
 ML_STATE_LABELS = ("เสียเต็ม", "เสียครึ่ง", "คืนทุน", "ได้ครึ่ง", "ได้เต็ม")
 
-# เพิ่ม Feature ใหม่จาก v2/v4 ลงในโครงสร้าง v3
 ML_ODDS_COLUMNS = ["1X2 เหย้า", "1X2 เสมอ", "1X2 เยือน", "แฮนดิแคป (เหย้า)", "ค่าน้ำ HDP (เหย้า)", "แฮนดิแคป (เยือน)", "ค่าน้ำ HDP (เยือน)", "โกลสูง/ต่ำ", "ค่าน้ำ (สูง)", "ค่าน้ำ (ต่ำ)"]
 
 def _ml_number(value):
@@ -663,8 +634,6 @@ def _ml_log_loss(y, probabilities):
 def _ml_metrics(y, probabilities):
     predicted = probabilities.argmax(axis=1)
     actual = np.eye(5)[y]
-    nonpush = y != 2
-    directional = probabilities[:, 3:].sum(axis=1) >= probabilities[:, :2].sum(axis=1)
     return {
         "n": len(y), "correct": int((predicted == y).sum()), "accuracy": float((predicted == y).mean()),
         "log_loss": _ml_log_loss(y, probabilities), "brier": float(np.square(probabilities - actual).sum(axis=1).mean()),
@@ -687,7 +656,6 @@ def _ml_label_state(value, market):
         labels = {"ต่ำได้เต็ม": 0, "ต่ำได้ครึ่ง": 1, "คืนทุน": 2, "สูงได้ครึ่ง": 3, "สูงได้เต็ม": 4}
     return labels.get(text, np.nan)
 
-# 🌟 V5.0 Feature Engineering (รวมศาสตร์ V2/V4 + V3)
 def _ml_prepare(df_in):
     df = df_in.copy(deep=True).reset_index(drop=True)
     df.columns = [str(c).strip() for c in df.columns]
@@ -707,7 +675,7 @@ def _ml_prepare(df_in):
     inverse = 1.0 / odds
     inverse_total = inverse.sum(axis=1, min_count=3)
     
-    # Mathematical Features
+    # Mathematical Features (v2/v4 + v3)
     X["True_Home_Prob"] = inverse["1X2 เหย้า"] / inverse_total
     X["True_Draw_Prob"] = inverse["1X2 เสมอ"] / inverse_total
     X["True_Away_Prob"] = inverse["1X2 เยือน"] / inverse_total
@@ -765,7 +733,7 @@ def _ml_split(groups):
     train, calibration = take(rest, 0.15 / 0.70, ML_CONFIG["seed"] + 2)
     return {"train": train, "calibration": calibration, "validation": validation, "test": test}
 
-# 🌟 V5.0 Dynamic Kelly Criterion
+# Dynamic Half-Kelly Criterion
 def _ml_kelly_fraction(probabilities, decimal, side):
     returns = _ml_returns(decimal)
     if side == 1: returns = returns[::-1]
@@ -801,7 +769,7 @@ def _ml_fit_market(df, X, market):
     lines = X.iloc[indices][market + "_Line"].to_numpy()
     
     with threadpool_limits(limits=2):
-        # 🌟 V5.0 Ensemble Voting (ใช้ HGB 3 ตัวที่นิสัยต่างกันมาโหวต)
+        # Ensemble Voting (3 HistGradientBoosting)
         m1 = HistGradientBoostingClassifier(max_iter=100, max_depth=3, learning_rate=0.03, l2_regularization=5.0, random_state=42)
         m2 = HistGradientBoostingClassifier(max_iter=150, max_depth=4, learning_rate=0.01, l2_regularization=2.0, random_state=43)
         m3 = HistGradientBoostingClassifier(max_iter=80, max_leaf_nodes=15, learning_rate=0.05, l2_regularization=10.0, random_state=44)
@@ -817,7 +785,7 @@ def _ml_fit_market(df, X, market):
         
         p_val = predict(validation)
         val_metrics = _ml_metrics(y[validation], p_val)
-        gate = bool(len(validation) >= 10) # Gate check simplified for deployment stability
+        gate = bool(len(validation) >= 10)
         
         p_test = predict(test)
         p_train = predict(train)
@@ -834,6 +802,7 @@ def _ml_fit_market(df, X, market):
     }
     return report, pending_probs
 
+# 🛡️ ฟังก์ชันให้สัญญาณ + ตรวจจับราคาหลอก (Guardrails)
 def _ml_verdict(market, side, ev, stress_ev, line, valid, report, kelly, row_data=None):
     if not valid: return "⚠️ ข้าม (ราคาผิด/ไม่ครบ)"
     
@@ -893,7 +862,6 @@ def _ml_verdict(market, side, ev, stress_ev, line, valid, report, kelly, row_dat
         
     return f"{level} ({desc}) | EV {ev:+.1%} | แนะนำไม้ {k_pct:.1f}%"
 
-
 @st.cache_data(ttl=300, show_spinner=False)
 def compute_ai(df_in):
     try:
@@ -935,7 +903,7 @@ def get_ai():
     except Exception as e: return {"status": "error", "level": "error", "msg": f"โหลดข้อมูลไม่สำเร็จ: {e}"}
 
 # ----------------------------------------
-# ชิ้นส่วนภาพแบบ Monitor (เกจ, VU meter, ECG)
+# UI Components & Gauges
 # ----------------------------------------
 def _pred_tone(text, kind):
     text = str(text)
@@ -1081,7 +1049,7 @@ def render_dashboard(ai):
     st.markdown("""
     - **Ensemble Voting:** ใช้ HistGradientBoosting 3 โมเดลช่วยกันโหวตกรองความผิดพลาด (Soft Voting)
     - **Half-Kelly Criterion:** ระบบคำนวณ 'แนะนำไม้' (เปอร์เซ็นต์ของพอร์ตที่ควรลง) อัตโนมัติใน Tab สัญญาณการทำนาย
-    - **5-State Probability:** แยกแยะผลลัพธ์ ได้เต็ม / ได้ครึ่ง / เจ๊า / เสียครึ่ง / เสียเต็ม แทนการมองแค่ชนะ/แพ้
+    - **System Guardrails:** ตรวจจับและบล็อก 'ราคาล่อแมงเม่า' ทั้งราคาต่อ ปป./ครึ่งลูกที่เสี่ยงหลอก และราคาโกลสูง/ต่ำที่เกิน 3.25 อัตโนมัติ
     """)
 
 # ----------------------------------------
