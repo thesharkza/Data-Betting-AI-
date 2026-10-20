@@ -834,31 +834,50 @@ def _ml_fit_market(df, X, market):
     }
     return report, pending_probs
 
-def _ml_verdict(market, side, ev, stress_ev, line, valid, report, kelly, row_data):
+def _ml_verdict(market, side, ev, stress_ev, line, valid, report, kelly, row_data=None):
     if not valid: return "⚠️ ข้าม (ราคาผิด/ไม่ครบ)"
     
-    # -----------------------------------------------------
-    # นำ Insight จาก Data ล่าสุดมาสร้าง Guardrails (จุดดักจับ)
-    # -----------------------------------------------------
-    if market == "HDP":
-        home_1x2 = row_data["1X2 เหย้า"]
-        hdp_line = row_data["แฮนดิแคป (เหย้า)"]
+    # -----------------------------------------------------------------
+    # 🛡️ SYSTEM GUARDRAILS: จุดจับผิดราคาหลอกจาก Data (HDP & O/U)
+    # -----------------------------------------------------------------
+    if row_data is not None:
+        home_1x2 = _ml_number(row_data.get("1X2 เหย้า", np.nan))
+        under_water = _ml_number(row_data.get("ค่าน้ำ (ต่ำ)", np.nan))
         
-        # 1. ดักจับ Trap "ราคาล่อแมงเม่า" (อิงจาก R14)
-        if 1.95 <= home_1x2 <= 2.20 and line in [-0.25, -0.50]:
-            if side == 0: # ถ้า AI กำลังจะเชียร์เจ้าบ้าน
-                # บังคับ EV ต้องสูงมากๆ ไม่งั้นให้ข้าม เพราะเป็นราคาล่อหลอก
-                if ev < 0.05: 
+        if market == "HDP":
+            # 1. ⚠️ TRAP ล่อแมงเม่า (อิงจาก R14) 
+            # ราคาต่อ ปป. หรือ ครึ่งลูก แต่เจ้าบ้าน 1X2 ลอยตัวสูง
+            if np.isfinite(home_1x2) and 1.95 <= home_1x2 <= 2.20 and line in [-0.25, -0.50]:
+                if side == 0 and ev < 0.04: # บังคับ EV ต้องสูงจริงๆ ถึงจะยอมแทง
                     return "⚠️ ข้าม (เข้าข่ายราคาล่อแมงเม่า HDP)"
                     
-        # 2. ปลดล็อค "บอลต่อสั่งตาย" (อิงจาก R15)
-        if home_1x2 <= 1.47 and line <= -1.25:
-            if side == 0 and ev > 0.01: # ถ้าเป็นเจ้าบ้าน ลดเกณฑ์ EV ลงเพราะสถิติชนะสูงมาก
-                kelly = min(kelly * 1.5, 0.05) # เพิ่มไม้ลงทุนให้หนักขึ้น
-    # -----------------------------------------------------
+            # 2. ⭐ บอลต่อสั่งตาย (อิงจาก R15)
+            # 1X2 ต่ำมาก (โอกาสชนะสูง) และยอมแบกกำแพงเรตแพง
+            if np.isfinite(home_1x2) and home_1x2 <= 1.47 and line <= -1.25:
+                if side == 0 and ev > 0.01: 
+                    kelly = min(kelly * 1.5, 0.05) # เพิ่มน้ำหนักไม้เดิมพันให้เจ้าบ้าน (Max 5%)
+
+        elif market == "OU":
+            # 3. 🎯 สวีทสปอต สูง 2.75 (สถิติ Over เข้า 56.3%)
+            if np.isclose(line, 2.75):
+                if side == 0 and ev > 0.01: # ถ้า AI สั่งให้เล่นฝั่งสูง
+                    kelly = min(kelly * 1.3, 0.04) # อัปเกรดความมั่นใจ
+                    
+            # 4. ⚠️ ภาพลวงตาบอลพ่นไฟ & กฎ R07 (Over-priced Line)
+            if line >= 3.25: # ถ้าเรตเปิดมาสูงจัดๆ (3.25 ขึ้นไป)
+                if side == 0: # AI สั่งให้ไปแทง "สูง"
+                    return "⚠️ ข้าม (เรตสูงผิดปกติ สถิติมักออกต่ำ)"
+                elif side == 1: # AI สั่งให้ไปแทง "ต่ำ"
+                    # ต้องเช็คค่าน้ำไม่ให้เอาเปรียบเกินไป
+                    under_decimal = _ml_malay_decimal(under_water) if np.isfinite(under_water) else 0.0
+                    if under_decimal < 1.85: # จ่ายต่ำกว่า 0.85
+                        return "⚠️ ข้าม (ออกต่ำจริง แต่ค่าน้ำเอาเปรียบเกินไป)"
+    # -----------------------------------------------------------------
 
     family = int(round(float(line) * 4)) % 4
     if report["family_counts"].get(family, 0) < ML_CONFIG["min_line_examples"]: return "⚠️ ข้าม (ตัวอย่างชนิดไลน์นี้น้อยไป)"
+    
+    # เกณฑ์พื้นฐานของ V5.0
     if not np.isfinite(ev) or ev < ML_CONFIG["min_ev"] or stress_ev <= 0: return f"⚠️ ข้าม (ความได้เปรียบไม่ผ่านเกณฑ์; EV {ev:+.1%})"
     
     desc = "สูง Over" if side == 0 else "ต่ำ Under"
@@ -873,6 +892,7 @@ def _ml_verdict(market, side, ev, stress_ev, line, valid, report, kelly, row_dat
     else: level = "⭐ ทดลองติดตาม"
         
     return f"{level} ({desc}) | EV {ev:+.1%} | แนะนำไม้ {k_pct:.1f}%"
+
 
 @st.cache_data(ttl=300, show_spinner=False)
 def compute_ai(df_in):
@@ -894,7 +914,7 @@ def compute_ai(df_in):
         
         pending[v_col] = [
             _ml_verdict(m, int(choices["side"][i]), choices["ev"][i], choices["stress_ev"][i],
-                        X.iloc[pos][m + "_Line"], bool(df.iloc[pos]["_ML_Valid_" + m]), reports[m], choices["kelly"][i])
+                        X.iloc[pos][m + "_Line"], bool(df.iloc[pos]["_ML_Valid_" + m]), reports[m], choices["kelly"][i], df.iloc[pos])
             for i, pos in enumerate(pending_pos)
         ]
         
