@@ -295,18 +295,26 @@ def clean_raw_data(raw_text):
         
     home = str(data[0]).strip()
     away = str(data[1]).strip()
-    
-    numbers = []
+
+    numbers, bad = [], []
     for i in range(2, 12):
         val_str = str(data[i]).replace('−', '-').replace(',', '').strip()
-        try: numbers.append(float(val_str))
-        except: numbers.append(0.0)
-        
+        try:
+            v = float(val_str)
+            if not isfinite(v): raise ValueError
+            numbers.append(v)
+        except (TypeError, ValueError):
+            numbers.append(None)      # ไม่ใช่ 0.0 อีกต่อไป
+            bad.append(i)
+
+    critical_bad = [FIELD_NAMES[i] for i in bad if i in CRITICAL_IDX]
+    if critical_bad:   # raise -> extract_row จะ retry ให้อัตโนมัติ และถ้ายังพลาดงานจะขึ้น error
+        raise ValueError(f"อ่านค่าไม่ได้: {', '.join(critical_bad)} -> AI ตอบ: {str(data)[:80]}")
+    warn = ("ช่องที่อ่านไม่ได้ (เว้นว่างในชีต): " + ", ".join(FIELD_NAMES[i] for i in bad)) if bad else None
+
     ai_fmt = str(data[12]).strip().upper() if len(data) > 12 else "UNK"
     if ai_fmt not in ["MY", "HK", "ID", "EU"]: ai_fmt = "UNK"
-    
-    row_data = [home, away] + numbers
-    return row_data, ai_fmt
+    return [home, away] + numbers, ai_fmt, warn
 
 def convert_water_to_malay(row, user_fmt, ai_fmt):
     new_row = list(row)
