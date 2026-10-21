@@ -654,11 +654,13 @@ def _ml_metrics(y, probabilities):
         "log_loss": _ml_log_loss(y, probabilities), "brier": float(np.square(probabilities - actual).sum(axis=1).mean()),
     }
 
+# ==========================================
+# 🛠️ ฟังก์ชันส่วนที่หายไป (ใส่กลับให้ครบแล้วครับ)
+# ==========================================
 def _ml_returns(decimal):
     decimal = float(decimal)
     return np.array([-1.0, -0.5, 0.0, (decimal - 1) / 2, decimal - 1])
 
-# 👇 นี่คือฟังก์ชันที่หายไปครับ นำกลับมาใส่ตรงนี้
 def _ml_expected_value(probabilities, decimal, reverse=False):
     if not np.isfinite(decimal) or decimal <= 1: return np.nan
     p = np.asarray(probabilities, dtype=float)
@@ -669,6 +671,7 @@ def _ml_home_share(probabilities):
     p = np.asarray(probabilities, dtype=float)
     decisive = p[:, [0, 1, 3, 4]].sum(axis=1)
     return np.where(decisive > 1e-9, p[:, 3:].sum(axis=1) / np.maximum(decisive, 1e-9), 0.5)
+# ==========================================
 
 def _ml_label_state(value, market):
     text = str(value).strip()
@@ -932,6 +935,7 @@ def get_ai():
             "msg": f"โหลดข้อมูลไม่สำเร็จ: {type(e).__name__} - {str(e)}", 
             "trace": err_trace
         }
+
 # ----------------------------------------
 # UI Components & Gauges
 # ----------------------------------------
@@ -1121,7 +1125,8 @@ with tab2:
         if AI["status"] != "ok":
             st.warning(AI["msg"])
             if "trace" in AI:
-                with st.expander("🛠️ Error Log"): st.code(AI["trace"], language="python")
+                with st.expander("🛠️ กางดู Error Log ที่นี่ (ส่งข้อมูลนี้ให้ผู้พัฒนา)"): 
+                    st.code(AI["trace"], language="python")
         else:
             df_view = _visible_matches(AI["df_predict"]) if len(AI["df_predict"]) > 0 else AI["df_predict"]
             if len(df_view) > 0:
@@ -1139,7 +1144,7 @@ with tab3:
         if AI["status"] != "ok":
             st.warning(AI["msg"])
             if "trace" in AI:
-                with st.expander("🛠️ กางดู Error Log ที่นี่ (ส่งข้อมูลนี้ให้ผู้พัฒนา)"):
+                with st.expander("🛠️ กางดู Error Log ที่นี่ (ส่งข้อมูลนี้ให้ผู้พัฒนา)"): 
                     st.code(AI["trace"], language="python")
         else:
             render_dashboard(AI)
