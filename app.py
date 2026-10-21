@@ -916,9 +916,16 @@ def load_dashboard_data(_workbook, version=0):
 
 def get_ai():
     if not workbook: return None
-    try: return compute_ai(load_dashboard_data(workbook, JOBS.data_version))
-    except Exception as e: return {"status": "error", "level": "error", "msg": f"โหลดข้อมูลไม่สำเร็จ: {e}"}
-
+    try: 
+        return compute_ai(load_dashboard_data(workbook, JOBS.data_version))
+    except Exception as e: 
+        err_trace = traceback.format_exc()
+        return {
+            "status": "error", 
+            "level": "error", 
+            "msg": f"โหลดข้อมูลไม่สำเร็จ: {type(e).__name__} - {str(e)}", 
+            "trace": err_trace
+        }
 # ----------------------------------------
 # UI Components & Gauges
 # ----------------------------------------
@@ -1125,5 +1132,8 @@ with tab3:
         st.button("🔄 รีเฟรชข้อมูล", key="refresh_dashboard", on_click=st.cache_data.clear)
         if AI["status"] != "ok":
             st.warning(AI["msg"])
+            if "trace" in AI:
+                with st.expander("🛠️ กางดู Error Log ที่นี่ (ส่งข้อมูลนี้ให้ผู้พัฒนา)"):
+                    st.code(AI["trace"], language="python")
         else:
             render_dashboard(AI)
