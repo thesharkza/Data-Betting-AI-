@@ -385,7 +385,7 @@ class JobManager:
     def __init__(self):
         self.jobs = {}
         self.lock = threading.Lock()
-        self.sheet_lock = threading.Lock()
+        self.sheet_lock = threading.RLock()
         self.pool = ThreadPoolExecutor(max_workers=3)
         self.data_version = 0
 
