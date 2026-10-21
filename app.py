@@ -903,8 +903,8 @@ def compute_ai(df_in):
         pending[p_col] = np.round(prob_home_over, 1)
         choices = _ml_choices(p, X.iloc[pending_pos][c1], X.iloc[pending_pos][c2])
         
-        # ดึงเปอร์เซ็นต์ของ "ฝั่งที่ AI เลือก (Side)" มาประเมิน
-        side_probs = np.where(choices["side"] == 0, prob_home_over[pending_pos], prob_away_under[pending_pos])
+        # 🛠️ แก้ไขบั๊กตรงนี้: เอา [pending_pos] ออก เพราะ Array p โดนกรองมาเฉพาะคู่ที่รอผลแล้ว
+        side_probs = np.where(choices["side"] == 0, prob_home_over, prob_away_under)
         
         pending[v_col] = [
             _ml_verdict(m, int(choices["side"][i]), side_probs[i], choices["ev"][i], choices["stress_ev"][i],
