@@ -813,94 +813,57 @@ def _ml_fit_market(df, X, market):
     return report, pending_probs
 
 # 🛡️ ฟังก์ชันให้สัญญาณ + ตรวจจับราคาหลอก (Guardrails) & Rank Rates + Confidence Indicator
-def _ml_verdict(market, side, prob_val, ev, stress_ev, line, valid, report, kelly, row_data=None):
+def _ml_verdict(market, side, prob_val, ev, stress_ev, line, valid, report, kelly,
+                row_data=None, min_prob=55.0, min_ev=None):
+    min_ev = ML_CONFIG["min_ev"] if min_ev is None else min_ev
     if not valid: return "⚠️ ข้าม (ราคาผิด/ไม่ครบ)"
-    
-    home_1x2 = np.nan
-    water_val = np.nan
-    
-    if row_data is not None:
-        home_1x2 = _ml_number(row_data.get("1X2 เหย้า", np.nan))
-        
-        # ดึงค่าน้ำของฝั่งที่ AI เลือกมาเช็ค
-        if market == "HDP":
-            water_val = _ml_number(row_data.get("ค่าน้ำ HDP (เหย้า)" if side == 0 else "ค่าน้ำ HDP (เยือน)", np.nan))
-        else:
-            water_val = _ml_number(row_data.get("ค่าน้ำ (สูง)" if side == 0 else "ค่าน้ำ (ต่ำ)", np.nan))
-            
-        # -----------------------------------------------------------------
-        # 🛡️ SYSTEM GUARDRAILS: บล็อกกับดักราคา (ห้ามลงทุน)
-        # -----------------------------------------------------------------
-        if market == "HDP":
-            if np.isfinite(home_1x2) and 1.95 <= home_1x2 <= 2.20 and line in [-0.25, -0.50] and side == 0:
-                return "⚠️ ข้าม (เข้าข่ายราคาล่อแมงเม่า HDP)"
-        elif market == "OU":
-            if line >= 3.25:
-                if side == 0: return "⚠️ ข้าม (เรตสูงผิดปกติ สถิติมักออกต่ำ)"
-                elif side == 1:
-                    under_decimal = _ml_malay_decimal(water_val) if np.isfinite(water_val) else 0.0
-                    if under_decimal < 1.85: return "⚠️ ข้าม (ออกต่ำจริง แต่ค่าน้ำเอาเปรียบเกินไป)"
+    if row_data is None: return "⚠️ ข้าม (ไม่มีข้อมูลแถวสำหรับตรวจ Guardrail)"
+
+    side = int(side)
+    home_1x2 = _ml_number(row_data.get("1X2 เหย้า", np.nan))
+    water_col = {("HDP", 0): "ค่าน้ำ HDP (เหย้า)", ("HDP", 1): "ค่าน้ำ HDP (เยือน)",
+                 ("OU", 0): "ค่าน้ำ (สูง)", ("OU", 1): "ค่าน้ำ (ต่ำ)"}[(market, side)]
+    water_decimal = _ml_malay_decimal(row_data.get(water_col, np.nan))
+    if not np.isfinite(water_decimal):
+        return "⚠️ ข้าม (ค่าน้ำฝั่งที่เลือกอ่านไม่ได้/อยู่นอกช่วง Malay)"
+
+    # 🛡️ GUARDRAILS
+    if market == "HDP":
+        if np.isfinite(home_1x2) and 1.95 <= home_1x2 <= 2.20 and line in (-0.25, -0.5) and side == 0:
+            return "⚠️ ข้าม (เข้าข่ายราคาล่อแมงเม่า HDP)"
+    elif line >= 3.25:
+        if side == 0: return "⚠️ ข้าม (เรตสูงผิดปกติ สถิติมักออกต่ำ)"
+        if water_decimal < 1.85: return "⚠️ ข้าม (ออกต่ำจริง แต่ค่าน้ำเอาเปรียบเกินไป)"
 
     family = int(round(float(line) * 4)) % 4
-    
-    # 🎯 ดึงจำนวน Sample Size ของเรตราคานี้มาเช็ค
     f_count = report["family_counts"].get(family, 0)
-    
-    if f_count < ML_CONFIG["min_line_examples"]: 
+    if f_count < ML_CONFIG["min_line_examples"]:
         return "⚠️ ข้าม (ตัวอย่างชนิดไลน์นี้น้อยไป)"
-    
-    # -----------------------------------------------------------------
-    # 📊 RANK RATES: คัดกรองตามเปอร์เซ็นต์ชนะจากสถิติจริง
-    # -----------------------------------------------------------------
-    if not np.isfinite(prob_val) or prob_val < 55.0:
+    if not np.isfinite(prob_val) or prob_val < min_prob:
         return f"⚠️ ข้าม (โอกาสชนะน้อยเกินไป: {prob_val:.1f}%)"
-        
-    if not np.isfinite(ev) or ev < ML_CONFIG["min_ev"] or stress_ev <= 0: 
-        return f"⚠️ ข้าม (ความได้เปรียบ EV ไม่ผ่านเกณฑ์)"
+    if not np.isfinite(ev) or ev < min_ev or stress_ev <= 0:
+        return "⚠️ ข้าม (ความได้เปรียบ EV ไม่ผ่านเกณฑ์)"
 
-    # 🔥 BOOSTERS (เพิ่มเกรด VIP)
-    is_high_water = False
-    is_strong_fav = False
-    
-    if np.isfinite(water_val):
-        water_decimal = _ml_malay_decimal(water_val)
-        if water_decimal >= 1.90:  
-            is_high_water = True
-            
-    if market == "HDP" and np.isfinite(home_1x2) and home_1x2 <= 1.47 and line <= -1.25 and side == 0:
-        is_strong_fav = True
-
+    is_high_water = water_decimal >= 1.90
+    is_strong_fav = bool(market == "HDP" and np.isfinite(home_1x2) and home_1x2 <= 1.47 and line <= -1.25 and side == 0)
     if is_high_water or is_strong_fav:
-        kelly = min(kelly * 1.5, 0.05) 
-
+        kelly = min(kelly * 1.5, 0.05)
     k_pct = kelly * 100
-    
-    if prob_val >= 65.0 or (prob_val >= 60.0 and is_high_water):
-        level = "⭐⭐⭐ VIP ไม้หนัก"
-    elif prob_val >= 60.0 or is_strong_fav:
-        level = "⭐⭐ น่าลงทุน"
-    else:
-        level = "⭐ ทดลองติดตาม"
-        
+
+    if prob_val >= 65.0 or (prob_val >= 60.0 and is_high_water): level = "⭐⭐⭐ VIP ไม้หนัก"
+    elif prob_val >= 60.0 or is_strong_fav: level = "⭐⭐ น่าลงทุน"
+    else: level = "⭐ ทดลองติดตาม"
+
     desc = "สูง Over" if side == 0 else "ต่ำ Under"
     if market == "HDP":
         if line < 0: desc = "ต่อเจ้าบ้าน" if side == 0 else "รองทีมเยือน"
         elif line > 0: desc = "รองเจ้าบ้าน" if side == 0 else "ต่อทีมเยือน"
         else: desc = "เจ้าบ้าน" if side == 0 else "ทีมเยือน"
-        
-    # =========================================================
-    # 🚨 เพิ่มตัวแจ้งเตือน (Swing / Low Data Warnings)
-    # =========================================================
+
     warnings = []
-    if f_count < 50:
-        warnings.append("ข้อมูลน้อย")
-        
-    if (59.5 <= prob_val <= 60.5) or (64.5 <= prob_val <= 65.5):
-        warnings.append("คาบเส้น")
-        
+    if f_count < 50: warnings.append("ข้อมูลน้อย")
+    if (59.5 <= prob_val <= 60.5) or (64.5 <= prob_val <= 65.5): warnings.append("คาบเส้น")
     warn_text = f" ⚠️({','.join(warnings)})" if warnings else ""
-    # =========================================================
-        
     return f"{level} ({desc}) | โอกาส {prob_val:.1f}% | แนะนำ {k_pct:.1f}%{warn_text}"
 
 @st.cache_data(ttl=300, show_spinner=False)
