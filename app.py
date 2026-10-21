@@ -348,6 +348,7 @@ def save_row_to_sheet(ws, row, form5):
     if target_row > ws.row_count: requests.append({"appendDimension": {"sheetId": ws.id, "dimension": "ROWS", "length": target_row - ws.row_count}})
 
     def typed(value):
+        if value is None or (isinstance(value, float) and not isfinite(value)): return {}   # เซลล์ว่าง
         if isinstance(value, (int, float)) and not isinstance(value, bool): return {"userEnteredValue": {"numberValue": value}}
         return {"userEnteredValue": {"stringValue": str(value)}}
 
