@@ -884,8 +884,8 @@ def compute_ai(df_in):
         p = probs[m]
         
         # คำนวณเปอร์เซ็นต์โอกาสของฝั่ง เหย้า/สูง และ เยือน/ต่ำ
-        prob_home_over = p[:, 3:].sum(axis=1) * 100
-        prob_away_under = p[:, :2].sum(axis=1) * 100
+        prob_home_over = _ml_home_share(p) * 100
+        prob_away_under = 100.0 - prob_home_over
         
         pending[p_col] = np.round(prob_home_over, 1)
         choices = _ml_choices(p, X.iloc[pending_pos][c1], X.iloc[pending_pos][c2])
