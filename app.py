@@ -906,10 +906,9 @@ def compute_ai(df_in):
         "ou_acc": round(reports["OU"]["test"]["accuracy"] * 100, 1),
     }
 
-@st.cache_data(ttl=60, show_spinner=False)
 def load_dashboard_data(_workbook, version=0):
-    ws = get_ws(_workbook)
-    return pd.DataFrame(ws.get_all_records())
+    with JOBS.sheet_lock:
+        return pd.DataFrame(get_ws(_workbook).get_all_records())
 
 def get_ai():
     if not workbook: return None
@@ -1037,7 +1036,7 @@ def render_prediction_cards(df_pred, workbook):
                             JOBS.bump_version()
                             st.toast(f"บันทึกผลสกอร์ {score_input.strip()} ของ {home} vs {away} เรียบร้อยแล้ว", icon="✅")
                             st.rerun()
-                        else: st.error("ไม่พบคู่นี้ใน Google Sheets กรุณาตรวจสอบชื่อทีม")
+                        else: st.error("ไม่พบคู่นี้ที่ยังไม่มีสกอร์ใน Google Sheets กรุณาตรวจสอบชื่อทีม")
                     else: st.warning("กรุณากรอกผลสกอร์ก่อนกดบันทึก")
             st.markdown("<div style='height: 18px;'></div>", unsafe_allow_html=True)
 
