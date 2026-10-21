@@ -802,65 +802,83 @@ def _ml_fit_market(df, X, market):
     }
     return report, pending_probs
 
-# 🛡️ ฟังก์ชันให้สัญญาณ + ตรวจจับราคาหลอก (Guardrails)
-def _ml_verdict(market, side, ev, stress_ev, line, valid, report, kelly, row_data=None):
+# 🛡️ ฟังก์ชันให้สัญญาณ + ตรวจจับราคาหลอก (Guardrails) & Rank Rates
+def _ml_verdict(market, side, prob_val, ev, stress_ev, line, valid, report, kelly, row_data=None):
     if not valid: return "⚠️ ข้าม (ราคาผิด/ไม่ครบ)"
     
-    # -----------------------------------------------------------------
-    # 🛡️ SYSTEM GUARDRAILS: จุดจับผิดราคาหลอกจาก Data (HDP & O/U)
-    # -----------------------------------------------------------------
+    home_1x2 = np.nan
+    water_val = np.nan
+    
     if row_data is not None:
         home_1x2 = _ml_number(row_data.get("1X2 เหย้า", np.nan))
-        under_water = _ml_number(row_data.get("ค่าน้ำ (ต่ำ)", np.nan))
         
+        # ดึงค่าน้ำของฝั่งที่ AI เลือกมาเช็ค
         if market == "HDP":
-            # 1. ⚠️ TRAP ล่อแมงเม่า (อิงจาก R14) 
-            # ราคาต่อ ปป. หรือ ครึ่งลูก แต่เจ้าบ้าน 1X2 ลอยตัวสูง
-            if np.isfinite(home_1x2) and 1.95 <= home_1x2 <= 2.20 and line in [-0.25, -0.50]:
-                if side == 0 and ev < 0.04: # บังคับ EV ต้องสูงจริงๆ ถึงจะยอมแทง
-                    return "⚠️ ข้าม (เข้าข่ายราคาล่อแมงเม่า HDP)"
-                    
-            # 2. ⭐ บอลต่อสั่งตาย (อิงจาก R15)
-            # 1X2 ต่ำมาก (โอกาสชนะสูง) และยอมแบกกำแพงเรตแพง
-            if np.isfinite(home_1x2) and home_1x2 <= 1.47 and line <= -1.25:
-                if side == 0 and ev > 0.01: 
-                    kelly = min(kelly * 1.5, 0.05) # เพิ่มน้ำหนักไม้เดิมพันให้เจ้าบ้าน (Max 5%)
-
+            water_val = _ml_number(row_data.get("ค่าน้ำ HDP (เหย้า)" if side == 0 else "ค่าน้ำ HDP (เยือน)", np.nan))
+        else:
+            water_val = _ml_number(row_data.get("ค่าน้ำ (สูง)" if side == 0 else "ค่าน้ำ (ต่ำ)", np.nan))
+            
+        # -----------------------------------------------------------------
+        # 🛡️ SYSTEM GUARDRAILS: บล็อกกับดักราคา (ห้ามลงทุน)
+        # -----------------------------------------------------------------
+        if market == "HDP":
+            if np.isfinite(home_1x2) and 1.95 <= home_1x2 <= 2.20 and line in [-0.25, -0.50] and side == 0:
+                return "⚠️ ข้าม (เข้าข่ายราคาล่อแมงเม่า HDP)"
         elif market == "OU":
-            # 3. 🎯 สวีทสปอต สูง 2.75 (สถิติ Over เข้า 56.3%)
-            if np.isclose(line, 2.75):
-                if side == 0 and ev > 0.01: # ถ้า AI สั่งให้เล่นฝั่งสูง
-                    kelly = min(kelly * 1.3, 0.04) # อัปเกรดความมั่นใจ
-                    
-            # 4. ⚠️ ภาพลวงตาบอลพ่นไฟ & กฎ R07 (Over-priced Line)
-            if line >= 3.25: # ถ้าเรตเปิดมาสูงจัดๆ (3.25 ขึ้นไป)
-                if side == 0: # AI สั่งให้ไปแทง "สูง"
-                    return "⚠️ ข้าม (เรตสูงผิดปกติ สถิติมักออกต่ำ)"
-                elif side == 1: # AI สั่งให้ไปแทง "ต่ำ"
-                    # ต้องเช็คค่าน้ำไม่ให้เอาเปรียบเกินไป
-                    under_decimal = _ml_malay_decimal(under_water) if np.isfinite(under_water) else 0.0
-                    if under_decimal < 1.85: # จ่ายต่ำกว่า 0.85
-                        return "⚠️ ข้าม (ออกต่ำจริง แต่ค่าน้ำเอาเปรียบเกินไป)"
-    # -----------------------------------------------------------------
+            if line >= 3.25:
+                if side == 0: return "⚠️ ข้าม (เรตสูงผิดปกติ สถิติมักออกต่ำ)"
+                elif side == 1:
+                    under_decimal = _ml_malay_decimal(water_val) if np.isfinite(water_val) else 0.0
+                    if under_decimal < 1.85: return "⚠️ ข้าม (ออกต่ำจริง แต่ค่าน้ำเอาเปรียบเกินไป)"
 
     family = int(round(float(line) * 4)) % 4
-    if report["family_counts"].get(family, 0) < ML_CONFIG["min_line_examples"]: return "⚠️ ข้าม (ตัวอย่างชนิดไลน์นี้น้อยไป)"
+    if report["family_counts"].get(family, 0) < ML_CONFIG["min_line_examples"]: 
+        return "⚠️ ข้าม (ตัวอย่างชนิดไลน์นี้น้อยไป)"
     
-    # เกณฑ์พื้นฐานของ V5.0
-    if not np.isfinite(ev) or ev < ML_CONFIG["min_ev"] or stress_ev <= 0: return f"⚠️ ข้าม (ความได้เปรียบไม่ผ่านเกณฑ์; EV {ev:+.1%})"
+    # -----------------------------------------------------------------
+    # 📊 RANK RATES: คัดกรองตามเปอร์เซ็นต์ชนะจากสถิติจริง
+    # -----------------------------------------------------------------
+    if not np.isfinite(prob_val) or prob_val < 55.0:
+        return f"⚠️ ข้าม (โอกาสชนะน้อยเกินไป: {prob_val:.1f}%)"
+        
+    if not np.isfinite(ev) or ev < ML_CONFIG["min_ev"] or stress_ev <= 0: 
+        return f"⚠️ ข้าม (ความได้เปรียบ EV ไม่ผ่านเกณฑ์)"
+
+    # 🔥 BOOSTERS (เพิ่มเกรด VIP)
+    is_high_water = False
+    is_strong_fav = False
     
+    # Booster 1: ค่าน้ำล้น/น้ำแดง (Win Rate แตะ 69.4% ในข้อมูลย้อนหลัง)
+    if np.isfinite(water_val):
+        water_decimal = _ml_malay_decimal(water_val)
+        if water_decimal >= 1.90:  # เทียบเท่าจ่านค่าน้ำ 0.90 ขึ้นไป
+            is_high_water = True
+            
+    # Booster 2: บอลต่อสั่งตาย (โอกาสชนะสูงมาก)
+    if market == "HDP" and np.isfinite(home_1x2) and home_1x2 <= 1.47 and line <= -1.25 and side == 0:
+        is_strong_fav = True
+
+    # ปรับเพิ่มขนาดไม้กรณีเจอ Booster
+    if is_high_water or is_strong_fav:
+        kelly = min(kelly * 1.5, 0.05) # เพิ่มไม้ให้หนักขึ้น แต่คุมไม่เกิน 5% ของพอร์ต
+
+    k_pct = kelly * 100
+    
+    # 🎯 ตัดสิน Rank Rate ตามระดับเปอร์เซ็นต์และ Booster
+    if prob_val >= 65.0 or (prob_val >= 60.0 and is_high_water):
+        level = "⭐⭐⭐ VIP ไม้หนัก"
+    elif prob_val >= 60.0 or is_strong_fav:
+        level = "⭐⭐ น่าลงทุน"
+    else:
+        level = "⭐ ทดลองติดตาม"
+        
     desc = "สูง Over" if side == 0 else "ต่ำ Under"
     if market == "HDP":
         if line < 0: desc = "ต่อเจ้าบ้าน" if side == 0 else "รองทีมเยือน"
         elif line > 0: desc = "รองเจ้าบ้าน" if side == 0 else "ต่อทีมเยือน"
         else: desc = "เจ้าบ้าน" if side == 0 else "ทีมเยือน"
         
-    k_pct = kelly * 100
-    if k_pct >= 2.5: level = "⭐⭐⭐ VIP ไม้หนัก"
-    elif k_pct >= 1.0: level = "⭐⭐ น่าลงทุน"
-    else: level = "⭐ ทดลองติดตาม"
-        
-    return f"{level} ({desc}) | EV {ev:+.1%} | แนะนำไม้ {k_pct:.1f}%"
+    return f"{level} ({desc}) | โอกาส {prob_val:.1f}% | แนะนำไม้ {k_pct:.1f}%"
 
 @st.cache_data(ttl=300, show_spinner=False)
 def compute_ai(df_in):
@@ -877,11 +895,19 @@ def compute_ai(df_in):
     for m, p_col, v_col, c1, c2 in (("HDP", "AI_โอกาสเหย้าชนะHDP(%)", "AI_ฟันธง_HDP", "HDP_Home_Decimal", "HDP_Away_Decimal"),
                                     ("OU", "AI_โอกาสออกสูง(%)", "AI_ฟันธง_สูงต่ำ", "Over_Decimal", "Under_Decimal")):
         p = probs[m]
-        pending[p_col] = np.round(p[:, 3:].sum(axis=1) * 100, 1)
+        
+        # คำนวณเปอร์เซ็นต์โอกาสของฝั่ง เหย้า/สูง และ เยือน/ต่ำ
+        prob_home_over = p[:, 3:].sum(axis=1) * 100
+        prob_away_under = p[:, :2].sum(axis=1) * 100
+        
+        pending[p_col] = np.round(prob_home_over, 1)
         choices = _ml_choices(p, X.iloc[pending_pos][c1], X.iloc[pending_pos][c2])
         
+        # ดึงเปอร์เซ็นต์ของ "ฝั่งที่ AI เลือก (Side)" มาประเมิน
+        side_probs = np.where(choices["side"] == 0, prob_home_over[pending_pos], prob_away_under[pending_pos])
+        
         pending[v_col] = [
-            _ml_verdict(m, int(choices["side"][i]), choices["ev"][i], choices["stress_ev"][i],
+            _ml_verdict(m, int(choices["side"][i]), side_probs[i], choices["ev"][i], choices["stress_ev"][i],
                         X.iloc[pos][m + "_Line"], bool(df.iloc[pos]["_ML_Valid_" + m]), reports[m], choices["kelly"][i], df.iloc[pos])
             for i, pos in enumerate(pending_pos)
         ]
@@ -1048,7 +1074,7 @@ def render_dashboard(ai):
     st.success("✅ **ระบบ V5.0 Ultimate Hybrid ทำงานสมบูรณ์แบบ:**")
     st.markdown("""
     - **Ensemble Voting:** ใช้ HistGradientBoosting 3 โมเดลช่วยกันโหวตกรองความผิดพลาด (Soft Voting)
-    - **Half-Kelly Criterion:** ระบบคำนวณ 'แนะนำไม้' (เปอร์เซ็นต์ของพอร์ตที่ควรลง) อัตโนมัติใน Tab สัญญาณการทำนาย
+    - **Risk Management & Ranking:** กรองบิลที่โอกาสชนะ < 55% ทิ้ง 100% พร้อมจัดระดับ ⭐⭐⭐ VIP (สำหรับบิลที่โอกาส > 60% ขึ้นไปและได้ค่าน้ำ 0.90+)
     - **System Guardrails:** ตรวจจับและบล็อก 'ราคาล่อแมงเม่า' ทั้งราคาต่อ ปป./ครึ่งลูกที่เสี่ยงหลอก และราคาโกลสูง/ต่ำที่เกิน 3.25 อัตโนมัติ
     """)
 
@@ -1056,7 +1082,7 @@ def render_dashboard(ai):
 # หัวข้อหลัก (Tabs)
 # ----------------------------------------
 st.markdown("<h1 class='page-title'>⚽ ระบบวิเคราะห์ราคาบอล VIP & AI (v5.0 The Ultimate Hybrid)</h1>", unsafe_allow_html=True)
-st.markdown("<p class='page-sub'>อัปเกรด Ensemble AI โหวต 3 ระดับ พร้อมระบบคำนวณเงินเดิมพันอัตโนมัติ (Kelly Criterion)</p>", unsafe_allow_html=True)
+st.markdown("<p class='page-sub'>อัปเกรด Ensemble AI โหวต 3 ระดับ พร้อมระบบคำนวณเงินเดิมพันอัตโนมัติ และ Ranking โอกาสชนะ</p>", unsafe_allow_html=True)
 
 AI = get_ai()
 
