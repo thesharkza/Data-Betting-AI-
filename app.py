@@ -366,15 +366,15 @@ def save_row_to_sheet(ws, row, form5):
     ws.spreadsheet.batch_update({"requests": requests})
     return target_row, overwritten
 
-def update_match_score_in_sheet(ws, home_team, away_team, score_text):
-    col_a = ws.col_values(1)
-    col_b = ws.col_values(2)
-    target_row = None
-    for i in range(1, len(col_a)):
-        if str(col_a[i]).strip() == str(home_team).strip() and str(col_b[i]).strip() == str(away_team).strip():
-            target_row = i + 1
-            break
-    if target_row:
+def update_match_score_in_sheet(workbook, home_team, away_team, score_text):
+    home, away = str(home_team).strip(), str(away_team).strip()
+    with JOBS.sheet_lock:
+        ws = get_ws(workbook)
+        col_a, col_b, col_m = ws.col_values(1), ws.col_values(2), ws.col_values(13)
+        cell = lambda col, i: str(col[i]).strip() if i < len(col) else ""
+        target_row = next((i + 1 for i in range(1, len(col_a))
+                           if cell(col_a, i) == home and cell(col_b, i) == away and not cell(col_m, i)), None)
+        if target_row is None: return False
         ws.update(f'M{target_row}', [[score_text]])
         return True
     return False
