@@ -440,8 +440,9 @@ def extract_row(img_bytes, user_fmt, model):
             raw_text = resp.text.strip()
             if not raw_text: raise ValueError("AI ตอบกลับเป็นค่าว่าง (Empty Response)")
                 
-            row, ai_fmt = clean_raw_data(raw_text)
-            return convert_water_to_malay(row, user_fmt, ai_fmt)
+            row, ai_fmt, parse_warn = clean_raw_data(raw_text)
+            row, note, fmt_warn = convert_water_to_malay(row, user_fmt, ai_fmt)
+            return row, note, (" | ".join(w for w in (parse_warn, fmt_warn) if w) or None)
         except Exception as e:
             last_error = str(e)
             time.sleep(2)
