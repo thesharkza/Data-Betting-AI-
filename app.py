@@ -253,7 +253,11 @@ def get_ws(wb):
 # ----------------------------------------
 model = genai.GenerativeModel('gemini-3.7-flash')
 
+# ประกาศตัวแปร FIELD_NAMES และ CRITICAL_IDX เพื่อป้องกันแอปพังตอนอ่านค่า
 WATER_IDX = [6, 8, 10, 11]
+CRITICAL_IDX = [5, 6, 7, 8, 9, 10, 11]
+FIELD_NAMES = ["ทีมเหย้า", "ทีมเยือน", "1X2เหย้า", "1X2เสมอ", "1X2เยือน", "HDPเหย้า", "น้ำHDPเหย้า", "HDPเยือน", "น้ำHDPเยือน", "โกลสูงต่ำ", "น้ำสูง", "น้ำต่ำ"]
+
 FMT_LABELS = {"MY": "มาเลเซีย", "HK": "ฮ่องกง", "ID": "อินโดนีเซีย", "EU": "ยุโรป (Decimal)"}
 FMT_CHOICES = { "อัตโนมัติ (ให้ AI ตรวจจับ)": None, "มาเลเซีย (Malay)": "MY", "ฮ่องกง (HK)": "HK", "อินโดนีเซีย (Indo)": "ID", "ยุโรป (Decimal)": "EU" }
 
@@ -1030,7 +1034,7 @@ def render_prediction_cards(df_pred, workbook):
                 with sc2: submitted = st.form_submit_button("💾 บันทึกผลลงชีต", use_container_width=True)
                 if submitted:
                     if score_input.strip():
-                        success = update_match_score_in_sheet(get_ws(workbook), home, away, score_input.strip())
+                        success = update_match_score_in_sheet(workbook, home, away, score_input.strip())
                         if success:
                             st.session_state.setdefault("hidden_matches", set()).add(_pair(home, away))
                             JOBS.bump_version()
