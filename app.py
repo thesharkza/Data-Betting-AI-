@@ -336,6 +336,7 @@ def validate_form5(values):
 
 def save_row_to_sheet(ws, row, form5):
     normalized = validate_form5(form5)
+    with JOBS.sheet_lock:
     col_a, col_b = ws.col_values(1), ws.col_values(2)
     last_row = max((i + 1 for i, v in enumerate(col_a) if str(v).strip()), default=1)
     new_home, new_away = str(row[0]).strip(), str(row[1]).strip()
