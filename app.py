@@ -658,6 +658,12 @@ def _ml_returns(decimal):
     decimal = float(decimal)
     return np.array([-1.0, -0.5, 0.0, (decimal - 1) / 2, decimal - 1])
 
+# 👇 นี่คือฟังก์ชันที่หายไปครับ นำกลับมาใส่ตรงนี้
+def _ml_expected_value(probabilities, decimal, reverse=False):
+    if not np.isfinite(decimal) or decimal <= 1: return np.nan
+    p = np.asarray(probabilities, dtype=float)
+    return float((p[::-1] if reverse else p) @ _ml_returns(decimal))
+
 def _ml_home_share(probabilities):
     """P(เหย้า/สูงชนะ | ไม่คืนทุน) = (HW+FW)/(FL+HL+HW+FW) ฝั่งตรงข้ามคือ 1 - ค่านี้"""
     p = np.asarray(probabilities, dtype=float)
