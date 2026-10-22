@@ -23,6 +23,8 @@ from sklearn.ensemble import HistGradientBoostingClassifier, VotingClassifier
 from sklearn.model_selection import GroupShuffleSplit
 from threadpoolctl import threadpool_limits
 import scipy.stats as stats
+import plotly.express as px
+import plotly.graph_objects as go
 
 # ----------------------------------------
 # ตั้งค่าหน้าเว็บ
@@ -920,6 +922,7 @@ def compute_ai(df_in):
     
     pending_pos = np.flatnonzero(df["_ML_Pending"].to_numpy())
     pending = df.iloc[pending_pos].copy()
+    history = df[~df["_ML_Pending"]].copy()
     
     for m, p_col, v_col, c1, c2 in (("HDP", "AI_โอกาสเหย้าชนะHDP(%)", "AI_ฟันธง_HDP", "HDP_Home_Decimal", "HDP_Away_Decimal"),
                                     ("OU", "AI_โอกาสออกสูง(%)", "AI_ฟันธง_สูงต่ำ", "Over_Decimal", "Under_Decimal")):
@@ -927,6 +930,7 @@ def compute_ai(df_in):
         prob_home_over = _ml_home_share(p) * 100
         prob_away_under = 100.0 - prob_home_over
         
+        # Calculate for pending
         pending[p_col] = np.round(prob_home_over, 1)
         choices = _ml_choices(p, X.iloc[pending_pos][c1], X.iloc[pending_pos][c2])
         side_probs = np.where(choices["side"] == 0, prob_home_over, prob_away_under)
@@ -939,7 +943,7 @@ def compute_ai(df_in):
         ]
         
     return {
-        "status": "ok", "df_predict": pending, "total_train": len(df[~df["_ML_Pending"]]),
+        "status": "ok", "df_predict": pending, "df_history": history, "total_train": len(history),
         "hdp_acc": round(reports["HDP"]["test"]["accuracy"] * 100, 1),
         "ou_acc": round(reports["OU"]["test"]["accuracy"] * 100, 1),
     }
@@ -1087,7 +1091,7 @@ def render_prediction_cards(df_pred, workbook):
             st.markdown("<div style='height: 18px;'></div>", unsafe_allow_html=True)
 
 # ----------------------------------------
-# Dashboard : KPI
+# Dashboard : KPI & Charts
 # ----------------------------------------
 def _kpi_html(hdp_acc, ou_acc, total_train):
     return ("<div class='kpi-wrap'>"
@@ -1111,6 +1115,73 @@ def render_dashboard(ai):
     - **Confidence Indicators:** แจ้งเตือนสัญญาณเสี่ยงสวิงด้วยแท็ก `⚠️(ข้อมูลน้อย)` และ `⚠️(คาบเส้น)` อัตโนมัติ
     - **System Guardrails:** ตรวจจับและบล็อก 'ราคาล่อแมงเม่า' ทั้งราคาต่อ ปป./ครึ่งลูกที่เสี่ยงหลอก และราคาโกลสูง/ต่ำที่เกิน 3.25 อัตโนมัติ
     """)
+
+    st.markdown("---")
+    st.markdown("<h3 style='color: #4ade80;'>📊 ข้อมูลเชิงลึกสำหรับการลงทุน (Investment Insights)</h3>", unsafe_allow_html=True)
+
+    df_hist = ai.get("df_history", pd.DataFrame())
+    
+    if len(df_hist) > 0:
+        # 1. โดนัทชาร์ตสรุปผลประกอบการจริง (W/L/D Breakdown)
+        hdp_counts = df_hist['ผล HDP'].value_counts()
+        ou_counts = df_hist['ผลสูง/ต่ำ'].value_counts()
+        
+        results = {"ได้เต็ม": 0, "ได้ครึ่ง": 0, "คืนทุน": 0, "เสียครึ่ง": 0, "เสียเต็ม": 0}
+        for label, count in hdp_counts.items():
+            if "ได้เต็ม" in str(label): results["ได้เต็ม"] += count
+            elif "ได้ครึ่ง" in str(label): results["ได้ครึ่ง"] += count
+            elif "คืนทุน" in str(label): results["คืนทุน"] += count
+            elif "เสียครึ่ง" in str(label): results["เสียครึ่ง"] += count
+            elif "เสียเต็ม" in str(label): results["เสียเต็ม"] += count
+            
+        for label, count in ou_counts.items():
+            if "ได้เต็ม" in str(label): results["ได้เต็ม"] += count
+            elif "ได้ครึ่ง" in str(label): results["ได้ครึ่ง"] += count
+            elif "คืนทุน" in str(label): results["คืนทุน"] += count
+            elif "เสียครึ่ง" in str(label): results["เสียครึ่ง"] += count
+            elif "เสียเต็ม" in str(label): results["เสียเต็ม"] += count
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("**สัดส่วนผลประกอบการจริง (HDP & O/U)**")
+            labels = list(results.keys())
+            values = list(results.values())
+            colors = ['#22c55e', '#86efac', '#7f9a8b', '#d9a441', '#e5484d']
+            
+            fig1 = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.5, marker_colors=colors)])
+            fig1.update_layout(paper_bgcolor='rgba(0,0,0,0)', font_color='#e6f2ea', margin=dict(t=20, b=20, l=20, r=20))
+            st.plotly_chart(fig1, use_container_width=True)
+
+        with col2:
+            # 2. Cumulative Profit Curve
+            st.markdown("**กราฟจำลองกำไรสะสม (Cumulative Profit Curve)**")
+            def _calc_unit(label):
+                if "ได้เต็ม" in str(label): return 1.0
+                if "ได้ครึ่ง" in str(label): return 0.5
+                if "เสียครึ่ง" in str(label): return -0.5
+                if "เสียเต็ม" in str(label): return -1.0
+                return 0.0
+                
+            profits = []
+            for i, row in df_hist.iterrows():
+                p = 0
+                if pd.notna(row.get('ผล HDP')): p += _calc_unit(row['ผล HDP'])
+                if pd.notna(row.get('ผลสูง/ต่ำ')): p += _calc_unit(row['ผลสูง/ต่ำ'])
+                profits.append(p)
+                
+            cumulative_profit = np.cumsum(profits)
+            
+            fig2 = go.Figure()
+            fig2.add_trace(go.Scatter(y=cumulative_profit, mode='lines', fill='tozeroy', 
+                                      line=dict(color='#22c55e', width=3), 
+                                      fillcolor='rgba(34, 197, 94, 0.2)'))
+            fig2.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                               font_color='#e6f2ea', yaxis_title="Units", xaxis_title="จำนวนบิล (Match)", 
+                               margin=dict(t=20, b=20, l=20, r=20))
+            st.plotly_chart(fig2, use_container_width=True)
+            
+    else:
+        st.info("ยังไม่มีข้อมูลสถิติที่บันทึกผลสกอร์เพียงพอสำหรับสร้างกราฟ (กราฟจะปรากฏเมื่อมีการกรอกผลสกอร์)")
 
 # ----------------------------------------
 # หัวข้อหลัก (Tabs)
