@@ -22,6 +22,7 @@ from html import escape as esc
 from sklearn.ensemble import HistGradientBoostingClassifier, VotingClassifier
 from sklearn.model_selection import GroupShuffleSplit
 from threadpoolctl import threadpool_limits
+import scipy.stats as stats
 
 # ----------------------------------------
 # ตั้งค่าหน้าเว็บ
@@ -592,9 +593,11 @@ def _ml_win_rate(value):
     return number if 0 <= number <= 1 else np.nan
 
 def _ml_malay_decimal(value):
-    value = _ml_number(value)
-    if not np.isfinite(value) or value == 0 or abs(value) > 1: return np.nan
-    return 1.0 + (value if value > 0 else 1.0 / abs(value))
+    v = _ml_number(value)
+    if not np.isfinite(v) or v == 0: return np.nan
+    if v > 1.0: return v  # Decimal ยุโรป/ฮ่องกง
+    if v < -1.0: return 1.0 + (1.0 / abs(v)) # อินโดนีเซีย
+    return 1.0 + (v if v > 0 else 1.0 / abs(v)) # มาเลย์
 
 def _ml_blank(value):
     return str(value).strip().lower() in ("", "nan", "none", "null", "<na>")
@@ -700,7 +703,7 @@ def _ml_prepare(df_in):
     inverse = 1.0 / odds
     inverse_total = inverse.sum(axis=1, min_count=3)
     
-    # Mathematical Features (v2/v4 + v3)
+    # 🌟 1. Mathematical Features
     X["True_Home_Prob"] = inverse["1X2 เหย้า"] / inverse_total
     X["True_Draw_Prob"] = inverse["1X2 เสมอ"] / inverse_total
     X["True_Away_Prob"] = inverse["1X2 เยือน"] / inverse_total
@@ -709,7 +712,14 @@ def _ml_prepare(df_in):
 
     for name, source in (("HDP_Home_Decimal", "ค่าน้ำ HDP (เหย้า)"), ("HDP_Away_Decimal", "ค่าน้ำ HDP (เยือน)"), ("Over_Decimal", "ค่าน้ำ (สูง)"), ("Under_Decimal", "ค่าน้ำ (ต่ำ)")):
         X[name] = df[source].map(_ml_malay_decimal)
-        
+
+    # 🌟 2. Data Imputation: กู้คืนค่าน้ำที่ OCR อาจอ่านพลาด โดยใช้ Bookie Margin มาตรฐาน (1.05)
+    for c1, c2 in [("HDP_Home_Decimal", "HDP_Away_Decimal"), ("Over_Decimal", "Under_Decimal")]:
+        missing_c2 = X[c2].isna() & X[c1].notna()
+        if missing_c2.any(): X.loc[missing_c2, c2] = 1.0 / (1.05 - (1.0 / X.loc[missing_c2, c1]))
+        missing_c1 = X[c1].isna() & X[c2].notna()
+        if missing_c1.any(): X.loc[missing_c1, c1] = 1.0 / (1.05 - (1.0 / X.loc[missing_c1, c2]))
+
     X["Water_HDP_Diff"] = X["HDP_Home_Decimal"] - X["HDP_Away_Decimal"]
     X["Water_OU_Diff"] = X["Over_Decimal"] - X["Under_Decimal"]
 
@@ -720,10 +730,21 @@ def _ml_prepare(df_in):
     X["HDP_vs_TrueProb_Diff"] = X["True_Home_Prob"] - (0.5 - X["HDP_Line"] * 0.1)
 
     for column in FORM5_HEADERS: X[column] = df[column]
-    X["Expected_Total_Goals"] = ((X["H_GoalsFor_Last5"] + X["A_GoalsAgainst_Last5"]) / 10.0) + ((X["A_GoalsFor_Last5"] + X["H_GoalsAgainst_Last5"]) / 10.0)
-    X["Form_Home_Goal_Avg"] = (X["H_GoalsFor_Last5"] + X["A_GoalsAgainst_Last5"]) / 10.0
-    X["Form_Away_Goal_Avg"] = (X["A_GoalsFor_Last5"] + X["H_GoalsAgainst_Last5"]) / 10.0
+
+    # 🌟 3. Poisson Distribution & Dynamic Expected Goals
+    avg_h_gf, avg_h_ga = X["H_GoalsFor_Last5"] / 5.0, X["H_GoalsAgainst_Last5"] / 5.0
+    avg_a_gf, avg_a_ga = X["A_GoalsFor_Last5"] / 5.0, X["A_GoalsAgainst_Last5"] / 5.0
+    
+    X["Expected_Total_Goals"] = (avg_h_gf + avg_a_ga) / 2.0 + (avg_a_gf + avg_h_ga) / 2.0
+    X["Form_Home_Goal_Avg"] = avg_h_gf
+    X["Form_Away_Goal_Avg"] = avg_a_gf
     X["Form_Total_vs_Line"] = X["Expected_Total_Goals"] - X["OU_Line"]
+    
+    # คำนวณเปอร์เซ็นต์สูง/ต่ำ ด้วยสูตรปัวซง
+    safe_lines = np.floor(X["OU_Line"].fillna(0))
+    safe_goals = X["Expected_Total_Goals"].fillna(2.5)
+    X["Poisson_Under_Prob"] = stats.poisson.cdf(safe_lines, safe_goals)
+    X["Poisson_Over_Prob"] = 1.0 - X["Poisson_Under_Prob"]
     
     X = X.replace([np.inf, -np.inf], np.nan).astype(float)
     names_ok = ~df["ทีมเหย้า"].map(_ml_blank) & ~df["ทีมเยือน"].map(_ml_blank)
@@ -827,9 +848,8 @@ def _ml_fit_market(df, X, market):
     }
     return report, pending_probs
 
-# 🛡️ ฟังก์ชันให้สัญญาณ + ตรวจจับราคาหลอก (Guardrails) & Rank Rates + Confidence Indicator
 def _ml_verdict(market, side, prob_val, ev, stress_ev, line, valid, report, kelly,
-                row_data=None, min_prob=55.0, min_ev=None):
+                row_data=None, features_data=None, min_prob=55.0, min_ev=None):
     min_ev = ML_CONFIG["min_ev"] if min_ev is None else min_ev
     if not valid: return "⚠️ ข้าม (ราคาผิด/ไม่ครบ)"
     if row_data is None: return "⚠️ ข้าม (ไม่มีข้อมูลแถวสำหรับตรวจ Guardrail)"
@@ -840,15 +860,24 @@ def _ml_verdict(market, side, prob_val, ev, stress_ev, line, valid, report, kell
                  ("OU", 0): "ค่าน้ำ (สูง)", ("OU", 1): "ค่าน้ำ (ต่ำ)"}[(market, side)]
     water_decimal = _ml_malay_decimal(row_data.get(water_col, np.nan))
     if not np.isfinite(water_decimal):
-        return "⚠️ ข้าม (ค่าน้ำฝั่งที่เลือกอ่านไม่ได้/อยู่นอกช่วง Malay)"
+        return "⚠️ ข้าม (ค่าน้ำฝั่งที่เลือกอ่านไม่ได้/อยู่นอกช่วงแปลงค่า)"
 
-    # 🛡️ GUARDRAILS
+    # 🛡️ DYNAMIC GUARDRAILS
     if market == "HDP":
-        if np.isfinite(home_1x2) and 1.95 <= home_1x2 <= 2.20 and line in (-0.25, -0.5) and side == 0:
-            return "⚠️ ข้าม (เข้าข่ายราคาล่อแมงเม่า HDP)"
-    elif line >= 3.25:
-        if side == 0: return "⚠️ ข้าม (เรตสูงผิดปกติ สถิติมักออกต่ำ)"
-        if water_decimal < 1.85: return "⚠️ ข้าม (ออกต่ำจริง แต่ค่าน้ำเอาเปรียบเกินไป)"
+        true_home_prob = features_data.get("True_Home_Prob", np.nan) if features_data is not None else np.nan
+        if np.isfinite(true_home_prob):
+            if true_home_prob < 0.45 and line <= -0.5 and side == 0:
+                return "⚠️ ข้าม (ราคาต่อล่อแมงเม่า สวนทางสถิติ 1X2)"
+            if true_home_prob > 0.60 and line >= 0.0 and side == 0:
+                return "⚠️ ข้าม (ราคาผิดปกติ เจ้าบ้านฟอร์มโหดแต่โต๊ะไม่กล้าให้ต่อ)"
+    elif market == "OU":
+        if line >= 3.25:
+            if side == 0: return "⚠️ ข้าม (เรตสูงผิดปกติ สถิติมักออกต่ำ)"
+            if water_decimal < 1.85: return "⚠️ ข้าม (ออกต่ำจริง แต่ค่าน้ำเอาเปรียบเกินไป)"
+        poisson_over = features_data.get("Poisson_Over_Prob", np.nan) if features_data is not None else np.nan
+        if np.isfinite(poisson_over):
+            if side == 0 and poisson_over < 0.35: return "⚠️ ข้าม (สถิติ Poisson ชี้ว่าโอกาสสูงน้อยเกินไป)"
+            if side == 1 and poisson_over > 0.65: return "⚠️ ข้าม (สถิติ Poisson ชี้ว่าโอกาสต่ำน้อยเกินไป)"
 
     family = int(round(float(line) * 4)) % 4
     f_count = report["family_counts"].get(family, 0)
@@ -861,8 +890,7 @@ def _ml_verdict(market, side, prob_val, ev, stress_ev, line, valid, report, kell
 
     is_high_water = water_decimal >= 1.90
     is_strong_fav = bool(market == "HDP" and np.isfinite(home_1x2) and home_1x2 <= 1.47 and line <= -1.25 and side == 0)
-    if is_high_water or is_strong_fav:
-        kelly = min(kelly * 1.5, 0.05)
+    if is_high_water or is_strong_fav: kelly = min(kelly * 1.5, 0.05)
     k_pct = kelly * 100
 
     if prob_val >= 65.0 or (prob_val >= 60.0 and is_high_water): level = "⭐⭐⭐ VIP ไม้หนัก"
@@ -879,7 +907,7 @@ def _ml_verdict(market, side, prob_val, ev, stress_ev, line, valid, report, kell
     if f_count < 50: warnings.append("ข้อมูลน้อย")
     if (59.5 <= prob_val <= 60.5) or (64.5 <= prob_val <= 65.5): warnings.append("คาบเส้น")
     warn_text = f" ⚠️({','.join(warnings)})" if warnings else ""
-    return f"{level} ({desc}) | โอกาส {prob_val:.1f}% | แนะนำ {k_pct:.1f}%{warn_text}"
+    return f"{level} ({desc}) | โอกาส {prob_val:.1f}% | แนะนำ {k_pct:.1f}%{warn_text}" 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def compute_ai(df_in):
@@ -896,20 +924,17 @@ def compute_ai(df_in):
     for m, p_col, v_col, c1, c2 in (("HDP", "AI_โอกาสเหย้าชนะHDP(%)", "AI_ฟันธง_HDP", "HDP_Home_Decimal", "HDP_Away_Decimal"),
                                     ("OU", "AI_โอกาสออกสูง(%)", "AI_ฟันธง_สูงต่ำ", "Over_Decimal", "Under_Decimal")):
         p = probs[m]
-        
-        # คำนวณเปอร์เซ็นต์โอกาสของฝั่ง เหย้า/สูง และ เยือน/ต่ำ
         prob_home_over = _ml_home_share(p) * 100
         prob_away_under = 100.0 - prob_home_over
         
         pending[p_col] = np.round(prob_home_over, 1)
         choices = _ml_choices(p, X.iloc[pending_pos][c1], X.iloc[pending_pos][c2])
-        
-        # 🛠️ ป้องกัน Index Out of Bounds: ใช้ prob ตรงๆ จาก Array p
         side_probs = np.where(choices["side"] == 0, prob_home_over, prob_away_under)
         
         pending[v_col] = [
             _ml_verdict(m, int(choices["side"][i]), side_probs[i], choices["ev"][i], choices["stress_ev"][i],
-                        X.iloc[pos][m + "_Line"], bool(df.iloc[pos]["_ML_Valid_" + m]), reports[m], choices["kelly"][i], df.iloc[pos])
+                        X.iloc[pos][m + "_Line"], bool(df.iloc[pos]["_ML_Valid_" + m]), reports[m], choices["kelly"][i], 
+                        row_data=df.iloc[pos], features_data=X.iloc[pos])
             for i, pos in enumerate(pending_pos)
         ]
         
