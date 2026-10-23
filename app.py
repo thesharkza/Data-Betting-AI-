@@ -279,8 +279,10 @@ def guess_format(nums):
 
 def clean_raw_data(raw_text):
     text = raw_text.strip()
-    text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'\s*```$', '', text).strip()
+    text = re.sub(r'^
+```(?:json)?\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\s*
+```$', '', text).strip()
     
     match_array = re.search(r'\[(.*)\]', text, re.DOTALL)
     match_obj = re.search(r'\{.*\}', text, re.DOTALL)
@@ -458,6 +460,48 @@ def extract_row(img_bytes, user_fmt, model):
             
     raise RuntimeError(f"{last_error}")
 
+def extract_form_stats(img_bytes, model):
+    img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
+    img.thumbnail((1600, 1600))
+    buf = io.BytesIO()
+    img.save(buf, format='JPEG', quality=85)
+    
+    prompt = (
+        "กรุณาดึงข้อมูลสถิติจากภาพ (ฟอร์มการเล่น) โดยตอบกลับเป็น JSON Array ที่มีตัวเลข 6 ตัวแบบนี้เท่านั้น ห้ามพิมพ์คำอธิบายอื่นเด็ดขาด:\n"
+        "[WinRateเหย้า, ประตูได้เหย้า, ประตูเสียเหย้า, WinRateเยือน, ประตูได้เยือน, ประตูเสียเยือน]\n"
+        "หมายเหตุ: ทีมบนคือเหย้า ทีมล่างคือเยือน WinRate ให้ใส่เฉพาะตัวเลข (เช่น 40% ให้ใส่ 40)"
+    )
+    
+    safety_settings = [
+        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"}
+    ]
+    
+    last_error = ""
+    for attempt in range(3):
+        try:
+            resp = model.generate_content([{"mime_type": "image/jpeg", "data": buf.getvalue()}, prompt], safety_settings=safety_settings)
+            raw_text = resp.text.strip()
+            
+            raw_text = re.sub(r'^
+```(?:json)?\s*', '', raw_text, flags=re.IGNORECASE)
+            raw_text = re.sub(r'\s*
+```$', '', raw_text).strip()
+            
+            match_array = re.search(r'\[(.*)\]', raw_text, re.DOTALL)
+            if match_array:
+                data = json.loads("[" + match_array.group(1).strip() + "]")
+                if len(data) >= 6:
+                    return [float(data[0]), int(data[1]), int(data[2]), float(data[3]), int(data[4]), int(data[5])]
+            raise ValueError(f"รูปแบบไม่ถูกต้อง: {raw_text}")
+        except Exception as e:
+            last_error = str(e)
+            time.sleep(2)
+            
+    raise RuntimeError(f"ไม่สามารถอ่านภาพสถิติได้: {last_error}")
+
 def process_job(job_id, workbook, model):
     try:
         job = JOBS.get(job_id)
@@ -546,20 +590,41 @@ def render_form5_editor():
     job_id = st.session_state.get("form5_editing")
     job = JOBS.get(job_id) if job_id else None
     if not job or job["status"] != "ready": return
-    panel_header("ฟอร์ม 5 นัดล่าสุด", "Win Rate กรอกเป็นเปอร์เซ็นต์ (เช่น 60) ส่วนประตูกรอกเป็นยอดรวม 5 นัด")
+    
+    panel_header("ฟอร์ม 5 นัดล่าสุด", "อัปโหลดภาพสถิติเพื่อให้ AI กรอกอัตโนมัติ หรือกรอกข้อมูลเอง")
+    
+    stat_file = st.file_uploader("📸 อัปโหลดภาพฟอร์มสถิติ", type=['png', 'jpg', 'jpeg'], key=f"stat_up_{job_id}")
+    
+    if stat_file and st.session_state.get(f"stat_processed_{job_id}") != stat_file.name:
+        with st.spinner("🤖 AI กำลังอ่านข้อมูลสถิติ..."):
+            try:
+                form_data = extract_form_stats(stat_file.getvalue(), model)
+                st.session_state[f"{job_id}_h_win"] = form_data[0]
+                st.session_state[f"{job_id}_h_for"] = form_data[1]
+                st.session_state[f"{job_id}_h_ag"] = form_data[2]
+                st.session_state[f"{job_id}_a_win"] = form_data[3]
+                st.session_state[f"{job_id}_a_for"] = form_data[4]
+                st.session_state[f"{job_id}_a_ag"] = form_data[5]
+                st.session_state[f"stat_processed_{job_id}"] = stat_file.name
+                st.toast("✅ ดึงข้อมูลสถิติสำเร็จ!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"เกิดข้อผิดพลาด: {e}")
+
     with st.form(f"form5_{job_id}"):
         left, right = st.columns(2, gap="large")
         with left:
             st.markdown(f"<div class='fx-side'><small>HOME</small>{esc(str(job['row_data'][0]))}</div>", unsafe_allow_html=True)
-            h_win = st.number_input('Win Rate เหย้า (%)', step=20., key=f"{job_id}_h_win")
-            h_for = st.number_input('ประตูได้ (รวม 5 นัด)', step=1, key=f"{job_id}_h_for")
-            h_ag = st.number_input('ประตูเสีย (รวม 5 นัด)', step=1, key=f"{job_id}_h_ag")
+            h_win = st.number_input('Win Rate เหย้า (%)', step=20., key=f"{job_id}_h_win", value=float(st.session_state.get(f"{job_id}_h_win", 0.0)))
+            h_for = st.number_input('ประตูได้ (รวม 5 นัด)', step=1, key=f"{job_id}_h_for", value=int(st.session_state.get(f"{job_id}_h_for", 0)))
+            h_ag = st.number_input('ประตูเสีย (รวม 5 นัด)', step=1, key=f"{job_id}_h_ag", value=int(st.session_state.get(f"{job_id}_h_ag", 0)))
         with right:
             st.markdown(f"<div class='fx-side away'><small>AWAY</small>{esc(str(job['row_data'][1]))}</div>", unsafe_allow_html=True)
-            a_win = st.number_input('Win Rate เยือน (%)', step=20., key=f"{job_id}_a_win")
-            a_for = st.number_input('ประตูได้ (รวม 5 นัด)', step=1, key=f"{job_id}_a_for")
-            a_ag = st.number_input('ประตูเสีย (รวม 5 นัด)', step=1, key=f"{job_id}_a_ag")
-        if st.form_submit_button('บันทึก', type="primary"):
+            a_win = st.number_input('Win Rate เยือน (%)', step=20., key=f"{job_id}_a_win", value=float(st.session_state.get(f"{job_id}_a_win", 0.0)))
+            a_for = st.number_input('ประตูได้ (รวม 5 นัด)', step=1, key=f"{job_id}_a_for", value=int(st.session_state.get(f"{job_id}_a_for", 0)))
+            a_ag = st.number_input('ประตูเสีย (รวม 5 นัด)', step=1, key=f"{job_id}_a_ag", value=int(st.session_state.get(f"{job_id}_a_ag", 0)))
+            
+        if st.form_submit_button('💾 บันทึกทั้งหมด', type="primary"):
             submit_form5(job_id, [h_win, h_for, h_ag, a_win, a_for, a_ag], st.session_state["form5_owner_id"])
             st.session_state.pop("form5_editing", None)
             st.rerun()
