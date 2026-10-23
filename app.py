@@ -1203,39 +1203,79 @@ def render_dashboard(ai):
         for t in df_hist['Target_OU'].dropna():
             if t in label_map: results[label_map[t]] += 1
 
-        col1, col2 = st.columns(2)
+        # ปรับสัดส่วนคอลัมน์ให้กราฟเทรนด์กว้างขึ้น (1:2)
+        col1, col2 = st.columns([1, 2])
+        
         with col1:
-            st.markdown("**สัดส่วนการจบสกอร์รวมทั้งหมด**")
+            st.markdown("**สัดส่วนผลประกอบการจริง**")
             labels = list(results.keys())
             values = list(results.values())
             colors = ['#22c55e', '#86efac', '#7f9a8b', '#d9a441', '#e5484d']
             
             fig1 = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.5, marker_colors=colors)])
-            fig1.update_layout(paper_bgcolor='rgba(0,0,0,0)', font_color='#e6f2ea', margin=dict(t=20, b=20, l=20, r=20))
+            fig1.update_layout(
+                paper_bgcolor='rgba(0,0,0,0)', 
+                font_color='#e6f2ea', 
+                margin=dict(t=20, b=20, l=10, r=10),
+                legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5)
+            )
             st.plotly_chart(fig1, use_container_width=True)
 
         with col2:
-            # 2. กราฟ Market Trend (เจ้าบ้านทำเงิน vs ทีมเยือนทำเงิน)
-            st.markdown("**กราฟเทรนด์ตลาด: เจ้าบ้าน vs ทีมเยือน**")
-            st.caption("📈 ชี้ขึ้น = ตลาดช่วงนี้บอลต่อ/เจ้าบ้านทำเงิน | 📉 ปักลง = ตลาดช่วงนี้บอลรอง/ทีมเยือนทำเงิน")
+            # 2. กราฟ Market Trend รวม 2 เส้น
+            st.markdown("**📈 กราฟเทรนด์ตลาดรวม (Market Trend Analysis)**")
+            
+            # Note ข้อความอธิบายแต่ละเส้น
+            st.markdown(
+                "<div style='font-size: 0.85rem; color: #a7c4b5; margin-bottom: 10px; padding: 10px; background: #0c130f; border: 1px solid #1b2a22; border-radius: 8px;'>"
+                "🔵 <b>เส้นสีฟ้า (แฮนดิแคป):</b> ชี้ขึ้น = เจ้าบ้านทำเงิน | ปักลง = ทีมเยือนทำเงิน<br>"
+                "🟣 <b>เส้นสีม่วง (สูง/ต่ำ):</b> ชี้ขึ้น = สกอร์สูงทำเงิน | ปักลง = สกอร์ต่ำทำเงิน"
+                "</div>", unsafe_allow_html=True
+            )
             
             unit_map = {0: -1.0, 1: -0.5, 2: 0.0, 3: 0.5, 4: 1.0}
             home_profits = []
+            over_profits = []
             
             for _, row in df_hist.iterrows():
-                p = 0
-                if pd.notna(row.get('Target_HDP')): p += unit_map.get(row['Target_HDP'], 0)
-                home_profits.append(p)
+                h_p = unit_map.get(row.get('Target_HDP'), 0) if pd.notna(row.get('Target_HDP')) else 0
+                o_p = unit_map.get(row.get('Target_OU'), 0) if pd.notna(row.get('Target_OU')) else 0
+                home_profits.append(h_p)
+                over_profits.append(o_p)
                 
-            market_trend = np.cumsum(home_profits)
+            trend_hdp = np.cumsum(home_profits)
+            trend_ou = np.cumsum(over_profits)
             
             fig2 = go.Figure()
-            fig2.add_trace(go.Scatter(y=market_trend, mode='lines', fill='tozeroy', 
-                                      line=dict(color='#0ea5e9', width=3), 
-                                      fillcolor='rgba(14, 165, 233, 0.2)'))
-            fig2.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                               font_color='#e6f2ea', yaxis_title="Trend Index", xaxis_title="จำนวนบิล (Match)", 
-                               margin=dict(t=20, b=20, l=20, r=20))
+            
+            # เส้นที่ 1: HDP (Home vs Away)
+            fig2.add_trace(go.Scatter(
+                y=trend_hdp, mode='lines', name='เทรนด์แฮนดิแคป (เจ้าบ้าน/เยือน)',
+                line=dict(color='#0ea5e9', width=2.5),
+                fill='tozeroy', fillcolor='rgba(14, 165, 233, 0.08)'
+            ))
+            
+            # เส้นที่ 2: OU (Over vs Under)
+            fig2.add_trace(go.Scatter(
+                y=trend_ou, mode='lines', name='เทรนด์สกอร์รวม (สูง/ต่ำ)',
+                line=dict(color='#d946ef', width=2.5),
+                fill='tozeroy', fillcolor='rgba(217, 70, 239, 0.08)'
+            ))
+            
+            fig2.update_layout(
+                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                font_color='#e6f2ea', yaxis_title="Trend Index (Units)", xaxis_title="จำนวนบิล (Match)", 
+                margin=dict(t=10, b=20, l=20, r=20),
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1,
+                    bgcolor='rgba(0,0,0,0.5)'
+                ),
+                hovermode="x unified"  # เพิ่ม Tooltip ให้แสดงเทียบกันสองเส้นเมื่อเอาเมาส์ชี้
+            )
             st.plotly_chart(fig2, use_container_width=True)
             
     else:
