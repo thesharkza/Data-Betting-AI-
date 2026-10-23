@@ -1121,25 +1121,17 @@ def render_dashboard(ai):
 
     df_hist = ai.get("df_history", pd.DataFrame())
     
-    if len(df_hist) > 0:
+    # เช็คว่ามีข้อมูล Target_HDP (ที่ AI ประมวลผลสถานะ ได้/เสีย จากสกอร์ให้แล้ว)
+    if len(df_hist) > 0 and 'Target_HDP' in df_hist.columns:
         # 1. โดนัทชาร์ตสรุปผลประกอบการจริง (W/L/D Breakdown)
-        hdp_counts = df_hist['ผล HDP'].value_counts()
-        ou_counts = df_hist['ผลสูง/ต่ำ'].value_counts()
-        
+        # แมปค่า 0-4 ที่ AI คำนวณกลับมาเป็นป้ายกำกับ
+        label_map = {0: "เสียเต็ม", 1: "เสียครึ่ง", 2: "คืนทุน", 3: "ได้ครึ่ง", 4: "ได้เต็ม"}
         results = {"ได้เต็ม": 0, "ได้ครึ่ง": 0, "คืนทุน": 0, "เสียครึ่ง": 0, "เสียเต็ม": 0}
-        for label, count in hdp_counts.items():
-            if "ได้เต็ม" in str(label): results["ได้เต็ม"] += count
-            elif "ได้ครึ่ง" in str(label): results["ได้ครึ่ง"] += count
-            elif "คืนทุน" in str(label): results["คืนทุน"] += count
-            elif "เสียครึ่ง" in str(label): results["เสียครึ่ง"] += count
-            elif "เสียเต็ม" in str(label): results["เสียเต็ม"] += count
-            
-        for label, count in ou_counts.items():
-            if "ได้เต็ม" in str(label): results["ได้เต็ม"] += count
-            elif "ได้ครึ่ง" in str(label): results["ได้ครึ่ง"] += count
-            elif "คืนทุน" in str(label): results["คืนทุน"] += count
-            elif "เสียครึ่ง" in str(label): results["เสียครึ่ง"] += count
-            elif "เสียเต็ม" in str(label): results["เสียเต็ม"] += count
+        
+        for t in df_hist['Target_HDP'].dropna():
+            if t in label_map: results[label_map[t]] += 1
+        for t in df_hist['Target_OU'].dropna():
+            if t in label_map: results[label_map[t]] += 1
 
         col1, col2 = st.columns(2)
         with col1:
@@ -1155,18 +1147,15 @@ def render_dashboard(ai):
         with col2:
             # 2. Cumulative Profit Curve
             st.markdown("**กราฟจำลองกำไรสะสม (Cumulative Profit Curve)**")
-            def _calc_unit(label):
-                if "ได้เต็ม" in str(label): return 1.0
-                if "ได้ครึ่ง" in str(label): return 0.5
-                if "เสียครึ่ง" in str(label): return -0.5
-                if "เสียเต็ม" in str(label): return -1.0
-                return 0.0
-                
+            
+            # คำนวณกำไรตามสเกล 0-4 (0=เสีย1ยูนิต, 4=ได้1ยูนิต)
+            unit_map = {0: -1.0, 1: -0.5, 2: 0.0, 3: 0.5, 4: 1.0}
             profits = []
-            for i, row in df_hist.iterrows():
+            
+            for _, row in df_hist.iterrows():
                 p = 0
-                if pd.notna(row.get('ผล HDP')): p += _calc_unit(row['ผล HDP'])
-                if pd.notna(row.get('ผลสูง/ต่ำ')): p += _calc_unit(row['ผลสูง/ต่ำ'])
+                if pd.notna(row.get('Target_HDP')): p += unit_map.get(row['Target_HDP'], 0)
+                if pd.notna(row.get('Target_OU')): p += unit_map.get(row['Target_OU'], 0)
                 profits.append(p)
                 
             cumulative_profit = np.cumsum(profits)
