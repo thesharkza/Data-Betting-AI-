@@ -1183,20 +1183,18 @@ def render_dashboard(ai):
     st.success("✅ **ระบบ V5.0 Ultimate Hybrid ทำงานสมบูรณ์แบบ:**")
     st.markdown("""
     - **Ensemble Voting:** ใช้ HistGradientBoosting 3 โมเดลช่วยกันโหวตกรองความผิดพลาด (Soft Voting)
-    - **Risk Management & Ranking:** กรองบิลที่โอกาสชนะ < 55% ทิ้ง 100% พร้อมจัดระดับ ⭐⭐⭐ VIP (สำหรับบิลที่โอกาส > 60% ขึ้นไปและได้ค่าน้ำ 0.90+)
+    - **Risk Management & Ranking:** กรองบิลที่โอกาสชนะ < 55% ทิ้ง 100% พร้อมจัดระดับ ⭐⭐⭐ VIP
     - **Confidence Indicators:** แจ้งเตือนสัญญาณเสี่ยงสวิงด้วยแท็ก `⚠️(ข้อมูลน้อย)` และ `⚠️(คาบเส้น)` อัตโนมัติ
-    - **System Guardrails:** ตรวจจับและบล็อก 'ราคาล่อแมงเม่า' ทั้งราคาต่อ ปป./ครึ่งลูกที่เสี่ยงหลอก และราคาโกลสูง/ต่ำที่เกิน 3.25 อัตโนมัติ
+    - **System Guardrails:** ตรวจจับและบล็อก 'ราคาล่อแมงเม่า' ช่วยเซฟทุนจากบิลหลอก
     """)
 
     st.markdown("---")
-    st.markdown("<h3 style='color: #4ade80;'>📊 ข้อมูลเชิงลึกสำหรับการลงทุน (Investment Insights)</h3>", unsafe_allow_html=True)
+    st.markdown("<h3 style='color: #4ade80;'>📊 ข้อมูลเชิงลึก & เทรนด์ตลาด (Market Insights)</h3>", unsafe_allow_html=True)
 
     df_hist = ai.get("df_history", pd.DataFrame())
     
-    # เช็คว่ามีข้อมูล Target_HDP (ที่ AI ประมวลผลสถานะ ได้/เสีย จากสกอร์ให้แล้ว)
     if len(df_hist) > 0 and 'Target_HDP' in df_hist.columns:
-        # 1. โดนัทชาร์ตสรุปผลประกอบการจริง (W/L/D Breakdown)
-        # แมปค่า 0-4 ที่ AI คำนวณกลับมาเป็นป้ายกำกับ
+        # 1. โดนัทชาร์ต
         label_map = {0: "เสียเต็ม", 1: "เสียครึ่ง", 2: "คืนทุน", 3: "ได้ครึ่ง", 4: "ได้เต็ม"}
         results = {"ได้เต็ม": 0, "ได้ครึ่ง": 0, "คืนทุน": 0, "เสียครึ่ง": 0, "เสียเต็ม": 0}
         
@@ -1207,7 +1205,7 @@ def render_dashboard(ai):
 
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown("**สัดส่วนผลประกอบการจริง (HDP & O/U)**")
+            st.markdown("**สัดส่วนการจบสกอร์รวมทั้งหมด**")
             labels = list(results.keys())
             values = list(results.values())
             colors = ['#22c55e', '#86efac', '#7f9a8b', '#d9a441', '#e5484d']
@@ -1217,32 +1215,31 @@ def render_dashboard(ai):
             st.plotly_chart(fig1, use_container_width=True)
 
         with col2:
-            # 2. Cumulative Profit Curve
-            st.markdown("**กราฟจำลองกำไรสะสม (Cumulative Profit Curve)**")
+            # 2. กราฟ Market Trend (เจ้าบ้านทำเงิน vs ทีมเยือนทำเงิน)
+            st.markdown("**กราฟเทรนด์ตลาด: เจ้าบ้าน vs ทีมเยือน**")
+            st.caption("📈 ชี้ขึ้น = ตลาดช่วงนี้บอลต่อ/เจ้าบ้านทำเงิน | 📉 ปักลง = ตลาดช่วงนี้บอลรอง/ทีมเยือนทำเงิน")
             
-            # คำนวณกำไรตามสเกล 0-4 (0=เสีย1ยูนิต, 4=ได้1ยูนิต)
             unit_map = {0: -1.0, 1: -0.5, 2: 0.0, 3: 0.5, 4: 1.0}
-            profits = []
+            home_profits = []
             
             for _, row in df_hist.iterrows():
                 p = 0
                 if pd.notna(row.get('Target_HDP')): p += unit_map.get(row['Target_HDP'], 0)
-                if pd.notna(row.get('Target_OU')): p += unit_map.get(row['Target_OU'], 0)
-                profits.append(p)
+                home_profits.append(p)
                 
-            cumulative_profit = np.cumsum(profits)
+            market_trend = np.cumsum(home_profits)
             
             fig2 = go.Figure()
-            fig2.add_trace(go.Scatter(y=cumulative_profit, mode='lines', fill='tozeroy', 
-                                      line=dict(color='#22c55e', width=3), 
-                                      fillcolor='rgba(34, 197, 94, 0.2)'))
+            fig2.add_trace(go.Scatter(y=market_trend, mode='lines', fill='tozeroy', 
+                                      line=dict(color='#0ea5e9', width=3), 
+                                      fillcolor='rgba(14, 165, 233, 0.2)'))
             fig2.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                               font_color='#e6f2ea', yaxis_title="Units", xaxis_title="จำนวนบิล (Match)", 
+                               font_color='#e6f2ea', yaxis_title="Trend Index", xaxis_title="จำนวนบิล (Match)", 
                                margin=dict(t=20, b=20, l=20, r=20))
             st.plotly_chart(fig2, use_container_width=True)
             
     else:
-        st.info("ยังไม่มีข้อมูลสถิติที่บันทึกผลสกอร์เพียงพอสำหรับสร้างกราฟ (กราฟจะปรากฏเมื่อมีการกรอกผลสกอร์)")
+        st.info("ยังไม่มีข้อมูลสถิติที่บันทึกผลสกอร์เพียงพอสำหรับสร้างกราฟ")
 
 # ----------------------------------------
 # หัวข้อหลัก (Tabs)
