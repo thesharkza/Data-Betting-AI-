@@ -864,18 +864,29 @@ def _ml_verdict(market, side, prob_val, ev, stress_ev, line, valid, report, kell
     if not np.isfinite(water_decimal):
         return "⚠️ ข้าม (ค่าน้ำฝั่งที่เลือกอ่านไม่ได้/อยู่นอกช่วงแปลงค่า)"
 
-    # 🛡️ DYNAMIC GUARDRAILS
+    # 🛡️ DYNAMIC GUARDRAILS (อัปเดตใหม่ตาม Data Insights 2165 แถว + กฎเดิม)
     if market == "HDP":
+        # 1. กฎใหม่: บล็อกเรตราคาล่อแมงเม่า: ต่อเจ้าบ้าน 0.5 และ 0.75 
+        if side == 0 and line in [-0.5, -0.75]:
+            if prob_val < 62.0:  
+                return "⚠️ ข้าม (ราคาต่อ 0.5/0.75 เจ้าบ้านมีความเสี่ยงสูง)"
+                
         true_home_prob = features_data.get("True_Home_Prob", np.nan) if features_data is not None else np.nan
         if np.isfinite(true_home_prob):
             if true_home_prob < 0.45 and line <= -0.5 and side == 0:
                 return "⚠️ ข้าม (ราคาต่อล่อแมงเม่า สวนทางสถิติ 1X2)"
             if true_home_prob > 0.60 and line >= 0.0 and side == 0:
                 return "⚠️ ข้าม (ราคาผิดปกติ เจ้าบ้านฟอร์มโหดแต่โต๊ะไม่กล้าให้ต่อ)"
+                
     elif market == "OU":
+        # 2. กฎใหม่: บล็อกการแทงต่ำ (Under) เมื่อค่าน้ำกดจ่ายน้อยกว่า 2.0 (น้ำดำ/ล่อให้แทง)
+        if side == 1 and water_decimal < 2.0:
+            return "⚠️ ข้าม (โต๊ะกดค่าน้ำต่ำเพื่อล่อ สถิติมักโดนยิงท้ายเกม)"
+            
         if line >= 3.25:
             if side == 0: return "⚠️ ข้าม (เรตสูงผิดปกติ สถิติมักออกต่ำ)"
             if water_decimal < 1.85: return "⚠️ ข้าม (ออกต่ำจริง แต่ค่าน้ำเอาเปรียบเกินไป)"
+            
         poisson_over = features_data.get("Poisson_Over_Prob", np.nan) if features_data is not None else np.nan
         if np.isfinite(poisson_over):
             if side == 0 and poisson_over < 0.35: return "⚠️ ข้าม (สถิติ Poisson ชี้ว่าโอกาสสูงน้อยเกินไป)"
