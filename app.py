@@ -279,10 +279,8 @@ def guess_format(nums):
 
 def clean_raw_data(raw_text):
     text = raw_text.strip()
-    text = re.sub(r'^
-```(?:json)?\s*', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'\s*
-```$', '', text).strip()
+    text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\s*```$', '', text).strip()
     
     match_array = re.search(r'\[(.*)\]', text, re.DOTALL)
     match_obj = re.search(r'\{.*\}', text, re.DOTALL)
@@ -485,10 +483,8 @@ def extract_form_stats(img_bytes, model):
             resp = model.generate_content([{"mime_type": "image/jpeg", "data": buf.getvalue()}, prompt], safety_settings=safety_settings)
             raw_text = resp.text.strip()
             
-            raw_text = re.sub(r'^
-```(?:json)?\s*', '', raw_text, flags=re.IGNORECASE)
-            raw_text = re.sub(r'\s*
-```$', '', raw_text).strip()
+            raw_text = re.sub(r'^```(?:json)?\s*', '', raw_text, flags=re.IGNORECASE)
+            raw_text = re.sub(r'\s*```$', '', raw_text).strip()
             
             match_array = re.search(r'\[(.*)\]', raw_text, re.DOTALL)
             if match_array:
