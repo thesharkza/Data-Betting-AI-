@@ -713,11 +713,36 @@ def _ml_log_loss(y, probabilities):
     return float(-np.log(np.clip(probabilities[np.arange(len(y)), y], 1e-12, 1)).mean())
 
 def _ml_metrics(y, probabilities):
-    predicted = probabilities.argmax(axis=1)
     actual = np.eye(5)[y]
+    
+    # 1. คำนวณความมั่นใจของแต่ละฝั่ง (เลียนแบบระบบ Guardrail)
+    decisive = probabilities[:, [0, 1, 3, 4]].sum(axis=1)
+    home_share = np.where(decisive > 1e-9, probabilities[:, 3:].sum(axis=1) / np.maximum(decisive, 1e-9), 0.5)
+    away_share = 1.0 - home_share
+    
+    # 2. คัดกรองเอาเฉพาะคู่ที่มี "สัญญาณ" (ความมั่นใจ >= 55% ตามเกณฑ์ลงทุน)
+    # คู่ที่ความมั่นใจต่ำกว่านี้ จะถูกเก็บไว้เทรนหลังบ้าน แต่ไม่นำมาโชว์ใน KPI
+    signal_mask = (home_share >= 0.55) | (away_share >= 0.55)
+    
+    # 3. คำนวณแบบทายถูกฝั่ง (Directional Win Rate)
+    pred_dir = np.where(home_share > 0.5, 1, -1) # ฝั่งที่ AI เลือก
+    actual_dir = np.where(y >= 3, 1, np.where(y <= 1, -1, 0)) # ผลสกอร์จริง (1=ได้, -1=เสีย, 0=เจ๊า)
+    
+    # นับเฉพาะบิลที่: มีสัญญาณให้แทง และ เตะจบแล้วมีแพ้ชนะ (ไม่นับคู่เจ๊า)
+    valid_mask = signal_mask & (actual_dir != 0)
+    
+    if valid_mask.sum() > 0:
+        win_rate = float((pred_dir[valid_mask] == actual_dir[valid_mask]).mean())
+    else:
+        win_rate = 0.0 # กรณีไม่มีคู่ไหนผ่านเกณฑ์เลย
+        
+    predicted = probabilities.argmax(axis=1)
     return {
-        "n": len(y), "correct": int((predicted == y).sum()), "accuracy": float((predicted == y).mean()),
-        "log_loss": _ml_log_loss(y, probabilities), "brier": float(np.square(probabilities - actual).sum(axis=1).mean()),
+        "n": len(y), 
+        "correct": int((predicted == y).sum()), 
+        "accuracy": win_rate * 100,  # ส่งออกเป็นเปอร์เซ็นต์ (คูณ 100)
+        "log_loss": _ml_log_loss(y, probabilities), 
+        "brier": float(np.square(probabilities - actual).sum(axis=1).mean()),
     }
 
 # ==========================================
@@ -1016,8 +1041,8 @@ def compute_ai(df_in):
         
     return {
         "status": "ok", "df_predict": pending, "df_history": history, "total_train": len(history),
-        "hdp_acc": round(reports["HDP"]["test"]["accuracy"] * 100, 1),
-        "ou_acc": round(reports["OU"]["test"]["accuracy"] * 100, 1),
+        "hdp_acc": round(reports["HDP"]["test"]["accuracy"], 1),
+        "ou_acc": round(reports["OU"]["test"]["accuracy"], 1),
     }
 
 def load_dashboard_data(_workbook, version=0):
