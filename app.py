@@ -217,7 +217,7 @@ label[data-testid="stWidgetLabel"] p { color: #a7c4b5; font-size: 0.85rem; font-
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
-""", unsafe_allow_html=True)
+""")
 
 # ----------------------------------------
 # การตั้งค่า API และ Google Sheets
@@ -1213,10 +1213,14 @@ def _kpi_html(hdp_acc, ou_acc, total_train):
             f"<div class='kpi-value'>{total_train}<span class='kpi-unit'>คู่</span></div></div></div>")
 
 def render_dashboard(ai):
+    if ai["status"] != "ok":
+        st.warning("⚠️ ยังไม่มีข้อมูลสรุปสำหรับ Dashboard (หรือโหลดไม่สำเร็จ)")
+        return
+        
     stamp = datetime.now(timezone(timedelta(hours=7))).strftime("%H:%M:%S")
     st.markdown(f"<div class='mon-status'><span class='led'></span><b>DASHBOARD</b>"
-                f"<span>เรียนรู้จาก<em>{ai['total_train']}</em>คู่</span><span>อัปเดตล่าสุด<em>{stamp}</em></span></div>", unsafe_allow_html=True)
-    st.markdown(_kpi_html(ai["hdp_acc"], ai["ou_acc"], ai["total_train"]), unsafe_allow_html=True)
+                f"<span>เรียนรู้จาก<em>{ai.get('total_train', 0)}</em>คู่</span><span>อัปเดตล่าสุด<em>{stamp}</em></span></div>", unsafe_allow_html=True)
+    st.markdown(_kpi_html(ai.get("hdp_acc", 0), ai.get("ou_acc", 0), ai.get("total_train", 0)), unsafe_allow_html=True)
     
     st.success("✅ **ระบบ V5.0 Ultimate Hybrid ทำงานสมบูรณ์แบบ:**")
     st.markdown("""
