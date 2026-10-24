@@ -893,8 +893,16 @@ def _ml_fit_market(df, X, market):
     valid = df["_ML_Valid_" + market] & df["Target_" + market].notna()
     indices = np.flatnonzero(valid.to_numpy())
     data = df.iloc[indices]
-    if len(data) < ML_CONFIG["min_rows"]: raise ValueError(f"ML {market}: ต้องมีข้อมูลอย่างน้อย {ML_CONFIG['min_rows']} แถว")
+    if len(data) < ML_CONFIG["min_rows"]: 
+        raise ValueError(f"ML {market}: ต้องมีข้อมูลอย่างน้อย {ML_CONFIG['min_rows']} แถว")
+        
     y = data["Target_" + market].to_numpy(dtype=int)
+    
+    # 🌟 NEW: สร้างระบบ Recency Weight (ปรับตัวตามสถานการณ์ปัจจุบัน)
+    # ข้อมูลแถวแรกๆ (เก่าสุด) จะถูกลดความสำคัญลงเหลือน้ำหนัก 0.5
+    # ข้อมูลแถวท้ายๆ (ใหม่ล่าสุด) จะถูกเพิ่มความสำคัญเป็น 2.5 เท่า
+    dynamic_weights = np.linspace(0.5, 2.5, len(data))
+    
     split = _ml_split(data["_ML_Group"].to_numpy())
     train, calibration, validation, test = [split[key] for key in ("train", "calibration", "validation", "test")]
     X_all = X.iloc[indices]
@@ -909,7 +917,16 @@ def _ml_fit_market(df, X, market):
         m3 = HistGradientBoostingClassifier(max_iter=80, max_leaf_nodes=15, learning_rate=0.05, l2_regularization=10.0, random_state=44)
         
         estimator = VotingClassifier(estimators=[('m1', m1), ('m2', m2), ('m3', m3)], voting='soft')
-        estimator.fit(X_all.iloc[train], y[train])
+        
+        # 🌟 NEW: ป้อนน้ำหนักสถานการณ์ปัจจุบันเข้าไปให้ AI เรียนรู้
+        try:
+            estimator.fit(X_all.iloc[train], y[train], sample_weight=dynamic_weights[train])
+        except TypeError:
+            # Fallback เผื่อเวอร์ชั่นของ Scikit-Learn ในเซิร์ฟเวอร์เก่าเกินไป
+            fit_params = {'m1__sample_weight': dynamic_weights[train], 
+                          'm2__sample_weight': dynamic_weights[train], 
+                          'm3__sample_weight': dynamic_weights[train]}
+            estimator.fit(X_all.iloc[train], y[train], **fit_params)
         
         raw_cal = _ml_raw_probabilities(estimator, X_all.iloc[calibration])
         temperatures = (0.8, 1.0, 1.25, 1.5, 2.0)
