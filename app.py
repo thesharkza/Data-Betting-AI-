@@ -1,4 +1,4 @@
-"""ระบบวิเคราะห์ราคาฟุตบอล 5.1.2 ภาษาไทย — แท็บแรกแบบเดิม และแก้การบันทึกสกอร์
+"""ระบบวิเคราะห์ราคาฟุตบอล 5.1.3 ภาษาไทย — แท็บแรกแบบเดิม และแก้การบันทึกสกอร์
 
 Run: python -m streamlit run app.py (Python 3.11+)
 Single-file app; existing DATA, secrets and model versions are retained.
@@ -10,6 +10,9 @@ Keep .football_ai_runtime persistent, especially when a write is unresolved.
 from __future__ import annotations
 
 import hashlib
+import sys
+from importlib.metadata import PackageNotFoundError, version as package_version
+from functools import lru_cache
 import hmac
 import io
 import json
@@ -150,12 +153,120 @@ def digest(value: Any) -> str:
                                     sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
+DIAGNOSTIC_STAGES = {
+    'operation': 'ดำเนินการทั่วไป',
+    'quote_validate': 'ตรวจราคาและฟอร์ม',
+    'quote_save': 'บันทึกราคาและฟอร์ม',
+    'quote_feedback': 'อัปเดตหน้าจอหลังบันทึกราคา',
+    'score_save': 'บันทึกสกอร์',
+    'score_feedback': 'อัปเดตหน้าจอหลังบันทึกสกอร์',
+    'sheet_open': 'เปิดแท็บ DATA',
+    'sheet_layout': 'ตรวจหัวคอลัมน์',
+    'sheet_read': 'อ่านข้อมูลก่อนบันทึก',
+    'sheet_metadata': 'เตรียมคอลัมน์รหัสและเวลา',
+    'journal_begin': 'เก็บประวัติคำสั่งก่อนส่ง',
+    'google_write': 'ส่งคำสั่งไป Google Sheets',
+    'sheet_verify': 'อ่านกลับเพื่อยืนยันผล',
+}
+
+
+@lru_cache(maxsize=1)
+def diagnostic_environment() -> dict:
+    """Version numbers only. Never read credentials or environment values."""
+    result = {'python': sys.version.split()[0]}
+    for name in ('streamlit', 'gspread', 'pandas', 'numpy', 'google-genai'):
+        try:
+            result[name] = package_version(name)
+        except PackageNotFoundError:
+            result[name] = 'not_installed'
+    try:
+        result['app_sha256'] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    except OSError:
+        result['app_sha256'] = 'unavailable'
+    return result
+
+
+def with_stage(stage: str, fn: Callable, *args: Any, **kwargs: Any) -> Any:
+    """Annotate the innermost known phase without changing exception type."""
+    try:
+        return fn(*args, **kwargs)
+    except Exception as exc:
+        if stage in DIAGNOSTIC_STAGES and not getattr(exc, '_ai_stage', None):
+            try:
+                exc._ai_stage = stage
+            except (AttributeError, TypeError):
+                pass
+        raise
+
+
+def incident_report(exc: Exception, stage: str = 'operation', write_state: str = 'unknown') -> dict:
+    """Allowlisted diagnostics: no message, local values, URLs, keys, or absolute paths."""
+    stage = getattr(exc, '_ai_stage', stage)
+    stage = stage if isinstance(stage, str) and stage in DIAGNOSTIC_STAGES else 'operation'
+    chain, seen, current = [], set(), exc
+    app_path = str(Path(__file__).resolve())
+    while current is not None and id(current) not in seen and len(chain) < 4:
+        seen.add(id(current))
+        frames = [{'file': 'app.py', 'line': f.lineno, 'function': f.name}
+                  for f in traceback.extract_tb(current.__traceback__)
+                  if str(Path(f.filename).resolve()) == app_path]
+        error_type = type(current).__name__
+        if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,100}', error_type):
+            error_type = 'Exception'
+        entry = {'type': error_type, 'frames': frames}
+        inner_stage = getattr(current, '_ai_stage', None)
+        if isinstance(inner_stage, str) and inner_stage in DIAGNOSTIC_STAGES:
+            entry['stage'] = inner_stage
+        code = status_code(current)
+        if code is not None and 100 <= code <= 599:
+            entry['http_status'] = code
+        # Show a missing INTERNAL field only, never an arbitrary KeyError value.
+        known = set(META_KEYS) | set(META_HEADERS) | set(FIELD_KEYS) | set(RAW_FIELDS) | {
+            'record_id', 'operation_id', 'hash', 'row', 'rows', 'data', 'id', 'owner',
+            'status', '_row', '_sheet_id', '_fingerprint', '_key', 'valueRanges', 'values'}
+        if isinstance(current, KeyError) and current.args and isinstance(current.args[0], str) and current.args[0] in known:
+            entry['missing_internal_field'] = current.args[0]
+        chain.append(entry)
+        current = current.__cause__ or (None if current.__suppress_context__ else current.__context__)
+    report = {'incident': uuid.uuid4().hex[:10], 'occurred_at_utc': utcnow(),
+              'ui_version': UI_VERSION, 'stage': stage, 'stage_th': DIAGNOSTIC_STAGES[stage],
+              'write_state': write_state if write_state in ('not_sent', 'rejected', 'uncertain', 'committed', 'unknown') else 'unknown',
+              'errors': chain, 'versions': dict(diagnostic_environment())}
+    LOGGER.error('diagnostic=%s', json.dumps(report, ensure_ascii=False, separators=(',', ':')))
+    return report
+
+
+def incident_message(report: dict) -> str:
+    return f"{error_category_th(report['errors'][0]['type'])} (รหัสอ้างอิง {report['incident']})"
+
+
 def public_error(exc: Exception) -> str:
-    """Do not put raw SDK URLs, keys, or remote response bodies in the UI/log."""
-    incident = uuid.uuid4().hex[:10]
-    location = ' > '.join(f'{Path(f.filename).name}:{f.lineno}:{f.name}' for f in traceback.extract_tb(exc.__traceback__))
-    LOGGER.error('incident=%s error_type=%s location=%s', incident, type(exc).__name__, location)
-    return f'{error_category_th(type(exc).__name__)} (รหัสอ้างอิง {incident})'
+    return incident_message(incident_report(exc))
+
+
+def show_save_error(exc: Exception, stage: str, write_state: str = 'unknown') -> None:
+    report = incident_report(exc, stage, write_state)
+    st.session_state['_last_save_diagnostic'] = report
+    if write_state == 'committed':
+        st.warning('ข้อมูลบันทึกและตรวจยืนยันแล้ว แต่อัปเดตหน้าจอไม่สำเร็จ กรุณารีเฟรช ไม่ต้องบันทึกซ้ำ')
+    else:
+        message = str(exc) if isinstance(exc, (DataError, UncertainWrite)) else incident_message(report)
+        st.error(message)
+    st.caption('ขั้นตอนที่พบปัญหา: ' + report['stage_th'])
+    with st.expander('รายละเอียดข้อผิดพลาดสำหรับส่งตรว', expanded=False):
+        st.caption('คัดลอกข้อความด้านล่างได้ ไม่รวมกุญแจ API รหัสผ่าน หรือข้อมูลรายการ')
+        getattr(st, 'code', st.text)(json.dumps(report, ensure_ascii=False, indent=2))
+
+
+def render_last_save_diagnostic() -> None:
+    report = st.session_state.get('_last_save_diagnostic')
+    if not report:
+        return
+    with st.expander('รายละเอียดข้อผิดพลาดครั้งล่าสุด', expanded=False):
+        payload = json.dumps(report, ensure_ascii=False, indent=2)
+        getattr(st, 'code', st.text)(payload)
+        st.download_button('ดาวน์โหลดรายละเอียดเพื่อส่งตรว', payload.encode('utf-8'),
+                           file_name='diagnostic_'+report['incident']+'.json', mime='application/json', key='save_diagnostic_download')
 
 
 class DataError(ValueError):
@@ -335,7 +446,7 @@ FMT_CHOICES = {'มาเลเซีย': 'MY', 'ฮ่องกง': 'HK',
 # -------------------- ภาษาไทยเฉพาะส่วนแสดงผล --------------------
 # ไม่เปลี่ยนชื่อคอลัมน์ รหัสสถานะ รุ่นการคำนวณ หรือข้อมูลที่บันทึกไว้
 UI_LANGUAGE = 'th'
-UI_VERSION = '5.1.2-TH'
+UI_VERSION = '5.1.3-TH'
 MARKET_LABELS_TH = {'HDP': 'แฮนดิแคป', 'OU': 'สูง/ต่ำ'}
 STATE_LABELS_TH = ('เสียเต็ม', 'เสียครึ่ง', 'คืนทุน', 'ได้ครึ่ง', 'ได้เต็ม')
 FORMAT_LABELS_TH = {'MY': 'มาเลเซีย', 'HK': 'ฮ่องกง', 'ID': 'อินโดนีเซีย',
@@ -436,7 +547,11 @@ def model_label(value: str) -> str:
 
 
 def error_category_th(name: str) -> str:
-    return {'PermissionError': 'ไม่มีสิทธิ์เข้าถึงข้อมูลหรือไฟล์',
+    return {'KeyError': 'ไม่พบช่องข้อมูลที่โค้ดต้องใช้ กรุณาเปิดรายละเอียดเพื่อตรวจช่องที่ขาด',
+            'AttributeError': 'โค้ดเรียกใช้คุณสมบัติที่ไม่พบ กรุณาส่งรายละเอียดและรุ่นไลบรารี',
+            'StreamlitAPIException': 'พบปัญหาการแสดงผลหรือสถานะหน้าจอ',
+            'SSLError': 'การเชื่อมต่อแบบเข้ารหัสมีปัญหา กรุณาตรวจเครือข่ายและใบรับรอง',
+            'PermissionError': 'ไม่มีสิทธิ์เข้าถึงข้อมูลหรือไฟล์',
             'FileNotFoundError': 'ไม่พบไฟล์ที่ต้องใช้งาน',
             'ModuleNotFoundError': 'ยังติดตั้งไลบรารีที่จำเป็นไม่ครบ',
             'ImportError': 'ไม่สามารถโหลดไลบรารีที่จำเป็นได้',
@@ -467,7 +582,7 @@ def reason_th(value: Any) -> str:
         if name in MODEL_LABELS_TH:
             return model_label(name) + ': ' + error_category_th(detail)
     # ข้อความที่เป็นภาษาไทยอยู่แล้วส่งต่อได้ แต่รหัสที่ไม่รู้จักไม่แสดงเป็นข้อสรุปใหม่
-    if re.search(r'[\u0e00-\u0e7f]', code):
+    if re.search(r'[฀-๿]', code):
         return code
     return 'พบสถานะเพิ่มเติมที่ยังไม่มีคำอธิบาย กรุณาให้ผู้ดูแลตรวจไฟล์ประวัติ'
 
@@ -1250,6 +1365,15 @@ class Journal:
         finally:
             con.close()
 
+    def operation(self, op_id: str, scope: str) -> dict | None:
+        con = self.connect()
+        try:
+            row = con.execute('SELECT state, result FROM operations WHERE id=? AND scope=?',
+                              (op_id, scope)).fetchone()
+            return dict(row) if row is not None else None
+        finally:
+            con.close()
+
     def unresolved(self, scope: str) -> list[dict]:
         con = self.connect()
         try:
@@ -1422,8 +1546,8 @@ class SheetStore:
 
     def read(self) -> pd.DataFrame:
         with self.lock:
-            ws = self.worksheet()
-            layout = self._layout(ws)
+            ws = with_stage('sheet_open', self.worksheet)
+            layout = with_stage('sheet_layout', self._layout, ws)
             ranges = [f'A1:M{ws.row_count}', f'X1:AC{ws.row_count}']
             start = layout['meta_start']
             if start is not None:
@@ -1477,7 +1601,7 @@ class SheetStore:
             pending = self.journal.unresolved(self.scope)
             if not pending:
                 return []
-            fresh = self.read()
+            fresh = with_stage('sheet_read', self.read)
             results = []
             for op in pending:
                 payload = json.loads(op['payload'])
@@ -1505,7 +1629,7 @@ class SheetStore:
             if time.time() - op['created'] < 300:
                 raise DataError('ต้องผ่านไปอย่างน้อย 5 นาทีนับจากคำสั่งเดิม และตรวจแท็บ DATA ก่อนปลดรายการที่ค้าง')
             payload = json.loads(op['payload'])
-            fresh = self.read()
+            fresh = with_stage('sheet_read', self.read)
             if self._matches_expected(payload['expected'], fresh):
                 self.journal.finish(op_id, 'committed', payload['result'])
                 return
@@ -1523,7 +1647,7 @@ class SheetStore:
 
     def _send(self, op_id: str, requests: list, expected: list[dict], result: dict, kind: str) -> dict:
         payload = {'kind': kind, 'expected': expected, 'result': result}
-        existing = self.journal.begin(op_id, self.scope, payload)
+        existing = with_stage('journal_begin', self.journal.begin, op_id, self.scope, payload)
         if existing:
             if existing['state'] == 'committed':
                 return json.loads(existing['result'])
@@ -1531,7 +1655,7 @@ class SheetStore:
         send_error = None
         try:
             # Exactly one send: a timeout does not prove that a write failed.
-            self.workbook.batch_update({'requests': requests})
+            with_stage('google_write', self.workbook.batch_update, {'requests': requests})
         except Exception as exc:
             send_error = exc
             code = status_code(exc)
@@ -1550,7 +1674,7 @@ class SheetStore:
         # write was rejected. Keep that case uncertain until reconciliation.
         self.journal.finish(op_id, 'uncertain')
         try:
-            if self._matches_expected(expected, self.read()):
+            if self._matches_expected(expected, with_stage('sheet_verify', self.read)):
                 self.journal.finish(op_id, 'committed', result)
                 return result
         except Exception as exc:
@@ -1567,9 +1691,9 @@ class SheetStore:
                 self.reconcile()
                 if self.journal.unresolved(self.scope):
                     raise UncertainWrite('มีรายการบันทึกก่อนหน้าที่ยังไม่ทราบผล กรุณาตรวจยืนยันก่อนบันทึกรายการใหม่')
-            ws = self.worksheet()
-            layout = self._layout(ws)
-            fresh = self.read()
+            ws = with_stage('sheet_open', self.worksheet)
+            layout = with_stage('sheet_layout', self._layout, ws)
+            fresh = with_stage('sheet_read', self.read)
             incoming = dict(zip(RAW_HEADERS[:12], normalized))
             incoming.update(zip(FORM5_HEADERS, forms))
             fp = raw_fingerprint(incoming)
@@ -1596,7 +1720,7 @@ class SheetStore:
                         if not blank(r[SCORE]):
                             raise DataError('การแข่งขันนี้มีผลสกอร์แล้ว ไม่สามารถเพิ่มราคาใหม่โดยระบุว่าเป็นข้อมูลก่อนแข่งได้')
             target = max([1] + fresh['_row'].astype(int).tolist()) + 1
-            start, requests = self._metadata_requests(ws, layout, allow_extend)
+            start, requests = with_stage('sheet_metadata', self._metadata_requests, ws, layout, allow_extend)
             if target > ws.row_count:
                 requests.append({'appendDimension': {'sheetId': ws.id, 'dimension': 'ROWS', 'length': target-ws.row_count}})
             # Existing formula ranges N:W and AD:... are never touched.
@@ -1628,9 +1752,9 @@ class SheetStore:
                 self.reconcile()
                 if self.journal.unresolved(self.scope):
                     raise UncertainWrite('กรุณาตรวจยืนยันผลการบันทึกที่ค้างก่อนบันทึกสกอร์')
-            ws = self.worksheet()
-            layout = self._layout(ws)
-            fresh = self.read()
+            ws = with_stage('sheet_open', self.worksheet)
+            layout = with_stage('sheet_layout', self._layout, ws)
+            fresh = with_stage('sheet_read', self.read)
             if reference.get('_sheet_id') not in (None, ws.id):
                 raise DataError('รายการนี้มาจากคนละแท็บ กรุณารีเฟรชจาก DATA ก่อนบันทึก')
             rid = text(reference.get('RecordID'))
@@ -1660,7 +1784,7 @@ class SheetStore:
             if layout['meta_start'] is not None:
                 start, requests = layout['meta_start'], []
             elif allow_extend:
-                start, requests = self._metadata_requests(ws, layout, allow_extend)
+                start, requests = with_stage('sheet_metadata', self._metadata_requests, ws, layout, allow_extend)
             else:
                 start, requests = None, []
             expected = []
@@ -2202,7 +2326,7 @@ def render_jobs(runtime: Runtime, owner: str, polling: bool = False, ai: dict | 
         status = STATUS_LABELS_TH.get(j['status'], 'กำลังตรวจสอบสถานะ')
         name = 'รายการกรอกด้วยตนเอง' if j['name'] in ('Manual quote', 'รายการกรอกราคาด้วยตนเอง') else j['name']
         message = text(j['message'])
-        if message and not re.search(r'[\u0e00-\u0e7f]', message):
+        if message and not re.search(r'[฀-๿]', message):
             message = 'กรุณาตรวจสถานะของรายการนี้อีกครั้ง'
         body = (f"<div class='job-card'><div class='job-head'><span class='job-name'>{esc(name)}</span>"
                 f"<span class='job-pill'>{esc(status)}</span></div><div class='job-msg'>{esc(message or status)}</div></div>")
@@ -2224,6 +2348,53 @@ def render_jobs(runtime: Runtime, owner: str, polling: bool = False, ai: dict | 
                     if (rid and text(r.get('RecordID')) == rid) or (not rid and r.get('_row') == j['result']['row']):
                         render_card(n, rec)
                         break
+
+
+def saved_operation(store: SheetStore | None, op_id: str) -> tuple[str, dict | None]:
+    if store is None:
+        return 'not_sent', None
+    try:
+        op = store.journal.operation(op_id, store.scope)
+        if op is None:
+            return 'not_sent', None
+        if op['state'] == 'committed':
+            return 'committed', json.loads(op['result']) if op['result'] else None
+        if op['state'] in ('pending', 'uncertain'):
+            return 'uncertain', None
+        if op['state'] in ('rejected', 'operator_aborted'):
+            return 'rejected', None
+        return 'unknown', None
+    except (sqlite3.Error, OSError, ValueError, KeyError, TypeError, AttributeError):
+        # An unreadable journal is not evidence that a write failed.
+        return 'unknown', None
+
+
+def quote_save_problem(runtime: Runtime, store: SheetStore | None, job: dict,
+                       exc: Exception, transitioned: bool, stage: str,
+                       committed_result: dict | None = None) -> None:
+    jid = job['id']
+    if committed_result is not None:
+        state, result = 'committed', committed_result
+    elif not transitioned:
+        state, result = 'not_sent', None
+    elif text(job.get('operation_id')):
+        state, result = saved_operation(store, text(job['operation_id']))
+    else:
+        state, result = 'unknown', None
+    if state == 'committed' and result is not None:
+        runtime.jobs.update(jid, status='done', result=result,
+                            message='บันทึกและยืนยันแล้ว กรุณารีเฟรชหน้าจอ', raw=None, preview=None)
+        st.session_state.pop('editing_job', None)
+        st.session_state['_quote_feedback'] = 'บันทึกลง DATA แล้ว แถว ' + str(result.get('row', '-'))
+    elif transitioned and (isinstance(exc, UncertainWrite) or state in ('uncertain', 'unknown')):
+        runtime.jobs.update(jid, status='error',
+                            message='ยังยืนยันผลการบันทึกไม่ได้ ให้ตรวจ DATA และกดตรวจยืนยันรายการบันทึกที่ค้าง ห้ามกดซ้ำ', raw=None, preview=None)
+    elif transitioned:
+        updates = {'status': 'ready'}
+        if state == 'rejected':
+            updates['operation_id'] = uuid.uuid4().hex
+        runtime.jobs.update(jid, **updates)
+    show_save_error(exc, stage, state)
 
 
 def render_editor(runtime: Runtime, store: SheetStore | None, owner: str, api_key: str,
@@ -2298,6 +2469,8 @@ def render_editor(runtime: Runtime, store: SheetStore | None, owner: str, api_ke
     if not submit:
         return
     transitioned = False
+    committed_result = None
+    stage = 'quote_validate'
     try:
         if not can_write or store is None:
             raise DataError('ยังบันทึกไม่ได้ กรุณาตรวจการเชื่อมต่อและโหมดอ่านอย่างเดียว')
@@ -2323,19 +2496,17 @@ def render_editor(runtime: Runtime, store: SheetStore | None, owner: str, api_ke
             raise DataError('รายการนี้ไม่ได้อยู่ในสถานะรอตรวจแล้ว อาจกำลังบันทึกอยู่ กรุณาตรวจสถานะงาน')
         if store is None:
             raise DataError('ต้องเชื่อมต่อ Google Sheets ก่อนบันทึกข้อมูล')
-        result = store.save_quote(row, form, meta, job['operation_id'], allow_extend)
+        stage = 'quote_save'
+        result = with_stage(stage, store.save_quote, row, form, meta, job['operation_id'], allow_extend)
+        committed_result = result
+        stage = 'quote_feedback'
         runtime.jobs.update(jid, status='done', result=result, message='บันทึกสำเร็จและตรวจข้อมูลที่อ่านกลับแล้ว', raw=None, preview=None)
         runtime.jobs.changed()
+        load_dashboard_data.clear()
         st.session_state.pop('editing_job', None)
         st.success('บันทึกลงแท็บ DATA เดิมเรียบร้อยแล้ว')
-    except UncertainWrite as exc:
-        runtime.jobs.update(jid, status='error', message=str(exc), raw=None, preview=None)
-        st.error(str(exc))
-        return
     except Exception as exc:
-        if transitioned:
-            runtime.jobs.update(jid, status='ready', operation_id=uuid.uuid4().hex)
-        st.error(str(exc) if isinstance(exc, DataError) else public_error(exc))
+        quote_save_problem(runtime, store, job, exc, transitioned, stage, committed_result)
         return
     st.rerun()
 
@@ -2439,6 +2610,8 @@ def render_form5_editor(runtime: Runtime, store: SheetStore | None, owner: str, 
     if not submit:
         return
     transitioned = False
+    committed_result = None
+    stage = 'quote_validate'
     try:
         if not can_write or store is None:
             raise DataError('ยังบันทึกไม่ได้ กรุณาตรวจการเชื่อมต่อและโหมดอ่านอย่างเดียว')
@@ -2462,19 +2635,17 @@ def render_form5_editor(runtime: Runtime, store: SheetStore | None, owner: str, 
             raise DataError('รายการนี้ไม่ได้อยู่ในสถานะรอตรวจแล้ว อาจกำลังบันทึกอยู่ กรุณาตรวจสถานะงาน')
         if store is None:
             raise DataError('ต้องเชื่อมต่อ Google Sheets ก่อนบันทึกข้อมูล')
-        result = store.save_quote(row, form, meta, job['operation_id'], allow_extend)
+        stage = 'quote_save'
+        result = with_stage(stage, store.save_quote, row, form, meta, job['operation_id'], allow_extend)
+        committed_result = result
+        stage = 'quote_feedback'
         runtime.jobs.update(jid, status='done', result=result, message='บันทึกสำเร็จและตรวจข้อมูลที่อ่านกลับแล้ว', raw=None, preview=None)
         runtime.jobs.changed()
+        load_dashboard_data.clear()
         st.session_state.pop('editing_job', None)
         st.success('บันทึกลงแท็บ DATA เดิมเรียบร้อยแล้ว')
-    except UncertainWrite as exc:
-        runtime.jobs.update(jid, status='error', message=str(exc), raw=None, preview=None)
-        st.error(str(exc))
-        return
     except Exception as exc:
-        if transitioned:
-            runtime.jobs.update(jid, status='ready', operation_id=uuid.uuid4().hex)
-        st.error(str(exc) if isinstance(exc, DataError) else public_error(exc))
+        quote_save_problem(runtime, store, job, exc, transitioned, stage, committed_result)
         return
     st.rerun()
 
@@ -2483,6 +2654,9 @@ def render_upload_tab(runtime: Runtime, store: SheetStore | None, owner: str,
                       api_key: str, model_name: str, allow_extend: bool,
                       can_write: bool, ai: dict) -> None:
     """Original flow: select photos -> read automatically -> form-five -> save."""
+    saved_message = st.session_state.pop('_quote_feedback', None)
+    if saved_message:
+        st.success(saved_message)
     st.info('ถ่ายภาพตารางราคาให้เห็น 1 คู่ชัดเจน ระบบจะอ่านภาพอัตโนมัติ แล้วกดกรอกฟอร์ม 5 นัดเพื่อตรวจและบันทึก')
     for notice in st.session_state.pop('_upload_notices', []):
         st.warning(notice)
@@ -2569,17 +2743,25 @@ def render_predictions(ai: dict, runtime: Runtime, store: SheetStore | None, all
             confirmed = st.checkbox('ยืนยันว่าการแข่งขันจบแล้วและผลสกอร์ถูกต้อง', key='ft_'+key)
             submit = st.form_submit_button(thai_action('score'), disabled=not can_write)
         if submit:
+            committed_result = None
+            operation_id = uuid.uuid4().hex
+            stage = 'score_save'
             try:
                 if not can_write or store is None:
                     raise DataError('ยังบันทึกไม่ได้ กรุณาตรวจการเชื่อมต่อและโหมดอ่านอย่างเดียว')
                 if not confirmed:
                     raise DataError('กรุณายืนยันว่าการแข่งขันจบแล้วก่อนบันทึกสกอร์')
-                result = store.save_score(row, score, uuid.uuid4().hex, allow_extend)
+                result = with_stage(stage, store.save_score, row, score, operation_id, allow_extend)
+                committed_result = result
+                stage = 'score_feedback'
                 load_dashboard_data.clear()
                 runtime.jobs.changed()
                 st.session_state['_score_feedback'] = ('บันทึกสกอร์ในแท็บ DATA ที่แถว '+', '.join(map(str,result['rows'])))
             except Exception as exc:
-                st.error(str(exc) if isinstance(exc,(DataError,UncertainWrite)) else public_error(exc))
+                state, saved = ('committed', committed_result) if committed_result is not None else saved_operation(store, operation_id)
+                if state == 'committed' and saved:
+                    st.session_state['_score_feedback'] = 'บันทึกสกอร์แล้ว แถว ' + ', '.join(map(str, saved.get('rows', [])))
+                show_save_error(exc, stage, state)
                 continue
             st.rerun()
 
@@ -2781,6 +2963,7 @@ def main() -> None:
     ai=compute_ai(df,X,models,runtime,scope)
     with st.sidebar:
         render_quick_help_th()
+        render_last_save_diagnostic()
     tabs=st.tabs(['📸 อัปโหลดราคาบอล',
                   '📡 สัญญาณการทำนาย', '📊 สรุปผลและคุณภาพข้อมูล'])
     with tabs[0]:
