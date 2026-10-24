@@ -132,8 +132,8 @@ p, label, span { color: inherit; }
 .ch-info { flex: 1; min-width: 0; }
 .ch-val { font-family: 'JetBrains Mono', monospace; font-size: 1.8rem; font-weight: 700; line-height: 1; color: var(--c); text-shadow: 0 0 18px color-mix(in srgb, var(--c) 55%, transparent); }
 .ch-val small { font-size: .9rem; color: #7f9a8b; margin-left: 2px; }
-.ch-d { font-size: .78rem; color: #7f9a8b; margin: 6px 0 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ch-v { display: inline-block; padding: 4px 11px; border-radius: 8px; font-size: .82rem; font-weight: 500; color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.ch-d { font-size: .78rem; color: #7f9a8b; margin: 6px 0 9px; line-height: 1.3; }
+.ch-v { display: block; padding: 6px 12px; border-radius: 8px; font-size: .82rem; font-weight: 500; color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); line-height: 1.4; word-wrap: break-word; margin-top: 4px; }
 
 /* 📱 Responsive Mobile Layout Fix */
 @media (max-width: 768px) {
