@@ -511,7 +511,7 @@ def render_jobs(polling=False):
         body = title + f"<div class='job-msg'>{esc(j['msg'])}</div>"
         if j.get("note"): body += f"<div class='job-note'>{esc(str(j['note']))}</div>"
         if j.get("warn"): body += f"<div class='job-note' style='color:#e8bb62'>{esc(str(j['warn']))}</div>"
-        if j["status"] in ("queued", "reading", "saving"): body += "<div class='job-bar'><i></i></div>"
+        if j["status"] in ("queued", "reading", "saving"): body += "<div class='job-bar'><div class='j-bar'></div></div>"
         st.markdown(f"<div class='job-card {cls}'>{head}{body}</div>", unsafe_allow_html=True)
         if j["status"] == "done" and res: _render_job_signal(res)
         if j["status"] == "ready":
