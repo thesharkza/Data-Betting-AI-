@@ -696,454 +696,737 @@ def render_form5_editor():
             st.rerun()
 
 # ----------------------------------------
-# AI : Machine Learning V5.0 (Ultimate Hybrid)
-# ----------------------------------------
-ML_PATCH_VERSION = "V5.0-Ultimate-Hybrid"
+# AI : V5.2-AI-ONLY (UI / OCR / sheet writes are not modified)
+# -----------------------------------------------------------------------------
+# This block is the complete prediction engine. It intentionally does not write
+# to Sheets, change widgets, invent missing odds, or train on legacy formulas.
+import copy as _ml_copy
+import hashlib as _ml_hashlib
+
+ML_PATCH_VERSION = "V5.2-AI-ONLY"
 ML_CONFIG = {
-    "seed": 42, "min_rows": 100, 
-    "min_ev": 0.02,                   # เกณฑ์ EV ขั้นต่ำ 2%
-    "probability_stress": 0.03,       # เผื่อความคลาดเคลื่อนทางสถิติ 3%
+    "seed": 42,
+    "min_rows": 100,
+    "min_groups": 20,
+    "min_partition": 10,
+    "min_validation": 50,
+    "min_calibration": 30,
+    "min_form_training_rows": 60,
     "min_line_examples": 15,
+    "min_probability": 55.0,
+    "min_ev": 0.02,
+    "probability_stress": 0.03,
+    "baseline_smoothing": 1.0,
+    "baseline_mix": 0.10,
+    "min_validation_gain": 0.005,
+    "max_brier_degradation": 0.005,
+    "max_top_label_ece": 0.15,
+    "temperatures": (0.75, 1.0, 1.25, 1.5, 2.0, 3.0),
+    "max_iter": 120,
+    "threads": 2,
+    "fractional_kelly": 0.25,
+    "max_theoretical_fraction": 0.01,
 }
+# Thresholds above are engineering defaults, NOT statistically proven guarantees.
+# No chronology is invented: this legacy schema supports grouped research only.
 ML_STATES = ("FL", "HL", "PUSH", "HW", "FW")
 ML_STATE_LABELS = ("เสียเต็ม", "เสียครึ่ง", "คืนทุน", "ได้ครึ่ง", "ได้เต็ม")
-
 ML_ODDS_COLUMNS = ["1X2 เหย้า", "1X2 เสมอ", "1X2 เยือน", "แฮนดิแคป (เหย้า)", "ค่าน้ำ HDP (เหย้า)", "แฮนดิแคป (เยือน)", "ค่าน้ำ HDP (เยือน)", "โกลสูง/ต่ำ", "ค่าน้ำ (สูง)", "ค่าน้ำ (ต่ำ)"]
+_ML_HOME = "ทีมเหย้า"
+_ML_AWAY = "ทีมเยือน"
+_ML_SCORE = "ผลสกอร์"
+_ML_PROB_COLS = {
+    "HDP": "AI_โอกาสเหย้าชนะHDP(%)",
+    "OU": "AI_โอกาสออกสูง(%)",
+}
+_ML_VERDICT_COLS = {
+    "HDP": "AI_ฟันธง_HDP",
+    "OU": "AI_ฟันธง_สูงต่ำ",
+}
+
 
 def _ml_number(value):
-    if isinstance(value, (bool, np.bool_)) or value is None: return np.nan
+    if isinstance(value, (bool, np.bool_)) or value is None:
+        return np.nan
     try:
-        number = float(str(value).strip().replace("\u2212", "-"))
-        return number if np.isfinite(number) else np.nan
-    except (TypeError, ValueError): return np.nan
+        result = float(str(value).strip().replace("−", "-"))
+        return result if np.isfinite(result) else np.nan
+    except (TypeError, ValueError, OverflowError):
+        return np.nan
+
+
+def _ml_blank(value):
+    if value is None:
+        return True
+    return str(value).strip().lower() in ("", "nan", "none", "null", "<na>", "nat")
+
 
 def _ml_win_rate(value):
     text = str(value).strip()
     percent = text.endswith("%")
     number = _ml_number(text[:-1] if percent else value)
-    if not np.isfinite(number) or number < 0: return np.nan
-    if percent or number > 1: number /= 100.0
+    if not np.isfinite(number) or number < 0:
+        return np.nan
+    if percent or number > 1:
+        number /= 100.0
     return number if 0 <= number <= 1 else np.nan
 
-def _ml_malay_decimal(value):
-    v = _ml_number(value)
-    if not np.isfinite(v) or v == 0: return np.nan
-    if v > 1.0: return v  # Decimal ยุโรป/ฮ่องกง
-    if v < -1.0: return 1.0 + (1.0 / abs(v)) # อินโดนีเซีย
-    return 1.0 + (v if v > 0 else 1.0 / abs(v)) # มาเลย์
 
-def _ml_blank(value):
-    return str(value).strip().lower() in ("", "nan", "none", "null", "<na>")
+def _ml_goal_count(value):
+    number = _ml_number(value)
+    return number if np.isfinite(number) and 0 <= number <= 500 and float(number).is_integer() else np.nan
+
+
+def _ml_malay_decimal(value):
+    """DATA's four water columns are Malay, converted by the frozen uploader.
+
+    Out-of-range inputs are rejected, not guessed to be HK/Decimal/Indonesian.
+    """
+    value = _ml_number(value)
+    if not np.isfinite(value) or value == 0 or abs(value) > 1:
+        return np.nan
+    return 1.0 + (value if value > 0 else 1.0 / abs(value))
+
 
 def _ml_score(value):
-    text = str(value).strip().replace("\u2212", "-").replace("\u2013", "-")
-    match = re.fullmatch(r"(\d{1,2})\s*[-:]\s*(\d{1,2})", text)
+    # Reject datetime, Excel serial numbers and booleans before string conversion.
+    if not isinstance(value, str):
+        return None
+    text = value.strip().replace("−", "-").replace("–", "-")
+    match = re.fullmatch(r"([0-9]{1,2})\s*[-:]\s*([0-9]{1,2})", text)
     return tuple(map(int, match.groups())) if match else None
 
+
 def _ml_valid_line(value, market):
+    if market not in ("HDP", "OU"):
+        return False
     value = _ml_number(value)
-    return bool(np.isfinite(value) and abs(value) <= 100 and abs(value * 4 - round(value * 4)) < 1e-7 and (market == "HDP" or value > 0))
+    return bool(np.isfinite(value) and abs(value) <= 100
+                and abs(value * 4 - round(value * 4)) < 1e-7
+                and (market == "HDP" or value > 0))
+
 
 def _ml_settlement(score, line, market):
-    if score is None or not _ml_valid_line(line, market): return np.nan
+    if score is None or not _ml_valid_line(line, market):
+        return np.nan
+    if (not isinstance(score, (tuple, list)) or len(score) != 2
+            or any(isinstance(v, (bool, np.bool_)) or not isinstance(v, (int, np.integer))
+                   or v < 0 for v in score)):
+        return np.nan
     line = float(line)
     parts = (np.floor(line * 2) / 2, np.ceil(line * 2) / 2)
-    if market == "HDP": differences = [score[0] - score[1] + part for part in parts]
-    else: differences = [sum(score) - part for part in parts]
+    differences = ([score[0] - score[1] + p for p in parts] if market == "HDP"
+                   else [sum(score) - p for p in parts])
     return int(round(float(np.mean(np.sign(differences))) * 2)) + 2
 
+
 def _ml_allowed(line, market):
-    if not _ml_valid_line(line, market): return np.ones(5, dtype=bool)
+    if not _ml_valid_line(line, market):
+        raise ValueError("ไลน์ไม่ถูกต้อง")
     family = int(round(float(line) * 4)) % 4
     allowed = np.array([True, False, False, False, True])
-    if family == 0: allowed[2] = True
+    if family == 0:
+        allowed[2] = True
     elif family in (1, 3):
         half_win = (family == 1) if market == "HDP" else (family == 3)
         allowed[3 if half_win else 1] = True
-    if market == "OU" and np.isclose(float(line), 0.25): allowed[0] = False
+    if market == "OU" and np.isclose(float(line), 0.25):
+        allowed[0] = False
     return allowed
+
 
 def _ml_probability(raw, lines, market, temperature=1.0):
     raw = np.asarray(raw, dtype=float)
-    if len(raw) == 0: return np.empty((0, 5), dtype=float)
+    lines = np.asarray(lines, dtype=float)
+    if len(raw) == 0:
+        return np.empty((0, 5), dtype=float)
+    if (raw.shape != (len(lines), 5) or not np.isfinite(raw).all()
+            or (raw < 0).any() or (raw.sum(axis=1) <= 0).any()
+            or not np.isfinite(temperature) or temperature <= 0):
+        raise ValueError("ความน่าจะเป็นไม่ถูกต้อง")
     masks = np.vstack([_ml_allowed(line, market) for line in lines])
     logits = np.log(np.clip(raw, 1e-12, 1.0)) / float(temperature)
     logits[~masks] = -np.inf
     logits -= logits.max(axis=1, keepdims=True)
-    probabilities = np.exp(logits)
-    return probabilities / probabilities.sum(axis=1, keepdims=True)
+    result = np.exp(logits)
+    return result / result.sum(axis=1, keepdims=True)
 
-def _ml_raw_probabilities(model, X):
-    probabilities = np.full((len(X), 5), 1e-12, dtype=float)
+
+def _ml_raw_probabilities(estimator, X):
+    raw = np.full((len(X), 5), 1e-12, dtype=float)
     if len(X):
-        probabilities[:, np.asarray(model.classes_, dtype=int)] = model.predict_proba(X)
-    return probabilities
+        classes = np.asarray(estimator.classes_, dtype=int)
+        if len(set(classes)) != len(classes) or (classes < 0).any() or (classes > 4).any():
+            raise ValueError("Invalid model class mapping")
+        raw[:, classes] = estimator.predict_proba(X)
+    return raw
+
 
 def _ml_log_loss(y, probabilities):
-    return float(-np.log(np.clip(probabilities[np.arange(len(y)), y], 1e-12, 1)).mean())
+    y = np.asarray(y, dtype=int)
+    return float(-np.log(np.clip(probabilities[np.arange(len(y)), y], 1e-12, 1)).mean()) if len(y) else np.nan
 
-def _ml_metrics(y, probabilities):
-    actual = np.eye(5)[y]
-    
-    # 1. คำนวณความมั่นใจของแต่ละฝั่ง (เลียนแบบระบบ Guardrail)
-    decisive = probabilities[:, [0, 1, 3, 4]].sum(axis=1)
-    home_share = np.where(decisive > 1e-9, probabilities[:, 3:].sum(axis=1) / np.maximum(decisive, 1e-9), 0.5)
-    away_share = 1.0 - home_share
-    
-    # 2. คัดกรองเอาเฉพาะคู่ที่มี "สัญญาณ" (ความมั่นใจ >= 55% ตามเกณฑ์ลงทุน)
-    # คู่ที่ความมั่นใจต่ำกว่านี้ จะถูกเก็บไว้เทรนหลังบ้าน แต่ไม่นำมาโชว์ใน KPI
-    signal_mask = (home_share >= 0.55) | (away_share >= 0.55)
-    
-    # 3. คำนวณแบบทายถูกฝั่ง (Directional Win Rate)
-    pred_dir = np.where(home_share > 0.5, 1, -1) # ฝั่งที่ AI เลือก
-    actual_dir = np.where(y >= 3, 1, np.where(y <= 1, -1, 0)) # ผลสกอร์จริง (1=ได้, -1=เสีย, 0=เจ๊า)
-    
-    # นับเฉพาะบิลที่: มีสัญญาณให้แทง และ เตะจบแล้วมีแพ้ชนะ (ไม่นับคู่เจ๊า)
-    valid_mask = signal_mask & (actual_dir != 0)
-    
-    if valid_mask.sum() > 0:
-        win_rate = float((pred_dir[valid_mask] == actual_dir[valid_mask]).mean())
-    else:
-        win_rate = 0.0 # กรณีไม่มีคู่ไหนผ่านเกณฑ์เลย
-        
-    predicted = probabilities.argmax(axis=1)
-    return {
-        "n": len(y), 
-        "correct": int((predicted == y).sum()), 
-        "accuracy": win_rate * 100,  # ส่งออกเป็นเปอร์เซ็นต์ (คูณ 100)
-        "log_loss": _ml_log_loss(y, probabilities), 
-        "brier": float(np.square(probabilities - actual).sum(axis=1).mean()),
-    }
-
-# ==========================================
-# 🛠️ ฟังก์ชันส่วนที่หายไป (ใส่กลับให้ครบแล้วครับ)
-# ==========================================
-def _ml_returns(decimal):
-    decimal = float(decimal)
-    return np.array([-1.0, -0.5, 0.0, (decimal - 1) / 2, decimal - 1])
-
-def _ml_expected_value(probabilities, decimal, reverse=False):
-    if not np.isfinite(decimal) or decimal <= 1: return np.nan
-    p = np.asarray(probabilities, dtype=float)
-    return float((p[::-1] if reverse else p) @ _ml_returns(decimal))
 
 def _ml_home_share(probabilities):
-    """P(เหย้า/สูงชนะ | ไม่คืนทุน) = (HW+FW)/(FL+HL+HW+FW) ฝั่งตรงข้ามคือ 1 - ค่านี้"""
+    """Legacy display contract: P(home/over positive | not a push)."""
     p = np.asarray(probabilities, dtype=float)
     decisive = p[:, [0, 1, 3, 4]].sum(axis=1)
-    return np.where(decisive > 1e-9, p[:, 3:].sum(axis=1) / np.maximum(decisive, 1e-9), 0.5)
-# ==========================================
+    result = np.full(len(p), np.nan)
+    np.divide(p[:, 3:].sum(axis=1), decisive, out=result, where=decisive > 1e-12)
+    return result
 
-def _ml_label_state(value, market):
-    text = str(value).strip()
-    if market == "HDP":
-        labels = {"เจ้าบ้านเสียเต็ม": 0, "เจ้าบ้านเสียครึ่ง": 1, "คืนทุน": 2, "เจ้าบ้านได้ครึ่ง": 3, "เจ้าบ้านได้เต็ม": 4}
-    else:
-        labels = {"ต่ำได้เต็ม": 0, "ต่ำได้ครึ่ง": 1, "คืนทุน": 2, "สูงได้ครึ่ง": 3, "สูงได้เต็ม": 4}
-    return labels.get(text, np.nan)
+
+def _ml_metrics(y, probabilities):
+    """Keep the legacy >=55% directional KPI; add explicit denominators.
+
+    Policy results are computed separately by _ml_policy_metrics. Never relabel
+    this filtered directional KPI as the win rate of recommended selections.
+    """
+    y, p = np.asarray(y, dtype=int), np.asarray(probabilities, dtype=float)
+    if not len(y):
+        return {"n": 0, "correct": 0, "accuracy": np.nan, "log_loss": np.nan,
+                "brier": np.nan, "ece": np.nan, "directional_n": 0,
+                "directional_correct": 0, "class_accuracy": np.nan}
+    share = _ml_home_share(p)
+    sign = np.where(share > 0.5, 1, -1)
+    outcome = np.sign(y - 2)
+    use = np.isfinite(share) & ((share >= 0.55) | (share <= 0.45)) & (outcome != 0)
+    n = int(use.sum())
+    correct = int((sign[use] == outcome[use]).sum())
+    predicted = p.argmax(axis=1)
+    confidence = p.max(axis=1)
+    top_correct = predicted == y
+    ece = 0.0
+    edges = np.linspace(0.0, 1.0, 11)
+    for low, high in zip(edges[:-1], edges[1:]):
+        selected = (confidence >= low) & ((confidence < high) if high < .999 else (confidence <= 1))
+        if selected.any():
+            ece += float(selected.mean()) * abs(float(top_correct[selected].mean()) - float(confidence[selected].mean()))
+    return {"n": len(y), "correct": int(top_correct.sum()),
+            "accuracy": correct / n * 100 if n else np.nan,
+            "class_accuracy": float(top_correct.mean() * 100),
+            "directional_n": n, "directional_correct": correct,
+            "directional_coverage": n / len(y), "push_n": int((y == 2).sum()),
+            "log_loss": _ml_log_loss(y, p),
+            "brier": float(np.square(p - np.eye(5)[y]).sum(axis=1).mean()),
+            "ece": float(ece)}
+
+
+def _ml_returns(decimal):
+    value = _ml_number(decimal)
+    if not np.isfinite(value) or value <= 1:
+        return np.full(5, np.nan)
+    return np.array([-1., -.5, 0., (value - 1) / 2, value - 1])
+
+
+def _ml_expected_value(probabilities, decimal, reverse=False):
+    p = np.asarray(probabilities, dtype=float)
+    r = _ml_returns(decimal)
+    if (p.shape != (5,) or not np.isfinite(p).all() or (p < 0).any()
+            or not np.isclose(p.sum(), 1) or not np.isfinite(r).all()):
+        return np.nan
+    return float((p[::-1] if reverse else p) @ r)
+
+
+def _ml_kelly_fraction(probabilities, decimal, side, config=None):
+    """Bounded fractional expected-log optimum, not the old mean/variance proxy.
+
+    Kept for diagnostics only. Research verdicts never recommend a bankroll size.
+    """
+    cfg = ML_CONFIG if config is None else config
+    p = np.asarray(probabilities, dtype=float)
+    returns = _ml_returns(decimal)
+    if side == 1:
+        returns = returns[::-1]
+    if (p.shape != (5,) or not np.isfinite(p).all() or (p < 0).any()
+            or not np.isclose(p.sum(), 1) or not np.isfinite(returns).all()
+            or np.dot(p, returns) <= 0):
+        return 0.0
+    lo, hi = 0.0, 1.0 - 1e-9
+    for _ in range(60):
+        middle = (lo + hi) / 2
+        derivative = float(np.dot(p, returns / (1 + middle * returns)))
+        if derivative > 0:
+            lo = middle
+        else:
+            hi = middle
+    return float(min((lo + hi) / 2 * cfg["fractional_kelly"], cfg["max_theoretical_fraction"]))
+
+
+def _ml_stress_ev(p, decimal, reverse=False, amount=None):
+    """Worst expected return in a total-variation ball, moving mass high to low.
+
+    A sensitivity test using a user-set radius, NOT a confidence interval.
+    """
+    p = np.asarray(p, dtype=float)
+    if p.shape != (5,) or not np.isfinite(p).all() or not np.isfinite(_ml_number(decimal)) or decimal <= 1:
+        return np.nan
+    if (p < 0).any() or not np.isclose(p.sum(), 1):
+        return np.nan
+    q = (p[::-1] if reverse else p).copy()
+    feasible = np.flatnonzero(q > 0)
+    worst = int(feasible[0])
+    remaining = float(ML_CONFIG["probability_stress"] if amount is None else amount)
+    if not 0 <= remaining <= 1:
+        raise ValueError("Invalid stress radius")
+    for high in range(4, worst, -1):
+        move = min(remaining, q[high], 1.0 - q[worst])
+        q[high] -= move
+        q[worst] += move
+        remaining -= move
+        if remaining <= 1e-12:
+            break
+    return float(q @ _ml_returns(decimal))
+
+
+def _ml_choices(probabilities, first_prices, second_prices, config=None):
+    cfg = ML_CONFIG if config is None else config
+    p = np.asarray(probabilities, dtype=float)
+    first_prices, second_prices = np.asarray(first_prices, float), np.asarray(second_prices, float)
+    if p.shape != (len(first_prices), 5) or len(second_prices) != len(first_prices):
+        raise ValueError("Probability and price row counts do not match")
+    first = np.array([_ml_expected_value(x, v) for x, v in zip(p, first_prices)])
+    second = np.array([_ml_expected_value(x, v, True) for x, v in zip(p, second_prices)])
+    side = np.where(np.nan_to_num(first, nan=-np.inf) >= np.nan_to_num(second, nan=-np.inf), 0, 1)
+    price = np.where(side == 0, first_prices, second_prices)
+    ev = np.where(side == 0, first, second)
+    stressed = np.array([_ml_stress_ev(x, v, bool(s), cfg["probability_stress"]) for x, v, s in zip(p, price, side)])
+    candidate = np.isfinite(ev) & (ev >= cfg["min_ev"]) & (stressed > 0)
+    kelly = np.array([_ml_kelly_fraction(x, v, int(s), cfg) for x, v, s in zip(p, price, side)])
+    return {"side": side, "ev": ev, "stress_ev": stressed, "price": price,
+            "candidate": candidate, "kelly": kelly}
+
 
 def _ml_prepare(df_in):
+    """Derive labels from checked scores only. Raw source columns remain intact.
+
+    Keeping the raw source values and _Snapshot is essential: Tab2's unchanged
+    optimistic-write checks must compare the actual sheet snapshot, not model
+    preprocessing (e.g. a fraction converted from a displayed percentage).
+    """
+    if not isinstance(df_in, pd.DataFrame):
+        raise ValueError("DATA must be a DataFrame")
     df = df_in.copy(deep=True).reset_index(drop=True)
     df.columns = [str(c).strip() for c in df.columns]
-    for column in ML_ODDS_COLUMNS: df[column] = df[column].map(_ml_number) if column in df else np.nan
-    for column in FORM5_HEADERS:
-        if column not in df: df[column] = np.nan
-        elif "WinRate" in column: df[column] = df[column].map(_ml_win_rate)
-        else: df[column] = df[column].map(_ml_number)
-    for column in ("ผลสกอร์", "ผล HDP", "ผลสูง/ต่ำ"):
-        if column not in df: df[column] = ""
-    
-    groups = [json.dumps([re.sub(r"\s+", " ", str(h).strip().casefold()), re.sub(r"\s+", " ", str(a).strip().casefold())], ensure_ascii=False) for h, a in zip(df["ทีมเหย้า"], df["ทีมเยือน"])]
-    df["_ML_Group"] = groups
-    
+    if df.columns.duplicated().any():
+        raise ValueError("หัวคอลัมน์ DATA ซ้ำกัน")
+    for col in (_ML_HOME, _ML_AWAY, _ML_SCORE):
+        if col not in df:
+            df[col] = ""
+    for col in ML_ODDS_COLUMNS + FORM5_HEADERS:
+        if col not in df:
+            df[col] = np.nan
+    # Retain invalid named rows for data-quality reporting; drop truly empty rows.
+    keep = ~(df[_ML_HOME].map(_ml_blank) & df[_ML_AWAY].map(_ml_blank))
+    df = df.loc[keep].reset_index(drop=True)
+    num = df[ML_ODDS_COLUMNS].apply(lambda column: column.map(_ml_number))
     X = pd.DataFrame(index=df.index)
-    odds = df[["1X2 เหย้า", "1X2 เสมอ", "1X2 เยือน"]].where(lambda values: values > 1)
-    inverse = 1.0 / odds
-    inverse_total = inverse.sum(axis=1, min_count=3)
-    
-    # 🌟 1. Mathematical Features
-    X["True_Home_Prob"] = inverse["1X2 เหย้า"] / inverse_total
-    X["True_Draw_Prob"] = inverse["1X2 เสมอ"] / inverse_total
-    X["True_Away_Prob"] = inverse["1X2 เยือน"] / inverse_total
-    X["Bookie_Margin"] = inverse_total - 1.0
-    X["1X2_Variance"] = X[["True_Home_Prob", "True_Draw_Prob", "True_Away_Prob"]].var(axis=1)
-
-    for name, source in (("HDP_Home_Decimal", "ค่าน้ำ HDP (เหย้า)"), ("HDP_Away_Decimal", "ค่าน้ำ HDP (เยือน)"), ("Over_Decimal", "ค่าน้ำ (สูง)"), ("Under_Decimal", "ค่าน้ำ (ต่ำ)")):
-        X[name] = df[source].map(_ml_malay_decimal)
-
-    # 🌟 2. Data Imputation: กู้คืนค่าน้ำที่ OCR อาจอ่านพลาด โดยใช้ Bookie Margin มาตรฐาน (1.05)
-    for c1, c2 in [("HDP_Home_Decimal", "HDP_Away_Decimal"), ("Over_Decimal", "Under_Decimal")]:
-        missing_c2 = X[c2].isna() & X[c1].notna()
-        if missing_c2.any(): X.loc[missing_c2, c2] = 1.0 / (1.05 - (1.0 / X.loc[missing_c2, c1]))
-        missing_c1 = X[c1].isna() & X[c2].notna()
-        if missing_c1.any(): X.loc[missing_c1, c1] = 1.0 / (1.05 - (1.0 / X.loc[missing_c1, c2]))
-
+    odds = num[ML_ODDS_COLUMNS[:3]].where(lambda values: values > 1)
+    inv = 1.0 / odds
+    total = inv.sum(axis=1, min_count=3)
+    for label, col in zip(("Home", "Draw", "Away"), ML_ODDS_COLUMNS[:3]):
+        X[f"Market_{label}_Prob"] = inv[col] / total
+    X["Bookie_Margin"] = total - 1.0
+    X["Has_1X2"] = odds.notna().all(axis=1).astype(float)
+    X["1X2_Variance"] = X[["Market_Home_Prob", "Market_Draw_Prob", "Market_Away_Prob"]].var(axis=1)
+    for feature, offset in (("HDP_Home_Decimal", 4), ("HDP_Away_Decimal", 6),
+                            ("Over_Decimal", 8), ("Under_Decimal", 9)):
+        X[feature] = df[ML_ODDS_COLUMNS[offset]].map(_ml_malay_decimal)
     X["Water_HDP_Diff"] = X["HDP_Home_Decimal"] - X["HDP_Away_Decimal"]
     X["Water_OU_Diff"] = X["Over_Decimal"] - X["Under_Decimal"]
-
-    for market, column in (("HDP", "แฮนดิแคป (เหย้า)"), ("OU", "โกลสูง/ต่ำ")):
-        X[market + "_Line"] = df[column].where(df[column].map(lambda v: _ml_valid_line(v, market)))
+    for market, offset in (("HDP", 3), ("OU", 7)):
+        line = num[ML_ODDS_COLUMNS[offset]]
+        X[market + "_Line"] = line.where(line.map(lambda v: _ml_valid_line(v, market)))
         X[market + "_Family"] = np.round(X[market + "_Line"] * 4) % 4
-        
-    X["HDP_vs_TrueProb_Diff"] = X["True_Home_Prob"] - (0.5 - X["HDP_Line"] * 0.1)
-
-    for column in FORM5_HEADERS: X[column] = df[column]
-
-    # 🌟 3. Poisson Distribution & Dynamic Expected Goals
-    avg_h_gf, avg_h_ga = X["H_GoalsFor_Last5"] / 5.0, X["H_GoalsAgainst_Last5"] / 5.0
-    avg_a_gf, avg_a_ga = X["A_GoalsFor_Last5"] / 5.0, X["A_GoalsAgainst_Last5"] / 5.0
-    
-    X["Expected_Total_Goals"] = (avg_h_gf + avg_a_ga) / 2.0 + (avg_a_gf + avg_h_ga) / 2.0
-    X["Form_Home_Goal_Avg"] = avg_h_gf
-    X["Form_Away_Goal_Avg"] = avg_a_gf
+    for col in FORM5_HEADERS:
+        X[col] = df[col].map(_ml_win_rate if "WinRate" in col else _ml_goal_count)
+    X["Form_Present_Count"] = X[FORM5_HEADERS].notna().sum(axis=1).astype(float)
+    X["Form_Complete"] = X[FORM5_HEADERS].notna().all(axis=1).astype(float)
+    for col in FORM5_HEADERS:
+        X[col + "_Missing"] = X[col].isna().astype(float)
+    h_for, h_against = X[FORM5_HEADERS[1]] / 5.0, X[FORM5_HEADERS[2]] / 5.0
+    a_for, a_against = X[FORM5_HEADERS[4]] / 5.0, X[FORM5_HEADERS[5]] / 5.0
+    X["Form_Home_Goal_Avg"] = h_for
+    X["Form_Away_Goal_Avg"] = a_for
+    X["Form_WinRate_Difference"] = X[FORM5_HEADERS[0]] - X[FORM5_HEADERS[3]]
+    X["Expected_Total_Goals"] = (h_for + a_against + a_for + h_against) / 2.0
     X["Form_Total_vs_Line"] = X["Expected_Total_Goals"] - X["OU_Line"]
-    
-    # คำนวณเปอร์เซ็นต์สูง/ต่ำ ด้วยสูตรปัวซง
-    safe_lines = np.floor(X["OU_Line"].fillna(0))
-    safe_goals = X["Expected_Total_Goals"].fillna(2.5)
-    X["Poisson_Under_Prob"] = stats.poisson.cdf(safe_lines, safe_goals)
-    X["Poisson_Over_Prob"] = 1.0 - X["Poisson_Under_Prob"]
-    
+    # No artificial 2.5-goal fallback. These are coarse features, not hard rules.
+    means = X["Expected_Total_Goals"].to_numpy(float)
+    lines = X["OU_Line"].to_numpy(float)
+    usable = np.isfinite(means) & (means >= 0) & np.isfinite(lines)
+    for feature in ("Poisson_Over_Positive", "Poisson_Under_Positive", "Poisson_Push"):
+        X[feature] = np.nan
+    if usable.any():
+        low = np.floor(lines[usable] * 2) / 2
+        high = np.ceil(lines[usable] * 2) / 2
+        X.loc[usable, "Poisson_Over_Positive"] = stats.poisson.sf(np.floor(low), means[usable])
+        X.loc[usable, "Poisson_Under_Positive"] = stats.poisson.cdf(np.ceil(high) - 1, means[usable])
+        whole = np.isclose(low, high) & np.isclose(low, np.round(low))
+        X.loc[usable, "Poisson_Push"] = np.where(whole, stats.poisson.pmf(np.round(low), means[usable]), 0.0)
     X = X.replace([np.inf, -np.inf], np.nan).astype(float)
-    names_ok = ~df["ทีมเหย้า"].map(_ml_blank) & ~df["ทีมเยือน"].map(_ml_blank)
-    base_valid = names_ok & odds.notna().all(axis=1)
-    
-    df["_ML_Valid_HDP"] = base_valid & X[["HDP_Line", "HDP_Home_Decimal", "HDP_Away_Decimal"]].notna().all(axis=1)
-    df["_ML_Valid_OU"] = base_valid & X[["OU_Line", "Over_Decimal", "Under_Decimal"]].notna().all(axis=1)
-    
-    scores = df["ผลสกอร์"].map(_ml_score)
-    for market, label_column, line_column in (("HDP", "ผล HDP", "HDP_Line"), ("OU", "ผลสูง/ต่ำ", "OU_Line")):
-        targets = []
-        for i in range(len(df)):
-            label = _ml_label_state(df.at[i, label_column], market)
-            result = _ml_settlement(scores.iloc[i], X.at[i, line_column], market)
-            if np.isfinite(result): pass
-            elif _ml_blank(df.at[i, "ผลสกอร์"]) and np.isfinite(label): result = label
-            if np.isfinite(result) and not _ml_allowed(X.at[i, line_column], market)[int(result)]: result = np.nan
-            targets.append(result)
-        df["Target_" + market] = targets
-    df["_ML_Pending"] = df[["ผลสกอร์", "ผล HDP", "ผลสูง/ต่ำ"]].apply(lambda c: c.map(_ml_blank)).all(axis=1)
+    names_ok = ~df[_ML_HOME].map(_ml_blank) & ~df[_ML_AWAY].map(_ml_blank)
+    names_ok &= df[_ML_HOME].astype(str).str.strip().str.casefold().ne(df[_ML_AWAY].astype(str).str.strip().str.casefold())
+    df["_ML_Group"] = [json.dumps(sorted([re.sub(r"\s+", " ", str(h).strip().casefold()),
+                                         re.sub(r"\s+", " ", str(a).strip().casefold())]), ensure_ascii=False)
+                        for h, a in zip(df[_ML_HOME], df[_ML_AWAY])]
+    score = df[_ML_SCORE].map(_ml_score)
+    score_blank = df[_ML_SCORE].map(_ml_blank)
+    df["_ML_InvalidScore"] = ~score_blank & score.isna()
+    df["_ML_Pending"] = names_ok & score_blank
+    away_line = num[ML_ODDS_COLUMNS[5]]
+    matching_hdp = np.isclose(X["HDP_Line"], -away_line, equal_nan=False)
+    for market, first, second in (("HDP", "HDP_Home_Decimal", "HDP_Away_Decimal"),
+                                  ("OU", "Over_Decimal", "Under_Decimal")):
+        ok = names_ok & X[[market + "_Line", first, second]].notna().all(axis=1)
+        if market == "HDP":
+            ok &= matching_hdp
+        df["_ML_Valid_" + market] = ok
+        target = [_ml_settlement(s, v, market) if valid else np.nan
+                  for s, v, valid in zip(score, X[market + "_Line"], ok)]
+        df["Target_" + market] = target
     return df, X
 
-def _ml_split(groups):
-    groups = np.asarray(groups)
-    indices = np.arange(len(groups))
-    def take(subset, test_size, seed):
-        splitter = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=seed)
-        train, test = next(splitter.split(subset, groups=groups[subset]))
-        return subset[train], subset[test]
-    rest, test = take(indices, 0.15, ML_CONFIG["seed"])
-    rest, validation = take(rest, 0.15 / 0.85, ML_CONFIG["seed"] + 1)
-    train, calibration = take(rest, 0.15 / 0.70, ML_CONFIG["seed"] + 2)
-    return {"train": train, "calibration": calibration, "validation": validation, "test": test}
 
-# Dynamic Half-Kelly Criterion
-def _ml_kelly_fraction(probabilities, decimal, side):
-    returns = _ml_returns(decimal)
-    if side == 1: returns = returns[::-1]
-    ev = float(np.dot(probabilities, returns))
-    if ev <= 0: return 0.0
-    var = float(np.dot(probabilities, (returns - ev)**2))
-    if var <= 0: return 0.0
-    half_kelly = (ev / var) * 0.5
-    return min(half_kelly, 0.05) # Cap at 5% of Bankroll
+def _ml_split(groups, config=None):
+    """Stable four-way GROUP split, explicitly NOT a chronological backtest."""
+    cfg = ML_CONFIG if config is None else config
+    groups = np.asarray(groups, dtype=str)
+    if len(np.unique(groups)) < cfg["min_groups"]:
+        raise ValueError("กลุ่มข้อมูลอิสระยังน้อยเกินไป")
+    def take(subset, fraction, seed):
+        split = GroupShuffleSplit(n_splits=1, test_size=fraction, random_state=seed)
+        a, b = next(split.split(subset, groups=groups[subset]))
+        return subset[a], subset[b]
+    rest, test = take(np.arange(len(groups)), .15, cfg["seed"])
+    rest, validation = take(rest, .15 / .85, cfg["seed"] + 1)
+    train, calibration = take(rest, .15 / .70, cfg["seed"] + 2)
+    parts = dict(train=train, calibration=calibration, validation=validation, test=test)
+    if min(map(len, parts.values())) < cfg["min_partition"]:
+        raise ValueError("จำนวนข้อมูลในชุดฝึกหรือทดสอบไม่พอ")
+    return parts
 
-def _ml_choices(probabilities, first_prices, second_prices):
-    first = np.array([_ml_expected_value(p, price) for p, price in zip(probabilities, first_prices)])
-    second = np.array([_ml_expected_value(p, price, True) for p, price in zip(probabilities, second_prices)])
-    side = np.where(np.nan_to_num(first, nan=-np.inf) >= np.nan_to_num(second, nan=-np.inf), 0, 1)
-    ev = np.where(side == 0, first, second)
-    price = np.where(side == 0, np.asarray(first_prices), np.asarray(second_prices))
-    stressed = ev - ML_CONFIG["probability_stress"] * price
-    candidate = np.isfinite(ev) & (ev >= ML_CONFIG["min_ev"]) & (stressed > 0)
-    kellys = np.array([_ml_kelly_fraction(p, pr, s) for p, pr, s in zip(probabilities, price, side)])
-    return {"side": side, "ev": ev, "stress_ev": stressed, "price": price, "candidate": candidate, "kelly": kellys}
+
+def _ml_training_payload(df, X, market):
+    valid = df["_ML_Valid_" + market] & df["Target_" + market].notna()
+    buckets = {}
+    for position in np.flatnonzero(valid.to_numpy()):
+        row = X.iloc[position]
+        values = [float(v) if np.isfinite(v) else None for v in row]
+        group = df.iloc[position]["_ML_Group"]
+        key = json.dumps([group, values], ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+        buckets.setdefault(key, set()).add(int(df.iloc[position]["Target_" + market]))
+    # Same input and pair with conflicting labels cannot be resolved without IDs.
+    conflicts = sum(len(labels) != 1 for labels in buckets.values())
+    rows = []
+    for key in sorted(buckets):
+        labels = buckets[key]
+        if len(labels) == 1:
+            group, values = json.loads(key)
+            rows.append([group, next(iter(labels)), values])
+    payload = json.dumps({"features": list(X.columns), "rows": rows}, ensure_ascii=False,
+                         allow_nan=False, separators=(",", ":"))
+    audit = {"eligible_rows": int(valid.sum()), "unique_training_rows": len(rows),
+             "conflicting_input_groups": conflicts,
+             "excluded_or_collapsed": int(valid.sum()) - len(rows)}
+    return payload, audit
+
+
+def _ml_baseline_fit(y, lines, smoothing):
+    counts = np.full((4, 5), float(smoothing))
+    for label, line in zip(y, lines):
+        counts[int(round(float(line) * 4)) % 4, int(label)] += 1
+    return counts
+
+
+def _ml_baseline_raw(counts, lines):
+    families = np.round(np.asarray(lines) * 4).astype(int) % 4
+    values = counts[families]
+    return values / values.sum(axis=1, keepdims=True)
+
+
+@st.cache_resource(show_spinner=False)
+def _ml_execution_lock():
+    # threadpoolctl changes process-level limits: serialize its scoped use here.
+    return threading.RLock()
+
+
+def _ml_candidate_raw(bundle, name, X, lines):
+    base = _ml_baseline_raw(bundle["baseline"], lines)
+    if name == "baseline":
+        return base
+    mix = bundle["config"]["baseline_mix"]
+    if name == "blend":
+        names = list(bundle["models"])
+        if not names:
+            return base
+        raw = np.mean([_ml_raw_probabilities(bundle["models"][n][0], X[bundle["models"][n][1]]) for n in names], axis=0)
+    else:
+        estimator, columns = bundle["models"][name]
+        raw = _ml_raw_probabilities(estimator, X[columns])
+    return (1 - mix) * raw + mix * base
+
+
+def _ml_predict_bundle(bundle, X, lines):
+    with _ml_execution_lock(), threadpool_limits(limits=bundle["config"]["threads"]):
+        raw = _ml_candidate_raw(bundle, bundle["selected"], X, lines)
+        return _ml_probability(raw, lines, bundle["market"], bundle["temperature"])
+
+
+def _ml_selection_mask(p, first, second, lines, report, config=None):
+    cfg = ML_CONFIG if config is None else config
+    choices = _ml_choices(p, first, second, cfg)
+    share = _ml_home_share(p)
+    selected_prob = np.where(choices["side"] == 0, share, 1 - share) * 100
+    support = np.array([report["family_counts"].get(int(round(float(line) * 4)) % 4, 0) for line in lines])
+    bounds = report.get("line_range", [-np.inf, np.inf])
+    in_range = (np.asarray(lines) >= bounds[0]) & (np.asarray(lines) <= bounds[1])
+    mask = (choices["candidate"] & (selected_prob >= cfg["min_probability"])
+            & (support >= cfg["min_line_examples"]) & in_range & bool(report["gate_pass"]))
+    return mask, choices, selected_prob
+
+
+def _ml_policy_metrics(y, p, first, second, lines, report, config=None):
+    mask, choices, _ = _ml_selection_mask(p, first, second, lines, report, config)
+    selected = np.flatnonzero(mask)
+    returns = np.array([_ml_returns(choices["price"][i])[int(y[i]) if choices["side"][i] == 0 else 4 - int(y[i])] for i in selected])
+    decisive = returns != 0
+    n = int(decisive.sum())
+    return {"eligible_test_rows": len(y), "research_signals": len(selected),
+            "decisive_n": n, "push_n": int((~decisive).sum()),
+            "positive_n": int((returns > 0).sum()),
+            "positive_rate_excluding_push": float((returns > 0).sum() / n * 100) if n else None,
+            "unit_return_sum": float(returns.sum()),
+            "unit_return_mean": float(returns.mean()) if len(returns) else None,
+            "stake_recommendations": 0,
+            "note": "Grouped held-out simulation; no timestamps; not live prediction history."}
+
+
+@st.cache_resource(max_entries=4, show_spinner=False)
+def _ml_train_cached(payload, market, config_json, engine_version):
+    """Only canonical labeled training records affect this resource cache.
+
+    Pending rows, legacy formulas, row order and sheet row numbers do not.
+    No pickle/model file is loaded. A process restart retrains lazily.
+    """
+    cfg = json.loads(config_json)
+    source = json.loads(payload)
+    records = source["rows"]
+    if len(records) < cfg["min_rows"]:
+        raise ValueError(f"{market}: ต้องมีข้อมูลที่ใช้ได้อย่างน้อย {cfg['min_rows']} รายการ")
+    groups = np.array([r[0] for r in records])
+    y = np.array([r[1] for r in records], dtype=int)
+    X = pd.DataFrame([r[2] for r in records], columns=source["features"], dtype=float)
+    parts = _ml_split(groups, cfg)
+    train, cal, val, test = (parts[key] for key in ("train", "calibration", "validation", "test"))
+    lines = X[market + "_Line"].to_numpy(float)
+    baseline = _ml_baseline_fit(y[train], lines[train], cfg["baseline_smoothing"])
+    bundle = {"baseline": baseline, "models": {}, "market": market, "config": cfg}
+    candidates = ["baseline"]
+    errors = []
+    active = [col for col in X if X.iloc[train][col].nunique(dropna=True) > 1]
+    form_features = set(FORM5_HEADERS) | {c for c in X if c.startswith(("Form_", "Poisson_", "Expected_")) or c.endswith("_Missing")}
+    price_features = [c for c in active if c not in form_features]
+    model_feature_sets = [("price", price_features)]
+    if int(X.iloc[train]["Form_Complete"].sum()) >= cfg["min_form_training_rows"] and set(active) - set(price_features):
+        model_feature_sets.append(("price_form", active))
+    with _ml_execution_lock(), threadpool_limits(limits=cfg["threads"]):
+        if len(np.unique(y[train])) > 1:
+            for number, (name, columns) in enumerate(model_feature_sets):
+                if not columns:
+                    continue
+                estimator = HistGradientBoostingClassifier(
+                    max_iter=cfg["max_iter"], max_depth=3, max_leaf_nodes=7,
+                    learning_rate=.035, l2_regularization=8.0,
+                    min_samples_leaf=max(15, min(50, len(train) // 30)),
+                    early_stopping=False, random_state=cfg["seed"] + number)
+                try:
+                    estimator.fit(X.iloc[train][columns], y[train])
+                except (ValueError, FloatingPointError, RuntimeError) as exc:
+                    errors.append({"candidate": name, "type": type(exc).__name__})
+                    continue
+                bundle["models"][name] = (estimator, columns)
+                candidates.append(name)
+        if len(bundle["models"]) > 1:
+            candidates.append("blend")
+        evaluation = {}
+        for name in candidates:
+            raw_cal = _ml_candidate_raw(bundle, name, X.iloc[cal], lines[cal])
+            temperature = min(cfg["temperatures"], key=lambda t: _ml_log_loss(y[cal], _ml_probability(raw_cal, lines[cal], market, t)))
+            p_val = _ml_probability(_ml_candidate_raw(bundle, name, X.iloc[val], lines[val]), lines[val], market, temperature)
+            evaluation[name] = {"temperature": float(temperature), "validation": _ml_metrics(y[val], p_val)}
+        # Select ONLY on validation. Test labels never select, calibrate or gate.
+        base_metrics = evaluation["baseline"]["validation"]
+        selected = "baseline"
+        for name in candidates[1:]:
+            metrics = evaluation[name]["validation"]
+            if (metrics["log_loss"] <= base_metrics["log_loss"] - cfg["min_validation_gain"]
+                    and metrics["brier"] <= base_metrics["brier"] + cfg["max_brier_degradation"]
+                    and metrics["log_loss"] < evaluation[selected]["validation"]["log_loss"]):
+                selected = name
+        val_metrics = evaluation[selected]["validation"]
+        reasons = []
+        if len(val) < cfg["min_validation"]:
+            reasons.append("ชุดตรวจสอบน้อยเกินไป")
+        if len(cal) < cfg["min_calibration"]:
+            reasons.append("ชุดปรับความน่าจะเป็นน้อยเกินไป")
+        if selected == "baseline":
+            reasons.append("ยังไม่ดีกว่าวิธีพื้นฐานตามเกณฑ์")
+        if val_metrics["ece"] > cfg["max_top_label_ece"]:
+            reasons.append("ความน่าจะเป็นยังคลาดเคลื่อนมาก")
+        bundle.update(selected=selected, temperature=evaluation[selected]["temperature"])
+        p_test = _ml_probability(_ml_candidate_raw(bundle, selected, X.iloc[test], lines[test]), lines[test], market, bundle["temperature"])
+        p_base = _ml_probability(_ml_baseline_raw(baseline, lines[test]), lines[test], market, evaluation["baseline"]["temperature"])
+    families = np.round(lines[train] * 4).astype(int) % 4
+    report = {
+        "market": market, "status": "ok", "engine_version": engine_version,
+        "model_id": _ml_hashlib.sha256((payload + market + config_json + engine_version).encode()).hexdigest()[:16],
+        "selected_model": selected, "temperature": bundle["temperature"],
+        "evaluation_mode": "GROUPED_RESEARCH_ONLY", "deployment_ready": False,
+        "gate_pass": not reasons, "gate_reasons": reasons,
+        "family_counts": {f: int((families == f).sum()) for f in range(4)},
+        "line_range": [float(lines[train].min()), float(lines[train].max())],
+        "split_counts": {key: len(value) for key, value in parts.items()},
+        "candidate_validation": evaluation, "validation": val_metrics,
+        "test": _ml_metrics(y[test], p_test), "baseline_test": _ml_metrics(y[test], p_base),
+        "model_errors": errors, "train_form_complete": int(X.iloc[train]["Form_Complete"].sum()),
+        "note": "ผลทดลองแบบแบ่งกลุ่ม ยังไม่ได้ทดสอบตามเวลาจริง",
+    }
+    first, second = (("HDP_Home_Decimal", "HDP_Away_Decimal") if market == "HDP" else ("Over_Decimal", "Under_Decimal"))
+    report["policy_test"] = _ml_policy_metrics(y[test], p_test, X.iloc[test][first], X.iloc[test][second], lines[test], report, cfg)
+    # Store only hashes for split auditing, not names or private input records.
+    report["split_group_hashes"] = {
+        key: sorted({_ml_hashlib.sha256(str(groups[i]).encode()).hexdigest() for i in indices})
+        for key, indices in parts.items()}
+    bundle["report"] = report
+    return bundle
+
 
 def _ml_fit_market(df, X, market):
-    valid = df["_ML_Valid_" + market] & df["Target_" + market].notna()
-    indices = np.flatnonzero(valid.to_numpy())
-    data = df.iloc[indices]
-    if len(data) < ML_CONFIG["min_rows"]: 
-        raise ValueError(f"ML {market}: ต้องมีข้อมูลอย่างน้อย {ML_CONFIG['min_rows']} แถว")
-        
-    y = data["Target_" + market].to_numpy(dtype=int)
-    
-    # 🌟 FIX 1: ปรับ Recency Weight ให้เบาลงมากๆ เพื่อไม่ให้ AI เกิด Overfit
-    # จาก 0.5->2.5 เปลี่ยนเป็น 0.95->1.05 (จำแพทเทิร์นเก่าได้ และรับรู้เทรนด์ใหม่ไปพร้อมๆ กัน)
-    dynamic_weights = np.linspace(0.95, 1.05, len(data))
-    
-    split = _ml_split(data["_ML_Group"].to_numpy())
-    train, calibration, validation, test = [split[key] for key in ("train", "calibration", "validation", "test")]
-    X_all = X.iloc[indices]
-    features = [c for c in X.columns if X_all.iloc[train][c].nunique(dropna=True) > 1]
-    X_all = X_all[features]
-    lines = X.iloc[indices][market + "_Line"].to_numpy()
-    
-    with threadpool_limits(limits=2):
-        m1 = HistGradientBoostingClassifier(max_iter=100, max_depth=3, learning_rate=0.03, l2_regularization=5.0, random_state=42)
-        m2 = HistGradientBoostingClassifier(max_iter=150, max_depth=4, learning_rate=0.01, l2_regularization=2.0, random_state=43)
-        m3 = HistGradientBoostingClassifier(max_iter=80, max_leaf_nodes=15, learning_rate=0.05, l2_regularization=10.0, random_state=44)
-        
-        estimator = VotingClassifier(estimators=[('m1', m1), ('m2', m2), ('m3', m3)], voting='soft')
-        
-        try:
-            estimator.fit(X_all.iloc[train], y[train], sample_weight=dynamic_weights[train])
-        except TypeError:
-            fit_params = {'m1__sample_weight': dynamic_weights[train], 
-                          'm2__sample_weight': dynamic_weights[train], 
-                          'm3__sample_weight': dynamic_weights[train]}
-            estimator.fit(X_all.iloc[train], y[train], **fit_params)
-        
-        raw_cal = _ml_raw_probabilities(estimator, X_all.iloc[calibration])
-        temperatures = (0.8, 1.0, 1.25, 1.5, 2.0)
-        temperature = min(temperatures, key=lambda t: _ml_log_loss(y[calibration], _ml_probability(raw_cal, lines[calibration], market, t)))
-        
-        def predict(part): return _ml_probability(_ml_raw_probabilities(estimator, X_all.iloc[part]), lines[part], market, temperature)
-        
-        p_val = predict(validation)
-        val_metrics = _ml_metrics(y[validation], p_val)
-        gate = bool(len(validation) >= 10)
-        
-        p_test = predict(test)
-        p_train = predict(train)
-        
-        pending_pos = np.flatnonzero(df["_ML_Pending"].to_numpy())
-        pending_lines = X.iloc[pending_pos][market + "_Line"].to_numpy()
-        pending_probs = _ml_probability(_ml_raw_probabilities(estimator, X.iloc[pending_pos][features]), pending_lines, market, temperature)
-        
-    family_counts = {family: int((np.round(lines[train] * 4).astype(int) % 4 == family).sum()) for family in range(4)}
-    
-    report = {
-        "market": market, "test": _ml_metrics(y[test], p_test), "gate_pass": gate,
-        "family_counts": family_counts
-    }
-    return report, pending_probs
-    
+    payload, audit = _ml_training_payload(df, X, market)
+    config_json = json.dumps(ML_CONFIG, sort_keys=True, allow_nan=False)
+    bundle = _ml_train_cached(payload, market, config_json, ML_PATCH_VERSION)
+    report = _ml_copy.deepcopy(bundle["report"])
+    report["data_audit"] = audit
+    pending = np.flatnonzero(df["_ML_Pending"].to_numpy())
+    p = np.full((len(pending), 5), np.nan)
+    use = df.iloc[pending]["_ML_Valid_" + market].to_numpy(bool)
+    if use.any():
+        positions = pending[use]
+        p[use] = _ml_predict_bundle(bundle, X.iloc[positions], X.iloc[positions][market + "_Line"].to_numpy(float))
+    return report, p
+
+
 def _ml_verdict(market, side, prob_val, ev, stress_ev, line, valid, report, kelly,
                 row_data=None, features_data=None, min_prob=55.0, min_ev=None):
-    min_ev = ML_CONFIG["min_ev"] if min_ev is None else min_ev
-    if not valid: return "⚠️ ข้าม (ราคาผิด/ไม่ครบ)"
-    if row_data is None: return "⚠️ ข้าม (ไม่มีข้อมูลแถวสำหรับตรวจ Guardrail)"
-
-    side = int(side)
-    home_1x2 = _ml_number(row_data.get("1X2 เหย้า", np.nan))
-    water_col = {("HDP", 0): "ค่าน้ำ HDP (เหย้า)", ("HDP", 1): "ค่าน้ำ HDP (เยือน)",
-                 ("OU", 0): "ค่าน้ำ (สูง)", ("OU", 1): "ค่าน้ำ (ต่ำ)"}[(market, side)]
-    water_decimal = _ml_malay_decimal(row_data.get(water_col, np.nan))
-    if not np.isfinite(water_decimal):
-        return "⚠️ ข้าม (ค่าน้ำฝั่งที่เลือกอ่านไม่ได้/อยู่นอกช่วงแปลงค่า)"
-
-    # 🛡️ DYNAMIC GUARDRAILS (แก้ไขให้สมเหตุสมผลขึ้น)
-    if market == "HDP":
-        # 🌟 FIX 2.1: ลดเพดานการบล็อกลง จาก 62% เหลือ 57%
-        if side == 0 and line in [-0.5, -0.75]:
-            if prob_val < 57.0:  
-                return "⚠️ ข้าม (ราคาต่อ 0.5/0.75 ต้องมั่นใจ 57% ขึ้นไป)"
-                
-        true_home_prob = features_data.get("True_Home_Prob", np.nan) if features_data is not None else np.nan
-        if np.isfinite(true_home_prob):
-            if true_home_prob < 0.45 and line <= -0.5 and side == 0:
-                return "⚠️ ข้าม (ราคาต่อล่อแมงเม่า สวนทางสถิติ 1X2)"
-            if true_home_prob > 0.60 and line >= 0.0 and side == 0:
-                return "⚠️ ข้าม (ราคาผิดปกติ เจ้าบ้านฟอร์มโหดแต่โต๊ะไม่กล้าให้ต่อ)"
-                
-    elif market == "OU":
-        # 🌟 FIX 2.2: แก้จุดบั๊ก! จาก < 2.0 เปลี่ยนเป็น < 1.80 เพื่อไม่ให้บล็อกบิลมากเกินไป
-        if side == 1 and water_decimal < 1.80:
-            return "⚠️ ข้าม (โต๊ะกดค่าน้ำต่ำเพื่อล่อ สถิติมักโดนยิงท้ายเกม)"
-            
-        if line >= 3.25:
-            if side == 0: return "⚠️ ข้าม (เรตสูงผิดปกติ สถิติมักออกต่ำ)"
-            if water_decimal < 1.85: return "⚠️ ข้าม (ออกต่ำจริง แต่ค่าน้ำเอาเปรียบเกินไป)"
-            
-        poisson_over = features_data.get("Poisson_Over_Prob", np.nan) if features_data is not None else np.nan
-        if np.isfinite(poisson_over):
-            if side == 0 and poisson_over < 0.35: return "⚠️ ข้าม (สถิติ Poisson ชี้ว่าโอกาสสูงน้อยเกินไป)"
-            if side == 1 and poisson_over > 0.65: return "⚠️ ข้าม (สถิติ Poisson ชี้ว่าโอกาสต่ำน้อยเกินไป)"
-
+    """Neutral research results. No unsupported market-story rules or VIP stakes."""
+    prefix = "⚠️ ข้าม"
+    if not valid:
+        return prefix + " (ราคาหรือไลน์ไม่ครบ/ผิดรูปแบบ)"
+    if report.get("status") != "ok":
+        return prefix + " (โมเดลตลาดนี้ยังไม่พร้อม)"
+    if not report.get("gate_pass", False):
+        reason = "; ".join(report.get("gate_reasons", [])) or "ไม่ผ่านเกณฑ์คุณภาพ"
+        return prefix + " (" + reason + ") | ค่าประเมินเพื่อทดลอง"
     family = int(round(float(line) * 4)) % 4
-    f_count = report["family_counts"].get(family, 0)
-    if f_count < ML_CONFIG["min_line_examples"]:
-        return "⚠️ ข้าม (ตัวอย่างชนิดไลน์นี้น้อยไป)"
+    if report["family_counts"].get(family, 0) < ML_CONFIG["min_line_examples"]:
+        return prefix + " (ตัวอย่างไลน์ชนิดนี้น้อยเกินไป)"
+    bounds = report.get("line_range", [-np.inf, np.inf])
+    if not bounds[0] <= float(line) <= bounds[1]:
+        return prefix + " (ไลน์นอกช่วงข้อมูลฝึก)"
+    min_ev = ML_CONFIG["min_ev"] if min_ev is None else min_ev
     if not np.isfinite(prob_val) or prob_val < min_prob:
-        return f"⚠️ ข้าม (โอกาสชนะน้อยเกินไป: {prob_val:.1f}%)"
-    if not np.isfinite(ev) or ev < min_ev or stress_ev <= 0:
-        return "⚠️ ข้าม (ความได้เปรียบ EV ไม่ผ่านเกณฑ์)"
+        return prefix + " (ความน่าจะเป็นไม่ถึงเกณฑ์)"
+    if not np.isfinite(ev) or not np.isfinite(stress_ev) or ev < min_ev or stress_ev <= 0:
+        return prefix + " (ผลตอบแทนคาดหมายไม่ผ่านเกณฑ์เผื่อความคลาดเคลื่อน)"
+    desc = ((_ML_HOME if side == 0 else _ML_AWAY) if market == "HDP"
+            else ("สูง" if side == 0 else "ต่ำ"))
+    return (f"⭐ ผลทดลอง: {desc} | {prob_val:.1f}% เมื่อไม่นับคืนทุน | "
+            "ยังไม่ทดสอบตามเวลา ไม่แนะนำขนาดเงิน")
 
-    is_high_water = water_decimal >= 1.90
-    is_strong_fav = bool(market == "HDP" and np.isfinite(home_1x2) and home_1x2 <= 1.47 and line <= -1.25 and side == 0)
-    if is_high_water or is_strong_fav: kelly = min(kelly * 1.5, 0.05)
-    k_pct = kelly * 100
-
-    if prob_val >= 65.0 or (prob_val >= 60.0 and is_high_water): level = "⭐⭐⭐ VIP ไม้หนัก"
-    elif prob_val >= 60.0 or is_strong_fav: level = "⭐⭐ น่าลงทุน"
-    else: level = "⭐ ทดลองติดตาม"
-
-    desc = "สูง Over" if side == 0 else "ต่ำ Under"
-    if market == "HDP":
-        if line < 0: desc = "ต่อเจ้าบ้าน" if side == 0 else "รองทีมเยือน"
-        elif line > 0: desc = "รองเจ้าบ้าน" if side == 0 else "ต่อทีมเยือน"
-        else: desc = "เจ้าบ้าน" if side == 0 else "ทีมเยือน"
-
-    warnings = []
-    if f_count < 50: warnings.append("ข้อมูลน้อย")
-    if (59.5 <= prob_val <= 60.5) or (64.5 <= prob_val <= 65.5): warnings.append("คาบเส้น")
-    warn_text = f" ⚠️({','.join(warnings)})" if warnings else ""
-    return f"{level} ({desc}) | โอกาส {prob_val:.1f}% | แนะนำ {k_pct:.1f}%{warn_text}" 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def compute_ai(df_in):
     try:
         df, X = _ml_prepare(df_in)
-        reports, probs = {}, {}
-        for m in ("HDP", "OU"):
-            reports[m], probs[m] = _ml_fit_market(df, X, m)
-    except ValueError as e: return {"status": "few", "level": "warning", "msg": str(e)}
-    
-    pending_pos = np.flatnonzero(df["_ML_Pending"].to_numpy())
-    pending = df.iloc[pending_pos].copy()
-    history = df[~df["_ML_Pending"]].copy()
-    
-    for m, p_col, v_col, c1, c2 in (("HDP", "AI_โอกาสเหย้าชนะHDP(%)", "AI_ฟันธง_HDP", "HDP_Home_Decimal", "HDP_Away_Decimal"),
-                                    ("OU", "AI_โอกาสออกสูง(%)", "AI_ฟันธง_สูงต่ำ", "Over_Decimal", "Under_Decimal")):
-        p = probs[m]
-        prob_home_over = _ml_home_share(p) * 100
-        prob_away_under = 100.0 - prob_home_over
-        
-        # Calculate for pending
-        pending[p_col] = np.round(prob_home_over, 1)
-        choices = _ml_choices(p, X.iloc[pending_pos][c1], X.iloc[pending_pos][c2])
-        side_probs = np.where(choices["side"] == 0, prob_home_over, prob_away_under)
-        
-        pending[v_col] = [
-            _ml_verdict(m, int(choices["side"][i]), side_probs[i], choices["ev"][i], choices["stress_ev"][i],
-                        X.iloc[pos][m + "_Line"], bool(df.iloc[pos]["_ML_Valid_" + m]), reports[m], choices["kelly"][i], 
-                        row_data=df.iloc[pos], features_data=X.iloc[pos])
-            for i, pos in enumerate(pending_pos)
-        ]
-        
-    return {
-        "status": "ok", "df_predict": pending, "df_history": history, "total_train": len(history),
-        "hdp_acc": round(reports["HDP"]["test"]["accuracy"], 1),
-        "ou_acc": round(reports["OU"]["test"]["accuracy"], 1),
-    }
+    except (ValueError, TypeError, KeyError) as exc:
+        return {"status": "error", "level": "error", "msg": str(exc), "engine_version": ML_PATCH_VERSION}
+    pending_positions = np.flatnonzero(df["_ML_Pending"].to_numpy())
+    pending = df.iloc[pending_positions].copy()
+    reports = {}
+    market_failures = []
+    for market, first, second in (("HDP", "HDP_Home_Decimal", "HDP_Away_Decimal"),
+                                  ("OU", "Over_Decimal", "Under_Decimal")):
+        try:
+            report, p = _ml_fit_market(df, X, market)
+        except Exception as exc:
+            # A market-local failure must not suppress the other market.
+            # No traceback locals, keys or provider responses are included.
+            report = {"market": market, "status": "unavailable", "gate_pass": False,
+                      "error_type": type(exc).__name__, "family_counts": {},
+                      "engine_version": ML_PATCH_VERSION,
+                      "msg": str(exc) if isinstance(exc, ValueError) else "คำนวณตลาดนี้ไม่สำเร็จ"}
+            p = np.full((len(pending), 5), np.nan)
+            market_failures.append(market)
+        reports[market] = report
+        home_prob = _ml_home_share(p) * 100
+        pending[_ML_PROB_COLS[market]] = np.round(home_prob, 1)
+        choices = _ml_choices(p, X.iloc[pending_positions][first], X.iloc[pending_positions][second])
+        selected_prob = np.where(choices["side"] == 0, home_prob, 100 - home_prob)
+        pending[_ML_VERDICT_COLS[market]] = [
+            _ml_verdict(market, int(choices["side"][i]), selected_prob[i], choices["ev"][i],
+                        choices["stress_ev"][i], X.iloc[pos][market + "_Line"],
+                        bool(df.iloc[pos]["_ML_Valid_" + market]), report, choices["kelly"][i],
+                        row_data=df.iloc[pos], features_data=X.iloc[pos],
+                        min_prob=ML_CONFIG["min_probability"])
+            for i, pos in enumerate(pending_positions)]
+        for k, state in enumerate(ML_STATES):
+            pending[f"AI_{market}_{state}"] = p[:, k]
+        pending[f"AI_{market}_Positive_Unconditional"] = p[:, 3:].sum(axis=1)
+        pending[f"AI_{market}_SelectedSide"] = choices["side"]
+        pending[f"AI_{market}_EV"] = choices["ev"]
+        pending[f"AI_{market}_StressEV"] = choices["stress_ev"]
+        pending[f"AI_{market}_TheoreticalFraction"] = choices["kelly"]
+    history = df.loc[df["Target_HDP"].notna() | df["Target_OU"].notna()].copy()
+    # Frozen widgets cannot render missing gauges honestly. Keep such rows in the
+    # detailed output, but omit them from the legacy paired-gauge card output.
+    # Tab2's independent raw loader still lists them and accepts their scores.
+    complete = np.isfinite(pending[list(_ML_PROB_COLS.values())].to_numpy(float)).all(axis=1)
+    display = pending.loc[complete].copy()
+    def accuracy(market):
+        return round(float(reports[market].get("test", {}).get("accuracy", np.nan)), 1)
+    status = "ok" if len(market_failures) < 2 else "few"
+    return {"status": status, "level": "warning" if market_failures else "info",
+            "msg": " / ".join(reports[m].get("msg", "") for m in market_failures),
+            "engine_version": ML_PATCH_VERSION,
+            "df_predict": display, "df_predict_details": pending,
+            "df_history": history, "total_train": len(history),
+            "hdp_acc": accuracy("HDP"), "ou_acc": accuracy("OU"),
+            "reports": reports,
+            "data_quality": {"named_rows": len(df), "pending": len(pending),
+                             "invalid_scores": int(df["_ML_InvalidScore"].sum()),
+                             "cards_without_both_probabilities": int((~complete).sum())},
+            "evaluation_mode": "GROUPED_RESEARCH_ONLY"}
 
+
+# The original DATA loader is retained for compatibility with callers.
 def load_dashboard_data(_workbook, version=0):
     with JOBS.sheet_lock:
         return pd.DataFrame(get_ws(_workbook).get_all_records())
 
+
 def get_ai():
-    if not workbook: return None
-    try: 
-        return compute_ai(load_dashboard_data(workbook, JOBS.data_version))
-    except Exception as e: 
-        err_trace = traceback.format_exc()
-        return {
-            "status": "error", 
-            "level": "error", 
-            "msg": f"โหลดข้อมูลไม่สำเร็จ: {type(e).__name__} - {str(e)}", 
-            "trace": err_trace
-        }
+    if not workbook:
+        return None
+    try:
+        # Reuse the existing 5.1.4 raw DATA reader: UNFORMATTED_VALUE preserves
+        # numeric Excel-date scores so _ml_score rejects them. No API writes here.
+        data = _t2_load_data(workbook, _t2_workbook_key(workbook), JOBS.data_version)
+        return compute_ai(data)
+    except Exception as exc:
+        return {"status": "error", "level": "error", "engine_version": ML_PATCH_VERSION,
+                "msg": "โหลดข้อมูลสำหรับ AI ไม่สำเร็จ: " + type(exc).__name__}
+
 
 # ----------------------------------------
 # UI Components & Gauges
