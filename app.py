@@ -1064,7 +1064,8 @@ def _dial_svg(p, color, cls="dial"):
 
 def _vu(p, n=20, cls=""):
     lit = int(round(max(0.0, min(float(p), 100.0)) / 100 * n))
-    cells = "".join(f"<i class='{'on' if i < lit else ''}' style='--i:{i}'></i>" for i in range(n))
+    # เปลี่ยนจาก <i> เป็น <div class='v-bar'> ป้องกัน Streamlit ลบทิ้ง
+    cells = "".join(f"<div class='v-bar {'on' if i < lit else ''}' style='--i:{i}'></div>" for i in range(n))
     return f"<div class='vu {cls}' style='--n:{n}'>{cells}</div>"
 
 def _channel_html(ch, name, line_txt, prob, verdict, color, desc, lo_lbl, hi_lbl):
@@ -1080,7 +1081,8 @@ def _channel_html(ch, name, line_txt, prob, verdict, color, desc, lo_lbl, hi_lbl
 def _match_card_html(n, home, away, hdp_line, ou_line, hdp_prob, ou_prob, hdp_verdict, ou_verdict, solo=False):
     t1, t2 = _pred_tone(hdp_verdict, "hdp"), _pred_tone(ou_verdict, "ou")
     strength = max(_TONE_STRENGTH[t1], _TONE_STRENGTH[t2])
-    bars = "".join(f"<i class='{'on' if k < strength else ''}'></i>" for k in range(4))
+    # เปลี่ยนจาก <i> เป็น <div class='s-bar'> 
+    bars = "".join(f"<div class='s-bar {'on' if k < strength else ''}'></div>" for k in range(4))
     status = "<span class='mon-st on'>มีสัญญาณ</span>" if strength > 0 else "<span class='mon-st'>ข้าม</span>"
     tag = "บันทึกแล้ว" if solo else "รอผลสกอร์"
     return (f"<div class='mon{' solo' if solo else ''}'><span class='cn tl'></span><span class='cn tr'></span><span class='cn bl'></span><span class='cn br'></span>"
