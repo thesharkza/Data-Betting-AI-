@@ -898,10 +898,9 @@ def _ml_fit_market(df, X, market):
         
     y = data["Target_" + market].to_numpy(dtype=int)
     
-    # 🌟 NEW: สร้างระบบ Recency Weight (ปรับตัวตามสถานการณ์ปัจจุบัน)
-    # ข้อมูลแถวแรกๆ (เก่าสุด) จะถูกลดความสำคัญลงเหลือน้ำหนัก 0.5
-    # ข้อมูลแถวท้ายๆ (ใหม่ล่าสุด) จะถูกเพิ่มความสำคัญเป็น 2.5 เท่า
-    dynamic_weights = np.linspace(0.5, 2.5, len(data))
+    # 🌟 FIX 1: ปรับ Recency Weight ให้เบาลงมากๆ เพื่อไม่ให้ AI เกิด Overfit
+    # จาก 0.5->2.5 เปลี่ยนเป็น 0.95->1.05 (จำแพทเทิร์นเก่าได้ และรับรู้เทรนด์ใหม่ไปพร้อมๆ กัน)
+    dynamic_weights = np.linspace(0.95, 1.05, len(data))
     
     split = _ml_split(data["_ML_Group"].to_numpy())
     train, calibration, validation, test = [split[key] for key in ("train", "calibration", "validation", "test")]
@@ -911,18 +910,15 @@ def _ml_fit_market(df, X, market):
     lines = X.iloc[indices][market + "_Line"].to_numpy()
     
     with threadpool_limits(limits=2):
-        # Ensemble Voting (3 HistGradientBoosting)
         m1 = HistGradientBoostingClassifier(max_iter=100, max_depth=3, learning_rate=0.03, l2_regularization=5.0, random_state=42)
         m2 = HistGradientBoostingClassifier(max_iter=150, max_depth=4, learning_rate=0.01, l2_regularization=2.0, random_state=43)
         m3 = HistGradientBoostingClassifier(max_iter=80, max_leaf_nodes=15, learning_rate=0.05, l2_regularization=10.0, random_state=44)
         
         estimator = VotingClassifier(estimators=[('m1', m1), ('m2', m2), ('m3', m3)], voting='soft')
         
-        # 🌟 NEW: ป้อนน้ำหนักสถานการณ์ปัจจุบันเข้าไปให้ AI เรียนรู้
         try:
             estimator.fit(X_all.iloc[train], y[train], sample_weight=dynamic_weights[train])
         except TypeError:
-            # Fallback เผื่อเวอร์ชั่นของ Scikit-Learn ในเซิร์ฟเวอร์เก่าเกินไป
             fit_params = {'m1__sample_weight': dynamic_weights[train], 
                           'm2__sample_weight': dynamic_weights[train], 
                           'm3__sample_weight': dynamic_weights[train]}
@@ -952,7 +948,7 @@ def _ml_fit_market(df, X, market):
         "family_counts": family_counts
     }
     return report, pending_probs
-
+    
 def _ml_verdict(market, side, prob_val, ev, stress_ev, line, valid, report, kelly,
                 row_data=None, features_data=None, min_prob=55.0, min_ev=None):
     min_ev = ML_CONFIG["min_ev"] if min_ev is None else min_ev
@@ -967,12 +963,12 @@ def _ml_verdict(market, side, prob_val, ev, stress_ev, line, valid, report, kell
     if not np.isfinite(water_decimal):
         return "⚠️ ข้าม (ค่าน้ำฝั่งที่เลือกอ่านไม่ได้/อยู่นอกช่วงแปลงค่า)"
 
-    # 🛡️ DYNAMIC GUARDRAILS (อัปเดตใหม่ตาม Data Insights 2165 แถว + กฎเดิม)
+    # 🛡️ DYNAMIC GUARDRAILS (แก้ไขให้สมเหตุสมผลขึ้น)
     if market == "HDP":
-        # 1. กฎใหม่: บล็อกเรตราคาล่อแมงเม่า: ต่อเจ้าบ้าน 0.5 และ 0.75 
+        # 🌟 FIX 2.1: ลดเพดานการบล็อกลง จาก 62% เหลือ 57%
         if side == 0 and line in [-0.5, -0.75]:
-            if prob_val < 62.0:  
-                return "⚠️ ข้าม (ราคาต่อ 0.5/0.75 เจ้าบ้านมีความเสี่ยงสูง)"
+            if prob_val < 57.0:  
+                return "⚠️ ข้าม (ราคาต่อ 0.5/0.75 ต้องมั่นใจ 57% ขึ้นไป)"
                 
         true_home_prob = features_data.get("True_Home_Prob", np.nan) if features_data is not None else np.nan
         if np.isfinite(true_home_prob):
@@ -982,8 +978,8 @@ def _ml_verdict(market, side, prob_val, ev, stress_ev, line, valid, report, kell
                 return "⚠️ ข้าม (ราคาผิดปกติ เจ้าบ้านฟอร์มโหดแต่โต๊ะไม่กล้าให้ต่อ)"
                 
     elif market == "OU":
-        # 2. กฎใหม่: บล็อกการแทงต่ำ (Under) เมื่อค่าน้ำกดจ่ายน้อยกว่า 2.0 (น้ำดำ/ล่อให้แทง)
-        if side == 1 and water_decimal < 2.0:
+        # 🌟 FIX 2.2: แก้จุดบั๊ก! จาก < 2.0 เปลี่ยนเป็น < 1.80 เพื่อไม่ให้บล็อกบิลมากเกินไป
+        if side == 1 and water_decimal < 1.80:
             return "⚠️ ข้าม (โต๊ะกดค่าน้ำต่ำเพื่อล่อ สถิติมักโดนยิงท้ายเกม)"
             
         if line >= 3.25:
