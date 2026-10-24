@@ -64,6 +64,61 @@ p, label, span { color: inherit; }
 .stTabs [data-baseweb="tab"] { background: transparent; color: #7f9a8b; padding: 10px 18px; border-radius: 10px 10px 0 0; font-weight: 500; }
 .stTabs [aria-selected="true"] { color: #22c55e !important; background: #0c130f; }
 .stTabs [data-baseweb="tab-highlight"] { background-color: #22c55e; }
+.stButton > button[kind="primary"], [data-testid="stFormSubmitButton"] > button[kind="primary"] { background: #22c55e; color: #03140a; border: none; font-weight: 600; border-radius: 10px; padding: 0.55rem 1.4rem; }
+.stButton > button[kind="primary"]:hover, [data-testid="stFormSubmitButton"] > button[kind="primary"]:hover { background: #4ade80; color: #03140a; }
+.stButton > button:not([kind="primary"]), [data-testid="stFormSubmitButton"] > button:not([kind="primary"]) { background: #0c130f; color: #cfe3d6; border: 1px solid #1b2a22; border-radius: 10px; transition: border-color .2s, box-shadow .2s; }
+.stButton > button:not([kind="primary"]):hover, [data-testid="stFormSubmitButton"] > button:not([kind="primary"]):hover { border-color: #22c55e; color: #4ade80; box-shadow: 0 0 20px -8px rgba(34,197,94,0.7); }
+[data-testid="stFileUploader"] section { background: #0c130f; border: 1px dashed #2a4136; border-radius: 14px; transition: border-color .2s, box-shadow .2s; }
+[data-testid="stFileUploader"] section:hover { border-color: #22c55e; box-shadow: 0 0 28px -12px rgba(34,197,94,0.6); }
+[data-testid="stAlert"] { background: #0c130f; border: 1px solid #1b2a22; border-radius: 12px; }
+.page-title { font-size: 1.9rem; font-weight: 600; margin: 0; color: #e6f2ea; }
+.page-sub { color: #7f9a8b; margin: 4px 0 22px 0; font-size: 0.95rem; }
+
+/* ================= INPUTS (ช่องกรอกข้อมูล) กลับมาแล้ว ================= */
+label[data-testid="stWidgetLabel"] p { color: #a7c4b5; font-size: 0.85rem; font-weight: 400; }
+[data-baseweb="input"], [data-baseweb="base-input"] { background-color: #080e0b !important; border-radius: 10px !important; }
+[data-baseweb="input"] { border: 1px solid #1b2a22 !important; transition: border-color .2s, box-shadow .2s; }
+[data-baseweb="input"]:focus-within { border-color: #22c55e !important; box-shadow: 0 0 0 1px rgba(34,197,94,0.55), 0 0 22px -6px rgba(34,197,94,0.65); }
+[data-testid="stNumberInput"] input { font-family: 'JetBrains Mono', monospace !important; font-weight: 500; color: #e6f2ea; }
+[data-testid="stNumberInput"] button { background: #0c130f !important; color: #7f9a8b !important; border: none !important; transition: background .2s, color .2s; }
+[data-testid="stNumberInput"] button:hover { background: rgba(34,197,94,0.14) !important; color: #4ade80 !important; }
+[data-baseweb="select"] > div { background-color: #080e0b !important; border: 1px solid #1b2a22 !important; border-radius: 10px !important; }
+[data-baseweb="select"] > div:focus-within { border-color: #22c55e !important; box-shadow: 0 0 22px -8px rgba(34,197,94,0.6); }
+
+/* ฟอร์ม = แผงควบคุม */
+[data-testid="stForm"] { position: relative; background: linear-gradient(180deg, #0b120e, #080e0b); border: 1px solid #1b2a22; border-radius: 16px; padding: 18px 20px 10px; }
+[data-testid="stForm"]::before { content: ""; position: absolute; left: 20px; right: 20px; top: -1px; height: 2px; background: linear-gradient(90deg, transparent, #22c55e, transparent); opacity: .7; }
+
+/* ช่องกรอกผลสกอร์ = สกอร์บอร์ด */
+[class*="st-key-score_input_"] input { font-family: 'JetBrains Mono', monospace !important; font-size: 1.55rem !important; font-weight: 700 !important; text-align: center; letter-spacing: .32em; color: #4ade80 !important; text-shadow: 0 0 14px rgba(74,222,128,0.5); }
+[class*="st-key-score_input_"] input::placeholder { color: #2a4136 !important; text-shadow: none; }
+[class*="st-key-score_form_"] [data-testid="stForm"], [data-testid="stForm"][class*="st-key-score_form_"] { border-radius: 0 0 18px 18px; border-top: 1px dashed #1b2a22; background: #080e0b; padding: 16px 20px 8px; }
+[class*="st-key-score_form_"] [data-testid="stForm"]::before, [data-testid="stForm"][class*="st-key-score_form_"]::before { display: none; }
+[class*="st-key-score_form_"] [data-testid="stFormSubmitButton"] { margin-top: 1.75rem; }
+
+/* หัวฟอร์ม 5 นัด */
+.fx-side { --c: #22c55e; display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 12px; margin-bottom: 10px; border: 1px solid color-mix(in srgb, var(--c) 45%, #1b2a22); background: color-mix(in srgb, var(--c) 9%, transparent); font-weight: 500; color: #e6f2ea; }
+.fx-side.away { --c: #d9a441; }
+.fx-side small { font-family: 'JetBrains Mono', monospace; color: var(--c); letter-spacing: .1em; font-size: .72rem; }
+
+/* ================= JOB CARDS (การ์ด Tab 1 กลับมาแล้ว) ================= */
+.job-card { position: relative; overflow: hidden; background: #0c130f; border: 1px solid #1b2a22; border-left: 4px solid #1b2a22; border-radius: 14px; padding: 14px 20px 16px; margin-bottom: 10px; }
+.job-card.ok { border-left-color: #22c55e; }
+.job-card.err { border-left-color: #e5484d; }
+.job-card.run { border-left-color: #d9a441; }
+.job-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.job-name { color: #7f9a8b; font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-pill { font-size: 0.76rem; padding: 3px 11px; border-radius: 999px; white-space: nowrap; font-weight: 500; }
+.job-pill.run { color: #e8bb62; background: rgba(217,164,65,0.14); }
+.job-pill.ok { color: #4ade80; background: rgba(34,197,94,0.15); }
+.job-pill.err { color: #f06b70; background: rgba(229,72,77,0.14); }
+.job-title { color: #e6f2ea; font-size: 1.05rem; font-weight: 600; margin: 8px 0 2px; }
+.job-title .vs { color: #7f9a8b; font-weight: 400; padding: 0 6px; }
+.job-msg { color: #a7c4b5; font-size: 0.9rem; }
+.job-note { color: #7f9a8b; font-size: 0.8rem; margin-top: 6px; }
+.job-bar { height: 3px; border-radius: 3px; margin-top: 12px; background: #17241d; overflow: hidden; }
+.job-bar .j-bar { display: block; height: 100%; width: 40%; border-radius: 3px; background: linear-gradient(90deg, transparent, #22c55e, #86efac, transparent); animation: sweep 1.4s ease-in-out infinite; }
+@keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
 
 /* ================= KPI (monitor tiles) ================= */
 .kpi-wrap { display: flex; flex-wrap: wrap; gap: 16px; margin: 12px 0 22px; width: 100%; }
@@ -89,7 +144,6 @@ p, label, span { color: inherit; }
 .mon-status b { color: #4ade80; letter-spacing: .1em; font-weight: 700; }
 .mon-status em { font-style: normal; color: #e6f2ea; margin-left: 6px; }
 
-/* 🌟 แก้บั๊ก Ticker ล้นจอ */
 .ticker-container { width: 100%; overflow: hidden; border-top: 1px solid #14211a; border-bottom: 1px solid #14211a; background: #080e0b; margin-bottom: 16px; position: relative; }
 .ticker-track { display: flex; white-space: nowrap; width: max-content; padding: 9px 0; animation: marquee var(--dur, 40s) linear infinite; }
 @keyframes marquee { to { transform: translateX(-50%); } }
@@ -110,10 +164,12 @@ p, label, span { color: inherit; }
 .mon-id { color: #cfe3d6; letter-spacing: .1em; }
 .mon-st { padding: 2px 10px; border-radius: 999px; border: 1px solid #1b2a22; font-family: 'Prompt', sans-serif; }
 .mon-st.on { color: #4ade80; border-color: rgba(34,197,94,0.45); background: rgba(34,197,94,0.1); }
+
 .sig { margin-left: auto; display: flex; align-items: flex-end; gap: 3px; height: 14px; }
-.sig i { width: 4px; border-radius: 1px; background: #1f2e26; }
-.sig i:nth-child(1) { height: 5px; } .sig i:nth-child(2) { height: 8px; } .sig i:nth-child(3) { height: 11px; } .sig i:nth-child(4) { height: 14px; }
-.sig i.on { background: #4ade80; box-shadow: 0 0 6px rgba(74,222,128,0.7); }
+.sig .s-bar { width: 4px; border-radius: 1px; background: #1f2e26; }
+.sig .s-bar:nth-child(1) { height: 5px; } .sig .s-bar:nth-child(2) { height: 8px; } .sig .s-bar:nth-child(3) { height: 11px; } .sig .s-bar:nth-child(4) { height: 14px; }
+.sig .s-bar.on { background: #4ade80; box-shadow: 0 0 6px rgba(74,222,128,0.7); }
+
 .mon-teams { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 16px 0 14px; padding: 0 6px; width: 100%; }
 .mon-t { flex: 1; font-weight: 600; font-size: 1.1rem; color: #e6f2ea; line-height: 1.3; }
 .mon-t.r { text-align: right; }
@@ -121,7 +177,6 @@ p, label, span { color: inherit; }
 .ecg .pulse { stroke-dasharray: 22 78; animation: ecg 2.6s linear infinite; filter: drop-shadow(0 0 4px #4ade80); }
 @keyframes ecg { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
 
-/* 🌟 แก้บั๊กกล่องหลุดกรอบ */
 .mon-ch { display: flex; flex-direction: row; gap: 14px; width: 100%; box-sizing: border-box; }
 .ch { flex: 1; min-width: 0; --c: #22c55e; padding: 14px 16px; border-radius: 14px; background: rgba(5,9,7,0.72); border: 1px solid #14211a; box-sizing: border-box; }
 .ch-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-family: 'JetBrains Mono', monospace; font-size: .72rem; color: #7f9a8b; letter-spacing: .04em; }
@@ -132,25 +187,17 @@ p, label, span { color: inherit; }
 .ch-info { flex: 1; min-width: 0; }
 .ch-val { font-family: 'JetBrains Mono', monospace; font-size: 1.8rem; font-weight: 700; line-height: 1; color: var(--c); text-shadow: 0 0 18px color-mix(in srgb, var(--c) 55%, transparent); }
 .ch-val small { font-size: .9rem; color: #7f9a8b; margin-left: 2px; }
-/* 🌟 แก้บั๊กข้อความถูกตัด และปุ่มล้น */
+
 .ch-d { font-size: .78rem; color: #7f9a8b; margin: 6px 0 9px; line-height: 1.3; }
 .ch-v { display: block; padding: 6px 12px; border-radius: 8px; font-size: .82rem; font-weight: 500; color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); line-height: 1.4; word-wrap: break-word; margin-top: 4px; }
 
-/* 🌟 แก้บั๊ก Streamlit ลบแท็ก <i> ทำให้กราฟหาย (เปลี่ยนมาใช้ div .v-bar แทน) */
 .vu { display: grid; grid-template-columns: repeat(var(--n, 20), 1fr); gap: 3px; margin-top: 12px; }
 .vu .v-bar { height: 9px; border-radius: 2px; background: #17241d; }
 .vu .v-bar.on { background: var(--c); box-shadow: 0 0 8px color-mix(in srgb, var(--c) 60%, transparent); animation: vuon .35s calc(var(--i) * 40ms) both; }
+@keyframes vuon { from { background: #17241d; box-shadow: none; } }
 .vu-l { display: flex; justify-content: space-between; font-family: 'JetBrains Mono', monospace; font-size: .7rem; color: #7f9a8b; margin-top: 5px; padding: 0 2px; }
 
-/* 🌟 แก้บั๊กเสาสัญญาณ (มุมขวาบน) หาย */
-.sig { margin-left: auto; display: flex; align-items: flex-end; gap: 3px; height: 14px; }
-.sig .s-bar { width: 4px; border-radius: 1px; background: #1f2e26; }
-.sig .s-bar:nth-child(1) { height: 5px; } .sig .s-bar:nth-child(2) { height: 8px; } .sig .s-bar:nth-child(3) { height: 11px; } .sig .s-bar:nth-child(4) { height: 14px; }
-.sig .s-bar.on { background: #4ade80; box-shadow: 0 0 6px rgba(74,222,128,0.7); }
-
-/* 🌟 แก้แถบโหลดงาน (หลอดวิ่งๆ) หาย */
-.job-bar { height: 3px; border-radius: 3px; margin-top: 12px; background: #17241d; overflow: hidden; }
-.job-bar .j-bar { display: block; height: 100%; width: 40%; border-radius: 3px; background: linear-gradient(90deg, transparent, #22c55e, #86efac, transparent); animation: sweep 1.4s ease-in-out infinite; }
+.mon.solo { border-radius: 18px; margin-bottom: 10px; }
 
 /* 📱 Responsive Mobile Layout Fix */
 @media (max-width: 768px) {
