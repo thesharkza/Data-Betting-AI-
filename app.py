@@ -1,1335 +1,647 @@
-import streamlit as st
-import gspread
-import google.generativeai as genai
-from PIL import Image
-import io
+"""Run: python -m streamlit run app.py
+
+Complete application entrypoint. Keep the football_ai/ package beside this file.
+Default deployment binds to localhost and does not touch the original DATA tab.
+"""
+from __future__ import annotations
+
 import os
-import re
+os.environ.setdefault("OMP_NUM_THREADS", "2")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "2")
+
+import hashlib
 import json
-import pandas as pd
-import numpy as np
-import gc
+import logging
+import secrets as random_secrets
 import time
-import threading
-import uuid
 import traceback
-from math import isfinite
-from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone, timedelta
-from html import escape as esc
+from dataclasses import asdict
+from datetime import datetime, time as clock_time
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+from zoneinfo import ZoneInfo
 
-# 🚀 นำเข้า Machine Learning Ensemble & Models (V5.0 Ultimate Hybrid)
-from sklearn.ensemble import HistGradientBoostingClassifier, VotingClassifier
-from sklearn.model_selection import GroupShuffleSplit
-from threadpoolctl import threadpool_limits
-import scipy.stats as stats
-import plotly.express as px
-import plotly.graph_objects as go
+import pandas as pd
+import streamlit as st
 
-# ----------------------------------------
-# ตั้งค่าหน้าเว็บ
-# ----------------------------------------
-st.set_page_config(page_title="ระบบวิเคราะห์ราคาบอล VIP & AI", page_icon="⚽", layout="wide")
+from football_ai import __version__
+from football_ai.config import Settings
+from football_ai.domain import (FORM_COLUMNS, STATES, ValidationError, canonical_json, digest, market_errors,
+                                number, timestamp, to_decimal, utc_now)
+from football_ai.ingestion import available_models, extract_image, image_key
+from football_ai.jobs import JobQueue
+from football_ai.model import assess_prediction, train_market, training_digest, training_records
+from football_ai.registry import Registry
+from football_ai.repository import AmbiguousWrite, SheetsStore, SQLiteStore, StorageError
+from football_ai.service import (evaluate_frozen, freeze_predictions, materialize, pending_latest, save_quote, save_result)
 
-# ----------------------------------------
-# THEME : Black & Emerald (Cyberpunk Monitor)
-# ----------------------------------------
-BG = "#050907"
-SURFACE = "#0c130f"
-LINE = "#1b2a22"
-TEXT = "#e6f2ea"
-MUTED = "#7f9a8b"
-GREEN = "#22c55e"
-GREEN_SOFT = "#86efac"
-AMBER = "#d9a441"
-RED = "#e5484d"
-CYAN = "#0ea5e9"
-CYAN_SOFT = "#7dd3fc"
+st.set_page_config(page_title="Football AI v6 | Data & Model Lab", page_icon="\u26bd", layout="wide")
+st.markdown("""<style>
+.block-container {max-width:1320px;padding-top:2rem;padding-bottom:3rem;}
+[data-testid="stMetric"] {border:1px solid #254437;border-radius:12px;padding:14px;}
+h1,h2,h3 {letter-spacing:-.02em;}
+.stCaption {line-height:1.6;}
+</style>""", unsafe_allow_html=True)
 
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
-html, body, [class*="css"], .stApp, .stMarkdown, button, input, textarea { font-family: 'Prompt', 'Segoe UI', sans-serif !important; }
-.stApp { background: #050907; color: #e6f2ea; }
-header[data-testid="stHeader"] { background: transparent; }
-.block-container { padding-top: 2.2rem; max-width: 1280px; }
-h1, h2, h3, h4 { color: #e6f2ea !important; letter-spacing: -0.01em; }
-p, label, span { color: inherit; }
 
-/* 🌟 แก้ปัญหาข้อความเททับกันใน Streamlit Container */
-.element-container { overflow: visible !important; }
-.stMarkdown div { line-height: 1.5; }
+def read_secrets():
+    try:
+        return st.secrets.to_dict()
+    except (FileNotFoundError, st.errors.StreamlitSecretNotFoundError):
+        return {}
 
-.stTabs [data-baseweb="tab-list"] { gap: 6px; border-bottom: 1px solid #1b2a22; }
-.stTabs [data-baseweb="tab"] { background: transparent; color: #7f9a8b; padding: 10px 18px; border-radius: 10px 10px 0 0; font-weight: 500; }
-.stTabs [aria-selected="true"] { color: #22c55e !important; background: #0c130f; }
-.stTabs [data-baseweb="tab-highlight"] { background-color: #22c55e; }
 
-/* ================= KPI (monitor tiles) ================= */
-.kpi-wrap { display: flex; flex-wrap: wrap; gap: 16px; margin: 12px 0 22px; width: 100%; }
-.kpi { flex: 1 1 calc(33.333% - 16px); min-width: 250px; --k: #7f9a8b; position: relative; overflow: hidden; border: 1px solid #1b2a22; border-radius: 16px; padding: 20px 24px 22px; background-color: #0c130f; background-image: linear-gradient(rgba(34,197,94,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(34,197,94,0.04) 1px, transparent 1px); background-size: 100% 24px, 24px 100%; box-sizing: border-box; }
-.kpi::before, .kpi::after { content: ""; position: absolute; width: 11px; height: 11px; border: 2px solid var(--k); opacity: .7; }
-.kpi::before { top: 8px; left: 8px; border-right: none; border-bottom: none; }
-.kpi::after { bottom: 8px; right: 8px; border-left: none; border-top: none; }
-.kpi.hero { --k: #22c55e; background-color: #0d2417; border-color: #1f6b3d; box-shadow: 0 0 40px -12px rgba(34,197,94,0.35); }
-.kpi.hero-cyan { --k: #0ea5e9; background-color: #08283d; border-color: #0284c7; box-shadow: 0 0 40px -12px rgba(14,165,233,0.35); }
-.kpi-label { display: flex; align-items: center; gap: 9px; color: #7f9a8b; font-size: 0.9rem; margin-bottom: 6px; }
-.kpi-value { font-family: 'JetBrains Mono', monospace; font-size: 2.4rem; font-weight: 700; line-height: 1.15; color: #e6f2ea; }
-.kpi.hero .kpi-value { font-size: 3.2rem; color: #4ade80; text-shadow: 0 0 22px rgba(74,222,128,0.45); }
-.kpi.hero-cyan .kpi-value { font-size: 3.2rem; color: #38bdf8; text-shadow: 0 0 22px rgba(56,189,248,0.45); }
-.kpi-unit { font-family: 'Prompt', sans-serif; font-size: 1rem; color: #7f9a8b; font-weight: 400; margin-left: 4px; text-shadow: none; }
-.kpi-bar { height: 6px; background: #17241d; border-radius: 6px; margin-top: 14px; overflow: hidden; }
-.kpi-bar > div { height: 100%; background: linear-gradient(90deg, #16a34a, #4ade80); border-radius: 6px; }
-.kpi.hero-cyan .kpi-bar > div { background: linear-gradient(90deg, #0284c7, #38bdf8); }
-
-/* ================= MONITOR & TICKER ================= */
-.led { --lc: var(--k, #22c55e); display: inline-block; flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--lc); box-shadow: 0 0 0 0 color-mix(in srgb, var(--lc) 70%, transparent); animation: ping 1.8s infinite; }
-@keyframes ping { 70% { box-shadow: 0 0 0 9px color-mix(in srgb, var(--lc) 0%, transparent); } 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--lc) 0%, transparent); } }
-.mon-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding: 11px 18px; margin: 6px 0 10px; background: #0a110d; border: 1px solid #1b2a22; border-radius: 14px; font-family: 'JetBrains Mono', monospace; font-size: .8rem; color: #7f9a8b; }
-.mon-status b { color: #4ade80; letter-spacing: .1em; font-weight: 700; }
-.mon-status em { font-style: normal; color: #e6f2ea; margin-left: 6px; }
-
-/* 🌟 แก้บั๊ก Ticker ล้นจอ */
-.ticker-container { width: 100%; overflow: hidden; border-top: 1px solid #14211a; border-bottom: 1px solid #14211a; background: #080e0b; margin-bottom: 16px; position: relative; }
-.ticker-track { display: flex; white-space: nowrap; width: max-content; padding: 9px 0; animation: marquee var(--dur, 40s) linear infinite; }
-@keyframes marquee { to { transform: translateX(-50%); } }
-.tk { display: inline-flex; align-items: center; font-size: .84rem; color: #a7c4b5; margin-right: 38px; }
-.tk b { color: #e6f2ea; font-weight: 500; margin-right: 6px; }
-.tk .d { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin: 0 6px 0 12px; background: var(--c); box-shadow: 0 0 8px var(--c); }
-
-/* ================= MATCH CARDS ================= */
-.mon { position: relative; overflow: hidden; border-radius: 18px; padding: 14px 22px 22px; margin-bottom: 16px; background: linear-gradient(rgba(34,197,94,0.045) 1px, transparent 1px) 0 0 / 100% 26px, linear-gradient(90deg, rgba(34,197,94,0.045) 1px, transparent 1px) 0 0 / 26px 100%, linear-gradient(180deg, #0e1712, #0b110e); border: 1px solid #1b2a22; }
-.mon::after { content: ""; position: absolute; left: 0; right: 0; top: -40%; height: 40%; pointer-events: none; background: linear-gradient(180deg, transparent, rgba(74,222,128,0.07), transparent); animation: scan 5.5s linear infinite; }
-@keyframes scan { to { transform: translateY(350%); } }
-.cn { position: absolute; width: 12px; height: 12px; border: 2px solid #22c55e; opacity: .65; pointer-events: none; }
-.cn.tl { top: 8px; left: 8px; border-right: none; border-bottom: none; }
-.cn.tr { top: 8px; right: 8px; border-left: none; border-bottom: none; }
-.cn.bl { bottom: 8px; left: 8px; border-right: none; border-top: none; }
-.cn.br { bottom: 8px; right: 8px; border-left: none; border-top: none; }
-.mon-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-family: 'JetBrains Mono', monospace; font-size: .74rem; color: #7f9a8b; padding: 0 6px; }
-.mon-id { color: #cfe3d6; letter-spacing: .1em; }
-.mon-st { padding: 2px 10px; border-radius: 999px; border: 1px solid #1b2a22; font-family: 'Prompt', sans-serif; }
-.mon-st.on { color: #4ade80; border-color: rgba(34,197,94,0.45); background: rgba(34,197,94,0.1); }
-.sig { margin-left: auto; display: flex; align-items: flex-end; gap: 3px; height: 14px; }
-.sig i { width: 4px; border-radius: 1px; background: #1f2e26; }
-.sig i:nth-child(1) { height: 5px; } .sig i:nth-child(2) { height: 8px; } .sig i:nth-child(3) { height: 11px; } .sig i:nth-child(4) { height: 14px; }
-.sig i.on { background: #4ade80; box-shadow: 0 0 6px rgba(74,222,128,0.7); }
-.mon-teams { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 16px 0 14px; padding: 0 6px; width: 100%; }
-.mon-t { flex: 1; font-weight: 600; font-size: 1.1rem; color: #e6f2ea; line-height: 1.3; }
-.mon-t.r { text-align: right; }
-.ecg { flex: 0 0 60px; height: 30px; }
-.ecg .pulse { stroke-dasharray: 22 78; animation: ecg 2.6s linear infinite; filter: drop-shadow(0 0 4px #4ade80); }
-@keyframes ecg { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
-
-/* 🌟 แก้บั๊กกล่องหลุดกรอบ */
-.mon-ch { display: flex; flex-direction: row; gap: 14px; width: 100%; box-sizing: border-box; }
-.ch { flex: 1; min-width: 0; --c: #22c55e; padding: 14px 16px; border-radius: 14px; background: rgba(5,9,7,0.72); border: 1px solid #14211a; box-sizing: border-box; }
-.ch-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-family: 'JetBrains Mono', monospace; font-size: .72rem; color: #7f9a8b; letter-spacing: .04em; }
-.ch-k { color: var(--c); font-weight: 700; flex: none; }
-.ch-l { color: #cfe3d6; font-size: .82rem; text-align: right; }
-.ch-body { display: flex; align-items: center; gap: 14px; margin-top: 6px; }
-.dial { flex: 0 0 80px; width: 80px; height: 48px; overflow: visible; }
-.ch-info { flex: 1; min-width: 0; }
-.ch-val { font-family: 'JetBrains Mono', monospace; font-size: 1.8rem; font-weight: 700; line-height: 1; color: var(--c); text-shadow: 0 0 18px color-mix(in srgb, var(--c) 55%, transparent); }
-.ch-val small { font-size: .9rem; color: #7f9a8b; margin-left: 2px; }
-/* 🌟 แก้บั๊กข้อความถูกตัด และปุ่มล้น */
-.ch-d { font-size: .78rem; color: #7f9a8b; margin: 6px 0 9px; line-height: 1.3; }
-.ch-v { display: block; padding: 6px 12px; border-radius: 8px; font-size: .82rem; font-weight: 500; color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); line-height: 1.4; word-wrap: break-word; margin-top: 4px; }
-
-/* 🌟 แก้บั๊ก Streamlit ลบแท็ก <i> ทำให้กราฟหาย (เปลี่ยนมาใช้ div .v-bar แทน) */
-.vu { display: grid; grid-template-columns: repeat(var(--n, 20), 1fr); gap: 3px; margin-top: 12px; }
-.vu .v-bar { height: 9px; border-radius: 2px; background: #17241d; }
-.vu .v-bar.on { background: var(--c); box-shadow: 0 0 8px color-mix(in srgb, var(--c) 60%, transparent); animation: vuon .35s calc(var(--i) * 40ms) both; }
-.vu-l { display: flex; justify-content: space-between; font-family: 'JetBrains Mono', monospace; font-size: .7rem; color: #7f9a8b; margin-top: 5px; padding: 0 2px; }
-
-/* 🌟 แก้บั๊กเสาสัญญาณ (มุมขวาบน) หาย */
-.sig { margin-left: auto; display: flex; align-items: flex-end; gap: 3px; height: 14px; }
-.sig .s-bar { width: 4px; border-radius: 1px; background: #1f2e26; }
-.sig .s-bar:nth-child(1) { height: 5px; } .sig .s-bar:nth-child(2) { height: 8px; } .sig .s-bar:nth-child(3) { height: 11px; } .sig .s-bar:nth-child(4) { height: 14px; }
-.sig .s-bar.on { background: #4ade80; box-shadow: 0 0 6px rgba(74,222,128,0.7); }
-
-/* 🌟 แก้แถบโหลดงาน (หลอดวิ่งๆ) หาย */
-.job-bar { height: 3px; border-radius: 3px; margin-top: 12px; background: #17241d; overflow: hidden; }
-.job-bar .j-bar { display: block; height: 100%; width: 40%; border-radius: 3px; background: linear-gradient(90deg, transparent, #22c55e, #86efac, transparent); animation: sweep 1.4s ease-in-out infinite; }
-
-/* 📱 Responsive Mobile Layout Fix */
-@media (max-width: 768px) {
-    .kpi { flex: 1 1 100%; min-width: 100%; }
-    .mon-ch { flex-direction: column; }
-    .mon-t { font-size: 1rem; }
-    .ecg { display: none; }
-    .mon-teams { justify-content: flex-start; }
-    .mon-t.r { text-align: left; }
-    .mon-t.r::before { content: "vs "; color: #5d7a69; font-weight: 400; }
-}
-@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
-</style>
-""", unsafe_allow_html=True)
-
-# ----------------------------------------
-# การตั้งค่า API และ Google Sheets
-# ----------------------------------------
-GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-else:
-    st.error("❌ ไม่พบ GEMINI_API_KEY กรุณาตั้งค่าใน Streamlit Secrets")
-
-def _has_gspread_secret():
-    try: return "gspread" in st.secrets
-    except Exception: return False
-
-@st.cache_resource
-def init_gspread():
-    if _has_gspread_secret():
-        client = gspread.service_account_from_dict(dict(st.secrets["gspread"]))
-    else:
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        client = gspread.service_account(filename=os.path.join(base_dir, 'credentials.json'))
-    return client.open("ข้อมูลราคาบอลสกัดจากภาพ")
-
+SECRET_VALUES = read_secrets()
 try:
-    workbook = init_gspread()
-except Exception as e:
-    st.error(f"❌ เชื่อมต่อ Google Sheets ไม่สำเร็จ: {e}")
-    workbook = None
+    SETTINGS = Settings.load(SECRET_VALUES)
+except (TypeError, ValueError) as exc:
+    st.error("Configuration error: " + str(exc)); st.stop()
+SETTINGS.data_dir.mkdir(parents=True, exist_ok=True)
 
-def get_ws(wb):
-    try: return wb.worksheet("DATA")
-    except gspread.exceptions.WorksheetNotFound: return wb.sheet1
-
-# ----------------------------------------
-# การจัดการ Data Extraction & Google Sheets
-# ----------------------------------------
-model = genai.GenerativeModel('gemini-3.7-flash')
-
-# ประกาศตัวแปร FIELD_NAMES และ CRITICAL_IDX เพื่อป้องกันแอปพังตอนอ่านค่า
-WATER_IDX = [6, 8, 10, 11]
-CRITICAL_IDX = [5, 6, 7, 8, 9, 10, 11]
-FIELD_NAMES = ["ทีมเหย้า", "ทีมเยือน", "1X2เหย้า", "1X2เสมอ", "1X2เยือน", "HDPเหย้า", "น้ำHDPเหย้า", "HDPเยือน", "น้ำHDPเยือน", "โกลสูงต่ำ", "น้ำสูง", "น้ำต่ำ"]
-
-FMT_LABELS = {"MY": "มาเลเซีย", "HK": "ฮ่องกง", "ID": "อินโดนีเซีย", "EU": "ยุโรป (Decimal)"}
-FMT_CHOICES = { "อัตโนมัติ (ให้ AI ตรวจจับ)": None, "มาเลเซีย (Malay)": "MY", "ฮ่องกง (HK)": "HK", "อินโดนีเซีย (Indo)": "ID", "ยุโรป (Decimal)": "EU" }
-
-def to_malay(x, fmt):
-    x = float(x)
-    if fmt == "MY": return round(x, 2)
-    if fmt == "EU": hk = x - 1
-    elif fmt == "ID": hk = x if x > 0 else (1 / abs(x) if x != 0 else 0)
-    else: hk = x
-    return round(hk, 2) if hk <= 1 else round(-1 / hk, 2)
-
-def guess_format(nums):
-    if nums and all(v > 1 for v in nums): return "EU"
-    if any(v < -1 for v in nums): return "ID"
-    return "MY"
-
-def clean_raw_data(raw_text):
-    text = raw_text.strip()
-    text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'\s*```$', '', text).strip()
-    
-    match_array = re.search(r'\[(.*)\]', text, re.DOTALL)
-    match_obj = re.search(r'\{.*\}', text, re.DOTALL)
-    
-    if match_array: json_str = "[" + match_array.group(1).strip() + "]"
-    elif match_obj: json_str = match_obj.group(0).strip()
-    else: json_str = text
-        
-    json_str = re.sub(r',\s*\]$', ']', json_str)
-    json_str = re.sub(r',\s*\}$', '}', json_str)
-    
-    try: data = json.loads(json_str)
-    except Exception: raise ValueError(f"รูปแบบข้อมูลผิดพลาด -> สิ่งที่ AI ตอบมาคือ: {text[:80]}...")
-        
-    if isinstance(data, dict): data = list(data.values())
-    if isinstance(data, list) and len(data) > 0 and isinstance(data[0], list): data = data[0]
-    if not isinstance(data, list): raise ValueError(f"ข้อมูลไม่ใช่ Array -> สิ่งที่ AI ตอบมาคือ: {str(data)[:80]}...")
-    if len(data) < 12: raise ValueError(f"ข้อมูลมาไม่ครบ (ได้ {len(data)} ช่อง จาก 12) -> ข้อมูลที่ได้: {str(data)[:80]}...")
-        
-    home = str(data[0]).strip()
-    away = str(data[1]).strip()
-
-    numbers, bad = [], []
-    for i in range(2, 12):
-        val_str = str(data[i]).replace('−', '-').replace(',', '').strip()
-        try:
-            v = float(val_str)
-            if not isfinite(v): raise ValueError
-            numbers.append(v)
-        except (TypeError, ValueError):
-            numbers.append(None)      # ไม่ใช่ 0.0 อีกต่อไป
-            bad.append(i)
-
-    critical_bad = [FIELD_NAMES[i] for i in bad if i in CRITICAL_IDX]
-    if critical_bad:   # raise -> extract_row จะ retry ให้อัตโนมัติ และถ้ายังพลาดงานจะขึ้น error
-        raise ValueError(f"อ่านค่าไม่ได้: {', '.join(critical_bad)} -> AI ตอบ: {str(data)[:80]}")
-    warn = ("ช่องที่อ่านไม่ได้ (เว้นว่างในชีต): " + ", ".join(FIELD_NAMES[i] for i in bad)) if bad else None
-
-    ai_fmt = str(data[12]).strip().upper() if len(data) > 12 else "UNK"
-    if ai_fmt not in ["MY", "HK", "ID", "EU"]: ai_fmt = "UNK"
-    return [home, away] + numbers, ai_fmt, warn
-
-def convert_water_to_malay(row, user_fmt, ai_fmt):
-    new_row = list(row)
-    idx = [i for i in WATER_IDX if i < len(new_row) and isinstance(new_row[i], (int, float))]
-    if not idx: return new_row, "ℹ️ ไม่พบค่าน้ำที่เป็นตัวเลข", ""
-    fmt, source = (user_fmt, "คุณเลือกเอง") if user_fmt else (ai_fmt, "AI ตรวจพบ")
-    if fmt not in FMT_LABELS:
-        fmt, source = guess_format([new_row[i] for i in idx]), "ระบบประเมินเอง"
-    for i in idx: new_row[i] = to_malay(new_row[i], fmt)
-    return new_row, f"อิงรูปแบบ: {FMT_LABELS.get(fmt, fmt)} ({source})", None
-
-FORM5_HEADERS = ["H_WinRate_Last5", "H_GoalsFor_Last5", "H_GoalsAgainst_Last5", "A_WinRate_Last5", "A_GoalsFor_Last5", "A_GoalsAgainst_Last5"]
-
-def validate_form5(values):
-    if len(values) != 6 or any(v is None or v == "" or isinstance(v, bool) for v in values):
-        raise ValueError('กรุณากรอกข้อมูลให้ครบ 6 ช่อง')
-    nums = [float(v) for v in values]
-    return [nums[0] / 100, int(nums[1]), int(nums[2]), nums[3] / 100, int(nums[4]), int(nums[5])]
-
-def save_row_to_sheet(ws, row, form5):
-    normalized = validate_form5(form5)
-    with JOBS.sheet_lock:
-        col_a, col_b = ws.col_values(1), ws.col_values(2)
-    last_row = max((i + 1 for i, v in enumerate(col_a) if str(v).strip()), default=1)
-    new_home, new_away = str(row[0]).strip(), str(row[1]).strip()
-    target_row = next((i + 1 for i in range(1, len(col_a)) if str(col_a[i]).strip() == new_home and (str(col_b[i]).strip() if i < len(col_b) else "") == new_away), None)
-    overwritten = target_row is not None
-    if not overwritten: target_row = max(2, last_row + 1)
-
-    requests = []
-    if ws.col_count < 29: requests.append({"appendDimension": {"sheetId": ws.id, "dimension": "COLUMNS", "length": 29 - ws.col_count}})
-    if target_row > ws.row_count: requests.append({"appendDimension": {"sheetId": ws.id, "dimension": "ROWS", "length": target_row - ws.row_count}})
-
-    def typed(value):
-        if value is None or (isinstance(value, float) and not isfinite(value)): return {}   # เซลล์ว่าง
-        if isinstance(value, (int, float)) and not isinstance(value, bool): return {"userEnteredValue": {"numberValue": value}}
-        return {"userEnteredValue": {"stringValue": str(value)}}
-
-    def update(start_row, start_col, cells, fields):
-        return {"updateCells": {"start": {"sheetId": ws.id, "rowIndex": start_row, "columnIndex": start_col}, "rows": [{"values": cells}], "fields": fields}}
-
-    requests.append(update(0, 23, [typed(h) for h in FORM5_HEADERS], "userEnteredValue"))
-    requests.append(update(target_row - 1, 0, [typed(v) for v in row[:12]], "userEnteredValue"))
-    
-    form_cells = [typed(v) for v in normalized]
-    for i, cell in enumerate(form_cells):
-        cell["userEnteredFormat"] = {"numberFormat": {"type": "PERCENT" if i in (0, 3) else "NUMBER", "pattern": "0.0%" if i in (0, 3) else "0"}}
-    requests.append(update(target_row - 1, 23, form_cells, "userEnteredValue,userEnteredFormat.numberFormat"))
-    ws.spreadsheet.batch_update({"requests": requests})
-    return target_row, overwritten
-
-def update_match_score_in_sheet(workbook, home_team, away_team, score_text):
-    home, away = str(home_team).strip(), str(away_team).strip()
-    with JOBS.sheet_lock:
-        ws = get_ws(workbook)
-        col_a, col_b, col_m = ws.col_values(1), ws.col_values(2), ws.col_values(13)
-        cell = lambda col, i: str(col[i]).strip() if i < len(col) else ""
-        target_row = next((i + 1 for i in range(1, len(col_a))
-                           if cell(col_a, i) == home and cell(col_b, i) == away and not cell(col_m, i)), None)
-        if target_row is None: return False
-        ws.update(f'M{target_row}', [[score_text]])
-        return True
-    return False
-
-# ----------------------------------------
-# Job Manager (คิวงานเบื้องหลัง)
-# ----------------------------------------
-class JobManager:
-    def __init__(self):
-        self.jobs = {}
-        self.lock = threading.Lock()
-        self.sheet_lock = threading.RLock()
-        self.pool = ThreadPoolExecutor(max_workers=3)
-        self.data_version = 0
-
-    def create(self, name, img_bytes, user_fmt, owner_id):
-        job_id = uuid.uuid4().hex[:8]
-        with self.lock:
-            self.jobs[job_id] = {"id": job_id, "name": name, "status": "queued", "msg": "รอคิว...", "created": time.time(), "finished": None, "img": img_bytes, "user_fmt": user_fmt, "result": None, "note": None, "warn": None, "owner_id": owner_id, "row_data": None, "form5": None}
-        return job_id
-    def get(self, job_id):
-        with self.lock: return dict(self.jobs.get(job_id)) if job_id in self.jobs else None
-    def update(self, job_id, **kw):
-        with self.lock:
-            if job_id in self.jobs: self.jobs[job_id].update(kw)
-    def bump_version(self):
-        with self.lock: self.data_version += 1
-    def snapshot(self):
-        with self.lock: return sorted((dict(j) for j in self.jobs.values()), key=lambda j: j["created"], reverse=True)
 
 @st.cache_resource
-def get_job_manager(): return JobManager()
+def configure_logging(directory: str):
+    logger = logging.getLogger("football_ai")
+    logger.setLevel(logging.INFO)
+    if not logger.handlers:
+        handler = RotatingFileHandler(Path(directory) / "application.log", maxBytes=2_000_000, backupCount=3, encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+        logger.addHandler(handler)
+    return logger
 
-JOBS = get_job_manager()
-if "form5_owner_id" not in st.session_state: st.session_state["form5_owner_id"] = uuid.uuid4().hex
 
-def extract_row(img_bytes, user_fmt, model):
-    img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
-    img.thumbnail((1600, 1600))
-    buf = io.BytesIO()
-    img.save(buf, format='JPEG', quality=85)
-    
-    prompt = (
-        "กรุณาดึงข้อมูลจากตารางราคาบอลในภาพนี้ เลือกมา 1 คู่ที่เห็นชัดที่สุด\n"
-        "**สำคัญมาก: ตอบกลับเฉพาะข้อมูลแบบ JSON Array เท่านั้น ห้ามพิมพ์คำอธิบายหรือตัวหนังสืออื่นๆ เด็ดขาด**\n"
-        "[\"ทีมเหย้า\", \"ทีมเยือน\", 1X2เหย้า, 1X2เสมอ, 1X2เยือน, HDPเหย้า, น้ำHDPเหย้า, HDPเยือน, น้ำHDPเยือน, โกลสูงต่ำ, น้ำสูง, น้ำต่ำ, \"รูปแบบน้ำเช่น MY\"]\n"
-        "ตัวอย่างที่ต้องการ:\n"
-        "[\"Arsenal\", \"Chelsea\", 2.10, 3.50, 3.20, -0.5, 0.95, 0.5, -0.85, 2.5, 0.80, -0.90, \"MY\"]"
-    )
-    
-    safety_settings = [
-        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"}
-    ]
-    
-    last_error = ""
-    for attempt in range(3):
-        try:
-            resp = model.generate_content([{"mime_type": "image/jpeg", "data": buf.getvalue()}, prompt], safety_settings=safety_settings)
-            if getattr(resp, 'prompt_feedback', None) and resp.prompt_feedback.block_reason:
-                raise ValueError("ภาพถูกเซ็นเซอร์โดยระบบ Safety ของ Google")
-                
-            raw_text = resp.text.strip()
-            if not raw_text: raise ValueError("AI ตอบกลับเป็นค่าว่าง (Empty Response)")
-                
-            row, ai_fmt, parse_warn = clean_raw_data(raw_text)
-            row, note, fmt_warn = convert_water_to_malay(row, user_fmt, ai_fmt)
-            return row, note, (" | ".join(w for w in (parse_warn, fmt_warn) if w) or None)
-        except Exception as e:
-            last_error = str(e)
-            time.sleep(2)
-            
-    raise RuntimeError(f"{last_error}")
+LOGGER = configure_logging(str(SETTINGS.data_dir))
 
-def extract_form_stats(img_bytes, model):
-    img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
-    img.thumbnail((1600, 1600))
-    buf = io.BytesIO()
-    img.save(buf, format='JPEG', quality=85)
-    
-    prompt = (
-        "กรุณาดึงข้อมูลสถิติจากภาพ (ฟอร์มการเล่น) โดยตอบกลับเป็น JSON Array ที่มีตัวเลข 6 ตัวแบบนี้เท่านั้น ห้ามพิมพ์คำอธิบายอื่นเด็ดขาด:\n"
-        "[WinRateเหย้า, ประตูได้เหย้า, ประตูเสียเหย้า, WinRateเยือน, ประตูได้เยือน, ประตูเสียเยือน]\n"
-        "หมายเหตุ: ทีมบนคือเหย้า ทีมล่างคือเยือน WinRate ให้ใส่เฉพาะตัวเลข (เช่น 40% ให้ใส่ 40)"
-    )
-    
-    safety_settings = [
-        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"}
-    ]
-    
-    last_error = ""
-    for attempt in range(3):
-        try:
-            resp = model.generate_content([{"mime_type": "image/jpeg", "data": buf.getvalue()}, prompt], safety_settings=safety_settings)
-            raw_text = resp.text.strip()
-            
-            raw_text = re.sub(r'^```(?:json)?\s*', '', raw_text, flags=re.IGNORECASE)
-            raw_text = re.sub(r'\s*```$', '', raw_text).strip()
-            
-            match_array = re.search(r'\[(.*)\]', raw_text, re.DOTALL)
-            if match_array:
-                data = json.loads("[" + match_array.group(1).strip() + "]")
-                if len(data) >= 6:
-                    return [float(data[0]), int(data[1]), int(data[2]), float(data[3]), int(data[4]), int(data[5])]
-            raise ValueError(f"รูปแบบไม่ถูกต้อง: {raw_text}")
-        except Exception as e:
-            last_error = str(e)
-            time.sleep(2)
-            
-    raise RuntimeError(f"ไม่สามารถอ่านภาพสถิติได้: {last_error}")
 
-def process_job(job_id, workbook, model):
-    try:
-        job = JOBS.get(job_id)
-        JOBS.update(job_id, status="reading", msg="🤖 AI กำลังอ่านราคา...")
-        row, note, warn = extract_row(job["img"], job["user_fmt"], model)
-        JOBS.update(job_id, status="ready", msg='อ่านราคาแล้ว', row_data=list(row), note=note, warn=warn, img=None)
-    except Exception as e:
-        JOBS.update(job_id, status="error", msg=f"{e}", finished=time.time())
-    finally: gc.collect()
-
-def save_confirmed_job(job_id, workbook):
-    job = JOBS.get(job_id)
-    if not job or job["status"] != "saving": return
-    try:
-        with JOBS.sheet_lock:
-            ws = get_ws(workbook)
-            target_row, overwritten = save_row_to_sheet(ws, job["row_data"], job["form5"])
-        JOBS.bump_version()
-        JOBS.update(job_id, status="done", msg="บันทึกสำเร็จ", finished=time.time(), result={"home": str(job["row_data"][0]), "away": str(job["row_data"][1]), "row": target_row, "overwritten": overwritten})
-    except Exception as exc:
-        JOBS.update(job_id, status="error", msg=f"Save error: {exc}", finished=time.time())
-
-def submit_form5(job_id, values, owner_id):
-    job = JOBS.get(job_id)
-    if job and job.get("owner_id") == owner_id:
-        JOBS.update(job_id, status="saving", msg="Saving...", form5=list(values))
-        JOBS.pool.submit(save_confirmed_job, job_id, workbook)
-
-# ----------------------------------------
-# UI: Upload & Tasks
-# ----------------------------------------
-STATUS_UI = {"queued": ("รอคิว", "run"), "reading": ("กำลังอ่านภาพ", "run"), "ready": ("อ่านราคาแล้ว", "ok"),
-             "saving": ("กำลังบันทึก", "run"), "done": ("บันทึกแล้ว", "ok"), "error": ("ไม่สำเร็จ", "err")}
-
-def panel_header(title, sub): st.markdown(f"<p class='panel-title'>{title}</p><p class='panel-sub'>{sub}</p>", unsafe_allow_html=True)
-
-def _render_job_signal(res):
-    ai = get_ai()
-    if ai is None or ai["status"] != "ok": return
-    dfp = ai["df_predict"]
-    if len(dfp) == 0 or 'AI_ฟันธง_HDP' not in dfp.columns: return
-    m = dfp[(dfp['ทีมเหย้า'].astype(str).str.strip() == str(res['home']).strip()) & (dfp['ทีมเยือน'].astype(str).str.strip() == str(res['away']).strip())]
-    if m.empty: return
-    st.markdown(_card_from_row(int(res['row']), m.iloc[-1], solo=True), unsafe_allow_html=True)
-
-def render_jobs(polling=False):
-    jobs = [j for j in JOBS.snapshot() if j.get("owner_id") == st.session_state["form5_owner_id"]]
-    if not jobs: return
-    if polling and not any(j["status"] in ("queued", "reading", "saving") for j in jobs): st.rerun()
-    for j in jobs:
-        cls = "ok" if j["status"] == "done" else "err" if j["status"] == "error" else "run"
-        label, pill_cls = STATUS_UI.get(j["status"], (j["status"], "run"))
-        head = (f"<div class='job-head'><span class='job-name'>{esc(j['name'])}</span>"
-                f"<span class='job-pill {pill_cls}'>{label}</span></div>")
-        pair = j.get("row_data")
-        res = j.get("result")
-        if j["status"] == "done" and res:
-            where = "บันทึกทับแถวเดิม" if res.get("overwritten") else "คู่ใหม่"
-            title = (f"<div class='job-title'>{esc(res['home'])}<span class='vs'>vs</span>{esc(res['away'])}"
-                     f"<span class='job-msg'> · แถว {res['row']} ({where})</span></div>")
-        elif pair:
-            title = f"<div class='job-title'>{esc(str(pair[0]))}<span class='vs'>vs</span>{esc(str(pair[1]))}</div>"
-        else: title = ""
-        body = title + f"<div class='job-msg'>{esc(j['msg'])}</div>"
-        if j.get("note"): body += f"<div class='job-note'>{esc(str(j['note']))}</div>"
-        if j.get("warn"): body += f"<div class='job-note' style='color:#e8bb62'>{esc(str(j['warn']))}</div>"
-        if j["status"] in ("queued", "reading", "saving"): body += "<div class='job-bar'><div class='j-bar'></div></div>"
-        st.markdown(f"<div class='job-card {cls}'>{head}{body}</div>", unsafe_allow_html=True)
-        if j["status"] == "done" and res: _render_job_signal(res)
-        if j["status"] == "ready":
-            if st.button('กรอกฟอร์ม 5 นัด', key=f"open_form5_{j['id']}"):
-                st.session_state["form5_editing"] = j["id"]
-                st.rerun()
-
-def clear_owner_jobs(owner_id):
-    with JOBS.lock:
-        for k in [k for k, j in JOBS.jobs.items() if j.get("owner_id") == owner_id and j["status"] != "saving"]:
-            JOBS.jobs.pop(k)
-
-def clear_upload_page():
-    clear_owner_jobs(st.session_state["form5_owner_id"])
-    st.session_state.pop("form5_editing", None)
-    st.session_state["up_n"] = st.session_state.get("up_n", 0) + 1
-
-def render_form5_editor():
-    job_id = st.session_state.get("form5_editing")
-    job = JOBS.get(job_id) if job_id else None
-    if not job or job["status"] != "ready": return
-    
-    panel_header("ฟอร์ม 5 นัดล่าสุด", "อัปโหลดภาพสถิติเพื่อให้ AI กรอกอัตโนมัติ หรือกรอกข้อมูลเอง")
-    
-    stat_file = st.file_uploader("📸 อัปโหลดภาพฟอร์มสถิติ", type=['png', 'jpg', 'jpeg'], key=f"stat_up_{job_id}")
-    
-    if stat_file and st.session_state.get(f"stat_processed_{job_id}") != stat_file.name:
-        with st.spinner("🤖 AI กำลังอ่านข้อมูลสถิติ..."):
-            try:
-                form_data = extract_form_stats(stat_file.getvalue(), model)
-                st.session_state[f"{job_id}_h_win"] = form_data[0]
-                st.session_state[f"{job_id}_h_for"] = form_data[1]
-                st.session_state[f"{job_id}_h_ag"] = form_data[2]
-                st.session_state[f"{job_id}_a_win"] = form_data[3]
-                st.session_state[f"{job_id}_a_for"] = form_data[4]
-                st.session_state[f"{job_id}_a_ag"] = form_data[5]
-                st.session_state[f"stat_processed_{job_id}"] = stat_file.name
-                st.toast("✅ ดึงข้อมูลสถิติสำเร็จ!")
-                st.rerun()
-            except Exception as e:
-                st.error(f"เกิดข้อผิดพลาด: {e}")
-
-    with st.form(f"form5_{job_id}"):
-        left, right = st.columns(2, gap="large")
-        with left:
-            st.markdown(f"<div class='fx-side'><small>HOME</small>{esc(str(job['row_data'][0]))}</div>", unsafe_allow_html=True)
-            h_win = st.number_input('Win Rate เหย้า (%)', step=20., key=f"{job_id}_h_win", value=float(st.session_state.get(f"{job_id}_h_win", 0.0)))
-            h_for = st.number_input('ประตูได้ (รวม 5 นัด)', step=1, key=f"{job_id}_h_for", value=int(st.session_state.get(f"{job_id}_h_for", 0)))
-            h_ag = st.number_input('ประตูเสีย (รวม 5 นัด)', step=1, key=f"{job_id}_h_ag", value=int(st.session_state.get(f"{job_id}_h_ag", 0)))
-        with right:
-            st.markdown(f"<div class='fx-side away'><small>AWAY</small>{esc(str(job['row_data'][1]))}</div>", unsafe_allow_html=True)
-            a_win = st.number_input('Win Rate เยือน (%)', step=20., key=f"{job_id}_a_win", value=float(st.session_state.get(f"{job_id}_a_win", 0.0)))
-            a_for = st.number_input('ประตูได้ (รวม 5 นัด)', step=1, key=f"{job_id}_a_for", value=int(st.session_state.get(f"{job_id}_a_for", 0)))
-            a_ag = st.number_input('ประตูเสีย (รวม 5 นัด)', step=1, key=f"{job_id}_a_ag", value=int(st.session_state.get(f"{job_id}_a_ag", 0)))
-            
-        if st.form_submit_button('💾 บันทึกทั้งหมด', type="primary"):
-            submit_form5(job_id, [h_win, h_for, h_ag, a_win, a_for, a_ag], st.session_state["form5_owner_id"])
-            st.session_state.pop("form5_editing", None)
-            st.rerun()
-
-# ----------------------------------------
-# AI : Machine Learning V5.0 (Ultimate Hybrid)
-# ----------------------------------------
-ML_PATCH_VERSION = "V5.0-Ultimate-Hybrid"
-ML_CONFIG = {
-    "seed": 42, "min_rows": 100, 
-    "min_ev": 0.02,                   # เกณฑ์ EV ขั้นต่ำ 2%
-    "probability_stress": 0.03,       # เผื่อความคลาดเคลื่อนทางสถิติ 3%
-    "min_line_examples": 15,
-}
-ML_STATES = ("FL", "HL", "PUSH", "HW", "FW")
-ML_STATE_LABELS = ("เสียเต็ม", "เสียครึ่ง", "คืนทุน", "ได้ครึ่ง", "ได้เต็ม")
-
-ML_ODDS_COLUMNS = ["1X2 เหย้า", "1X2 เสมอ", "1X2 เยือน", "แฮนดิแคป (เหย้า)", "ค่าน้ำ HDP (เหย้า)", "แฮนดิแคป (เยือน)", "ค่าน้ำ HDP (เยือน)", "โกลสูง/ต่ำ", "ค่าน้ำ (สูง)", "ค่าน้ำ (ต่ำ)"]
-
-def _ml_number(value):
-    if isinstance(value, (bool, np.bool_)) or value is None: return np.nan
-    try:
-        number = float(str(value).strip().replace("\u2212", "-"))
-        return number if np.isfinite(number) else np.nan
-    except (TypeError, ValueError): return np.nan
-
-def _ml_win_rate(value):
-    text = str(value).strip()
-    percent = text.endswith("%")
-    number = _ml_number(text[:-1] if percent else value)
-    if not np.isfinite(number) or number < 0: return np.nan
-    if percent or number > 1: number /= 100.0
-    return number if 0 <= number <= 1 else np.nan
-
-def _ml_malay_decimal(value):
-    v = _ml_number(value)
-    if not np.isfinite(v) or v == 0: return np.nan
-    if v > 1.0: return v  # Decimal ยุโรป/ฮ่องกง
-    if v < -1.0: return 1.0 + (1.0 / abs(v)) # อินโดนีเซีย
-    return 1.0 + (v if v > 0 else 1.0 / abs(v)) # มาเลย์
-
-def _ml_blank(value):
-    return str(value).strip().lower() in ("", "nan", "none", "null", "<na>")
-
-def _ml_score(value):
-    text = str(value).strip().replace("\u2212", "-").replace("\u2013", "-")
-    match = re.fullmatch(r"(\d{1,2})\s*[-:]\s*(\d{1,2})", text)
-    return tuple(map(int, match.groups())) if match else None
-
-def _ml_valid_line(value, market):
-    value = _ml_number(value)
-    return bool(np.isfinite(value) and abs(value) <= 100 and abs(value * 4 - round(value * 4)) < 1e-7 and (market == "HDP" or value > 0))
-
-def _ml_settlement(score, line, market):
-    if score is None or not _ml_valid_line(line, market): return np.nan
-    line = float(line)
-    parts = (np.floor(line * 2) / 2, np.ceil(line * 2) / 2)
-    if market == "HDP": differences = [score[0] - score[1] + part for part in parts]
-    else: differences = [sum(score) - part for part in parts]
-    return int(round(float(np.mean(np.sign(differences))) * 2)) + 2
-
-def _ml_allowed(line, market):
-    if not _ml_valid_line(line, market): return np.ones(5, dtype=bool)
-    family = int(round(float(line) * 4)) % 4
-    allowed = np.array([True, False, False, False, True])
-    if family == 0: allowed[2] = True
-    elif family in (1, 3):
-        half_win = (family == 1) if market == "HDP" else (family == 3)
-        allowed[3 if half_win else 1] = True
-    if market == "OU" and np.isclose(float(line), 0.25): allowed[0] = False
-    return allowed
-
-def _ml_probability(raw, lines, market, temperature=1.0):
-    raw = np.asarray(raw, dtype=float)
-    if len(raw) == 0: return np.empty((0, 5), dtype=float)
-    masks = np.vstack([_ml_allowed(line, market) for line in lines])
-    logits = np.log(np.clip(raw, 1e-12, 1.0)) / float(temperature)
-    logits[~masks] = -np.inf
-    logits -= logits.max(axis=1, keepdims=True)
-    probabilities = np.exp(logits)
-    return probabilities / probabilities.sum(axis=1, keepdims=True)
-
-def _ml_raw_probabilities(model, X):
-    probabilities = np.full((len(X), 5), 1e-12, dtype=float)
-    if len(X):
-        probabilities[:, np.asarray(model.classes_, dtype=int)] = model.predict_proba(X)
-    return probabilities
-
-def _ml_log_loss(y, probabilities):
-    return float(-np.log(np.clip(probabilities[np.arange(len(y)), y], 1e-12, 1)).mean())
-
-def _ml_metrics(y, probabilities):
-    actual = np.eye(5)[y]
-    
-    # 1. คำนวณความมั่นใจของแต่ละฝั่ง (เลียนแบบระบบ Guardrail)
-    decisive = probabilities[:, [0, 1, 3, 4]].sum(axis=1)
-    home_share = np.where(decisive > 1e-9, probabilities[:, 3:].sum(axis=1) / np.maximum(decisive, 1e-9), 0.5)
-    away_share = 1.0 - home_share
-    
-    # 2. คัดกรองเอาเฉพาะคู่ที่มี "สัญญาณ" (ความมั่นใจ >= 55% ตามเกณฑ์ลงทุน)
-    # คู่ที่ความมั่นใจต่ำกว่านี้ จะถูกเก็บไว้เทรนหลังบ้าน แต่ไม่นำมาโชว์ใน KPI
-    signal_mask = (home_share >= 0.55) | (away_share >= 0.55)
-    
-    # 3. คำนวณแบบทายถูกฝั่ง (Directional Win Rate)
-    pred_dir = np.where(home_share > 0.5, 1, -1) # ฝั่งที่ AI เลือก
-    actual_dir = np.where(y >= 3, 1, np.where(y <= 1, -1, 0)) # ผลสกอร์จริง (1=ได้, -1=เสีย, 0=เจ๊า)
-    
-    # นับเฉพาะบิลที่: มีสัญญาณให้แทง และ เตะจบแล้วมีแพ้ชนะ (ไม่นับคู่เจ๊า)
-    valid_mask = signal_mask & (actual_dir != 0)
-    
-    if valid_mask.sum() > 0:
-        win_rate = float((pred_dir[valid_mask] == actual_dir[valid_mask]).mean())
+def error_message(exc: Exception, context: str):
+    ref = random_secrets.token_hex(6)
+    frames = [{"file": Path(f.filename).name, "line": f.lineno, "function": f.name}
+              for f in traceback.extract_tb(exc.__traceback__)[-8:]]
+    cause = exc.__cause__ or exc
+    status = getattr(getattr(cause, "response", None), "status_code", getattr(cause, "code", None))
+    LOGGER.error("operation_failed op=%s ref=%s type=%s http=%s frames=%s", context, ref,
+                 type(exc).__name__, status if isinstance(status, int) else "unknown", frames)
+    if isinstance(exc, (ValidationError, StorageError)):
+        st.error(str(exc))
     else:
-        win_rate = 0.0 # กรณีไม่มีคู่ไหนผ่านเกณฑ์เลย
-        
-    predicted = probabilities.argmax(axis=1)
-    return {
-        "n": len(y), 
-        "correct": int((predicted == y).sum()), 
-        "accuracy": win_rate * 100,  # ส่งออกเป็นเปอร์เซ็นต์ (คูณ 100)
-        "log_loss": _ml_log_loss(y, probabilities), 
-        "brier": float(np.square(probabilities - actual).sum(axis=1).mean()),
-    }
+        st.error(f"{context} failed ({type(exc).__name__}). Reference: {ref}. No credentials or stack trace are shown.")
 
-# ==========================================
-# 🛠️ ฟังก์ชันส่วนที่หายไป (ใส่กลับให้ครบแล้วครับ)
-# ==========================================
-def _ml_returns(decimal):
-    decimal = float(decimal)
-    return np.array([-1.0, -0.5, 0.0, (decimal - 1) / 2, decimal - 1])
 
-def _ml_expected_value(probabilities, decimal, reverse=False):
-    if not np.isfinite(decimal) or decimal <= 1: return np.nan
-    p = np.asarray(probabilities, dtype=float)
-    return float((p[::-1] if reverse else p) @ _ml_returns(decimal))
-
-def _ml_home_share(probabilities):
-    """P(เหย้า/สูงชนะ | ไม่คืนทุน) = (HW+FW)/(FL+HL+HW+FW) ฝั่งตรงข้ามคือ 1 - ค่านี้"""
-    p = np.asarray(probabilities, dtype=float)
-    decisive = p[:, [0, 1, 3, 4]].sum(axis=1)
-    return np.where(decisive > 1e-9, p[:, 3:].sum(axis=1) / np.maximum(decisive, 1e-9), 0.5)
-# ==========================================
-
-def _ml_label_state(value, market):
-    text = str(value).strip()
-    if market == "HDP":
-        labels = {"เจ้าบ้านเสียเต็ม": 0, "เจ้าบ้านเสียครึ่ง": 1, "คืนทุน": 2, "เจ้าบ้านได้ครึ่ง": 3, "เจ้าบ้านได้เต็ม": 4}
+def authenticate():
+    if SETTINGS.local_only:
+        # Important: a reverse proxy can expose even a loopback service. See README.
+        address = st.get_option("server.address")
+        if address not in {"localhost", "127.0.0.1", "::1"}:
+            st.error("Local-only mode requires server.address=127.0.0.1. For shared hosting configure OIDC and local_only=false.")
+            st.stop()
+        return "local-admin", "admin"
+    if "auth" not in SECRET_VALUES:
+        st.error("Shared hosting is locked: configure Streamlit OIDC and administrator/viewer allowlists.")
+        st.stop()
+    if not getattr(st.user, "is_logged_in", False):
+        st.title("Sign in / \u0e40\u0e02\u0e49\u0e32\u0e2a\u0e39\u0e48\u0e23\u0e30\u0e1a\u0e1a")
+        if st.button("Sign in", type="primary"):
+            st.login()
+        st.stop()
+    claims = st.user.to_dict()
+    if claims.get("exp") and float(claims["exp"]) <= time.time():
+        st.logout(); st.stop()
+    if claims.get("email_verified") is False:
+        st.error("Your identity provider has not verified this email."); st.stop()
+    email = str(claims.get("email") or claims.get("preferred_username") or "").casefold()
+    if email in SETTINGS.administrators:
+        role = "admin"
+    elif email in SETTINGS.editors:
+        role = "editor"
+    elif email in SETTINGS.viewers:
+        role = "viewer"
     else:
-        labels = {"ต่ำได้เต็ม": 0, "ต่ำได้ครึ่ง": 1, "คืนทุน": 2, "สูงได้ครึ่ง": 3, "สูงได้เต็ม": 4}
-    return labels.get(text, np.nan)
+        st.error("Signed in, but your identity is not on this application's allowlist.")
+        if st.button("Sign out"): st.logout()
+        st.stop()
+    return email, role
 
-def _ml_prepare(df_in):
-    df = df_in.copy(deep=True).reset_index(drop=True)
-    df.columns = [str(c).strip() for c in df.columns]
-    for column in ML_ODDS_COLUMNS: df[column] = df[column].map(_ml_number) if column in df else np.nan
-    for column in FORM5_HEADERS:
-        if column not in df: df[column] = np.nan
-        elif "WinRate" in column: df[column] = df[column].map(_ml_win_rate)
-        else: df[column] = df[column].map(_ml_number)
-    for column in ("ผลสกอร์", "ผล HDP", "ผลสูง/ต่ำ"):
-        if column not in df: df[column] = ""
-    
-    groups = [json.dumps([re.sub(r"\s+", " ", str(h).strip().casefold()), re.sub(r"\s+", " ", str(a).strip().casefold())], ensure_ascii=False) for h, a in zip(df["ทีมเหย้า"], df["ทีมเยือน"])]
-    df["_ML_Group"] = groups
-    
-    X = pd.DataFrame(index=df.index)
-    odds = df[["1X2 เหย้า", "1X2 เสมอ", "1X2 เยือน"]].where(lambda values: values > 1)
-    inverse = 1.0 / odds
-    inverse_total = inverse.sum(axis=1, min_count=3)
-    
-    # 🌟 1. Mathematical Features
-    X["True_Home_Prob"] = inverse["1X2 เหย้า"] / inverse_total
-    X["True_Draw_Prob"] = inverse["1X2 เสมอ"] / inverse_total
-    X["True_Away_Prob"] = inverse["1X2 เยือน"] / inverse_total
-    X["Bookie_Margin"] = inverse_total - 1.0
-    X["1X2_Variance"] = X[["True_Home_Prob", "True_Draw_Prob", "True_Away_Prob"]].var(axis=1)
 
-    for name, source in (("HDP_Home_Decimal", "ค่าน้ำ HDP (เหย้า)"), ("HDP_Away_Decimal", "ค่าน้ำ HDP (เยือน)"), ("Over_Decimal", "ค่าน้ำ (สูง)"), ("Under_Decimal", "ค่าน้ำ (ต่ำ)")):
-        X[name] = df[source].map(_ml_malay_decimal)
+ACTOR, ROLE = authenticate()
+if "session_id_v6" not in st.session_state:
+    st.session_state.session_id_v6 = random_secrets.token_hex(20)
+OWNER = ACTOR + ":" + st.session_state.session_id_v6
+CAN_EDIT = ROLE in {"admin", "editor"}
+CAN_WRITE = CAN_EDIT and SETTINGS.enable_writes
 
-    # 🌟 2. Data Imputation: กู้คืนค่าน้ำที่ OCR อาจอ่านพลาด โดยใช้ Bookie Margin มาตรฐาน (1.05)
-    for c1, c2 in [("HDP_Home_Decimal", "HDP_Away_Decimal"), ("Over_Decimal", "Under_Decimal")]:
-        missing_c2 = X[c2].isna() & X[c1].notna()
-        if missing_c2.any(): X.loc[missing_c2, c2] = 1.0 / (1.05 - (1.0 / X.loc[missing_c2, c1]))
-        missing_c1 = X[c1].isna() & X[c2].notna()
-        if missing_c1.any(): X.loc[missing_c1, c1] = 1.0 / (1.05 - (1.0 / X.loc[missing_c1, c2]))
 
-    X["Water_HDP_Diff"] = X["HDP_Home_Decimal"] - X["HDP_Away_Decimal"]
-    X["Water_OU_Diff"] = X["Over_Decimal"] - X["Under_Decimal"]
+def require_role(role="editor", writes=True):
+    if (ROLE != "admin" if role == "admin" else not CAN_EDIT):
+        raise ValidationError("You do not have permission for this operation.")
+    if writes and not SETTINGS.enable_writes:
+        raise ValidationError("Data writes are disabled by configuration.")
 
-    for market, column in (("HDP", "แฮนดิแคป (เหย้า)"), ("OU", "โกลสูง/ต่ำ")):
-        X[market + "_Line"] = df[column].where(df[column].map(lambda v: _ml_valid_line(v, market)))
-        X[market + "_Family"] = np.round(X[market + "_Line"] * 4) % 4
-        
-    X["HDP_vs_TrueProb_Diff"] = X["True_Home_Prob"] - (0.5 - X["HDP_Line"] * 0.1)
 
-    for column in FORM5_HEADERS: X[column] = df[column]
+@st.cache_resource
+def connect_store(namespace: str, backend: str, enabled: bool, spreadsheet_id: str, legacy_sheet: str, directory: str, _credentials: dict):
+    if backend == "local":
+        return SQLiteStore(Path(directory) / namespace, enabled)
+    return SheetsStore(spreadsheet_id, _credentials, legacy_sheet, enabled, Path(directory) / namespace / "uncertain_write.json")
 
-    # 🌟 3. Poisson Distribution & Dynamic Expected Goals
-    avg_h_gf, avg_h_ga = X["H_GoalsFor_Last5"] / 5.0, X["H_GoalsAgainst_Last5"] / 5.0
-    avg_a_gf, avg_a_ga = X["A_GoalsFor_Last5"] / 5.0, X["A_GoalsAgainst_Last5"] / 5.0
-    
-    X["Expected_Total_Goals"] = (avg_h_gf + avg_a_ga) / 2.0 + (avg_a_gf + avg_h_ga) / 2.0
-    X["Form_Home_Goal_Avg"] = avg_h_gf
-    X["Form_Away_Goal_Avg"] = avg_a_gf
-    X["Form_Total_vs_Line"] = X["Expected_Total_Goals"] - X["OU_Line"]
-    
-    # คำนวณเปอร์เซ็นต์สูง/ต่ำ ด้วยสูตรปัวซง
-    safe_lines = np.floor(X["OU_Line"].fillna(0))
-    safe_goals = X["Expected_Total_Goals"].fillna(2.5)
-    X["Poisson_Under_Prob"] = stats.poisson.cdf(safe_lines, safe_goals)
-    X["Poisson_Over_Prob"] = 1.0 - X["Poisson_Under_Prob"]
-    
-    X = X.replace([np.inf, -np.inf], np.nan).astype(float)
-    names_ok = ~df["ทีมเหย้า"].map(_ml_blank) & ~df["ทีมเยือน"].map(_ml_blank)
-    base_valid = names_ok & odds.notna().all(axis=1)
-    
-    df["_ML_Valid_HDP"] = base_valid & X[["HDP_Line", "HDP_Home_Decimal", "HDP_Away_Decimal"]].notna().all(axis=1)
-    df["_ML_Valid_OU"] = base_valid & X[["OU_Line", "Over_Decimal", "Under_Decimal"]].notna().all(axis=1)
-    
-    scores = df["ผลสกอร์"].map(_ml_score)
-    for market, label_column, line_column in (("HDP", "ผล HDP", "HDP_Line"), ("OU", "ผลสูง/ต่ำ", "OU_Line")):
-        targets = []
-        for i in range(len(df)):
-            label = _ml_label_state(df.at[i, label_column], market)
-            result = _ml_settlement(scores.iloc[i], X.at[i, line_column], market)
-            if np.isfinite(result): pass
-            elif _ml_blank(df.at[i, "ผลสกอร์"]) and np.isfinite(label): result = label
-            if np.isfinite(result) and not _ml_allowed(X.at[i, line_column], market)[int(result)]: result = np.nan
-            targets.append(result)
-        df["Target_" + market] = targets
-    df["_ML_Pending"] = df[["ผลสกอร์", "ผล HDP", "ผลสูง/ต่ำ"]].apply(lambda c: c.map(_ml_blank)).all(axis=1)
-    return df, X
 
-def _ml_split(groups):
-    groups = np.asarray(groups)
-    indices = np.arange(len(groups))
-    def take(subset, test_size, seed):
-        splitter = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=seed)
-        train, test = next(splitter.split(subset, groups=groups[subset]))
-        return subset[train], subset[test]
-    rest, test = take(indices, 0.15, ML_CONFIG["seed"])
-    rest, validation = take(rest, 0.15 / 0.85, ML_CONFIG["seed"] + 1)
-    train, calibration = take(rest, 0.15 / 0.70, ML_CONFIG["seed"] + 2)
-    return {"train": train, "calibration": calibration, "validation": validation, "test": test}
+@st.cache_resource
+def registry_for(namespace: str, directory: str):
+    return Registry(Path(directory) / namespace / "models")
 
-# Dynamic Half-Kelly Criterion
-def _ml_kelly_fraction(probabilities, decimal, side):
-    returns = _ml_returns(decimal)
-    if side == 1: returns = returns[::-1]
-    ev = float(np.dot(probabilities, returns))
-    if ev <= 0: return 0.0
-    var = float(np.dot(probabilities, (returns - ev)**2))
-    if var <= 0: return 0.0
-    half_kelly = (ev / var) * 0.5
-    return min(half_kelly, 0.05) # Cap at 5% of Bankroll
 
-def _ml_choices(probabilities, first_prices, second_prices):
-    first = np.array([_ml_expected_value(p, price) for p, price in zip(probabilities, first_prices)])
-    second = np.array([_ml_expected_value(p, price, True) for p, price in zip(probabilities, second_prices)])
-    side = np.where(np.nan_to_num(first, nan=-np.inf) >= np.nan_to_num(second, nan=-np.inf), 0, 1)
-    ev = np.where(side == 0, first, second)
-    price = np.where(side == 0, np.asarray(first_prices), np.asarray(second_prices))
-    stressed = ev - ML_CONFIG["probability_stress"] * price
-    candidate = np.isfinite(ev) & (ev >= ML_CONFIG["min_ev"]) & (stressed > 0)
-    kellys = np.array([_ml_kelly_fraction(p, pr, s) for p, pr, s in zip(probabilities, price, side)])
-    return {"side": side, "ev": ev, "stress_ev": stressed, "price": price, "candidate": candidate, "kelly": kellys}
+@st.cache_resource
+def queues_for(namespace: str):
+    return JobQueue(workers=2, max_pending=6, max_per_owner=3), JobQueue(workers=1, max_pending=2, max_per_owner=2)
 
-def _ml_fit_market(df, X, market):
-    valid = df["_ML_Valid_" + market] & df["Target_" + market].notna()
-    indices = np.flatnonzero(valid.to_numpy())
-    data = df.iloc[indices]
-    if len(data) < ML_CONFIG["min_rows"]: 
-        raise ValueError(f"ML {market}: ต้องมีข้อมูลอย่างน้อย {ML_CONFIG['min_rows']} แถว")
-        
-    y = data["Target_" + market].to_numpy(dtype=int)
-    
-    # 🌟 FIX 1: ปรับ Recency Weight ให้เบาลงมากๆ เพื่อไม่ให้ AI เกิด Overfit
-    # จาก 0.5->2.5 เปลี่ยนเป็น 0.95->1.05 (จำแพทเทิร์นเก่าได้ และรับรู้เทรนด์ใหม่ไปพร้อมๆ กัน)
-    dynamic_weights = np.linspace(0.95, 1.05, len(data))
-    
-    split = _ml_split(data["_ML_Group"].to_numpy())
-    train, calibration, validation, test = [split[key] for key in ("train", "calibration", "validation", "test")]
-    X_all = X.iloc[indices]
-    features = [c for c in X.columns if X_all.iloc[train][c].nunique(dropna=True) > 1]
-    X_all = X_all[features]
-    lines = X.iloc[indices][market + "_Line"].to_numpy()
-    
-    with threadpool_limits(limits=2):
-        m1 = HistGradientBoostingClassifier(max_iter=100, max_depth=3, learning_rate=0.03, l2_regularization=5.0, random_state=42)
-        m2 = HistGradientBoostingClassifier(max_iter=150, max_depth=4, learning_rate=0.01, l2_regularization=2.0, random_state=43)
-        m3 = HistGradientBoostingClassifier(max_iter=80, max_leaf_nodes=15, learning_rate=0.05, l2_regularization=10.0, random_state=44)
-        
-        estimator = VotingClassifier(estimators=[('m1', m1), ('m2', m2), ('m3', m3)], voting='soft')
-        
-        try:
-            estimator.fit(X_all.iloc[train], y[train], sample_weight=dynamic_weights[train])
-        except TypeError:
-            fit_params = {'m1__sample_weight': dynamic_weights[train], 
-                          'm2__sample_weight': dynamic_weights[train], 
-                          'm3__sample_weight': dynamic_weights[train]}
-            estimator.fit(X_all.iloc[train], y[train], **fit_params)
-        
-        raw_cal = _ml_raw_probabilities(estimator, X_all.iloc[calibration])
-        temperatures = (0.8, 1.0, 1.25, 1.5, 2.0)
-        temperature = min(temperatures, key=lambda t: _ml_log_loss(y[calibration], _ml_probability(raw_cal, lines[calibration], market, t)))
-        
-        def predict(part): return _ml_probability(_ml_raw_probabilities(estimator, X_all.iloc[part]), lines[part], market, temperature)
-        
-        p_val = predict(validation)
-        val_metrics = _ml_metrics(y[validation], p_val)
-        gate = bool(len(validation) >= 10)
-        
-        p_test = predict(test)
-        p_train = predict(train)
-        
-        pending_pos = np.flatnonzero(df["_ML_Pending"].to_numpy())
-        pending_lines = X.iloc[pending_pos][market + "_Line"].to_numpy()
-        pending_probs = _ml_probability(_ml_raw_probabilities(estimator, X.iloc[pending_pos][features]), pending_lines, market, temperature)
-        
-    family_counts = {family: int((np.round(lines[train] * 4).astype(int) % 4 == family).sum()) for family in range(4)}
-    
-    report = {
-        "market": market, "test": _ml_metrics(y[test], p_test), "gate_pass": gate,
-        "family_counts": family_counts
-    }
-    return report, pending_probs
-    
-def _ml_verdict(market, side, prob_val, ev, stress_ev, line, valid, report, kelly,
-                row_data=None, features_data=None, min_prob=55.0, min_ev=None):
-    min_ev = ML_CONFIG["min_ev"] if min_ev is None else min_ev
-    if not valid: return "⚠️ ข้าม (ราคาผิด/ไม่ครบ)"
-    if row_data is None: return "⚠️ ข้าม (ไม่มีข้อมูลแถวสำหรับตรวจ Guardrail)"
 
-    side = int(side)
-    home_1x2 = _ml_number(row_data.get("1X2 เหย้า", np.nan))
-    water_col = {("HDP", 0): "ค่าน้ำ HDP (เหย้า)", ("HDP", 1): "ค่าน้ำ HDP (เยือน)",
-                 ("OU", 0): "ค่าน้ำ (สูง)", ("OU", 1): "ค่าน้ำ (ต่ำ)"}[(market, side)]
-    water_decimal = _ml_malay_decimal(row_data.get(water_col, np.nan))
-    if not np.isfinite(water_decimal):
-        return "⚠️ ข้าม (ค่าน้ำฝั่งที่เลือกอ่านไม่ได้/อยู่นอกช่วงแปลงค่า)"
+@st.cache_data(ttl=45, max_entries=4, show_spinner=False)
+def load_snapshot(namespace: str, revision: int, _store):
+    return _store.snapshot()
 
-    # 🛡️ DYNAMIC GUARDRAILS (แก้ไขให้สมเหตุสมผลขึ้น)
-    if market == "HDP":
-        # 🌟 FIX 2.1: ลดเพดานการบล็อกลง จาก 62% เหลือ 57%
-        if side == 0 and line in [-0.5, -0.75]:
-            if prob_val < 57.0:  
-                return "⚠️ ข้าม (ราคาต่อ 0.5/0.75 ต้องมั่นใจ 57% ขึ้นไป)"
-                
-        true_home_prob = features_data.get("True_Home_Prob", np.nan) if features_data is not None else np.nan
-        if np.isfinite(true_home_prob):
-            if true_home_prob < 0.45 and line <= -0.5 and side == 0:
-                return "⚠️ ข้าม (ราคาต่อล่อแมงเม่า สวนทางสถิติ 1X2)"
-            if true_home_prob > 0.60 and line >= 0.0 and side == 0:
-                return "⚠️ ข้าม (ราคาผิดปกติ เจ้าบ้านฟอร์มโหดแต่โต๊ะไม่กล้าให้ต่อ)"
-                
-    elif market == "OU":
-        # 🌟 FIX 2.2: แก้จุดบั๊ก! จาก < 2.0 เปลี่ยนเป็น < 1.80 เพื่อไม่ให้บล็อกบิลมากเกินไป
-        if side == 1 and water_decimal < 1.80:
-            return "⚠️ ข้าม (โต๊ะกดค่าน้ำต่ำเพื่อล่อ สถิติมักโดนยิงท้ายเกม)"
-            
-        if line >= 3.25:
-            if side == 0: return "⚠️ ข้าม (เรตสูงผิดปกติ สถิติมักออกต่ำ)"
-            if water_decimal < 1.85: return "⚠️ ข้าม (ออกต่ำจริง แต่ค่าน้ำเอาเปรียบเกินไป)"
-            
-        poisson_over = features_data.get("Poisson_Over_Prob", np.nan) if features_data is not None else np.nan
-        if np.isfinite(poisson_over):
-            if side == 0 and poisson_over < 0.35: return "⚠️ ข้าม (สถิติ Poisson ชี้ว่าโอกาสสูงน้อยเกินไป)"
-            if side == 1 and poisson_over > 0.65: return "⚠️ ข้าม (สถิติ Poisson ชี้ว่าโอกาสต่ำน้อยเกินไป)"
 
-    family = int(round(float(line) * 4)) % 4
-    f_count = report["family_counts"].get(family, 0)
-    if f_count < ML_CONFIG["min_line_examples"]:
-        return "⚠️ ข้าม (ตัวอย่างชนิดไลน์นี้น้อยไป)"
-    if not np.isfinite(prob_val) or prob_val < min_prob:
-        return f"⚠️ ข้าม (โอกาสชนะน้อยเกินไป: {prob_val:.1f}%)"
-    if not np.isfinite(ev) or ev < min_ev or stress_ev <= 0:
-        return "⚠️ ข้าม (ความได้เปรียบ EV ไม่ผ่านเกณฑ์)"
+REGISTRY = registry_for(SETTINGS.namespace, str(SETTINGS.data_dir))
+OCR_QUEUE, TRAIN_QUEUE = queues_for(SETTINGS.namespace)
+try:
+    STORE = connect_store(SETTINGS.namespace, SETTINGS.backend, SETTINGS.enable_writes, SETTINGS.spreadsheet_id,
+                          SETTINGS.legacy_sheet, str(SETTINGS.data_dir), dict(SECRET_VALUES.get("gspread", {})))
+except Exception as exc:
+    error_message(exc, "Storage connection")
+    st.info("Offline use: backend='local'. Google Sheets: configure spreadsheet_id and [gspread] in secrets.toml.")
+    st.stop()
 
-    is_high_water = water_decimal >= 1.90
-    is_strong_fav = bool(market == "HDP" and np.isfinite(home_1x2) and home_1x2 <= 1.47 and line <= -1.25 and side == 0)
-    if is_high_water or is_strong_fav: kelly = min(kelly * 1.5, 0.05)
-    k_pct = kelly * 100
 
-    if prob_val >= 65.0 or (prob_val >= 60.0 and is_high_water): level = "⭐⭐⭐ VIP ไม้หนัก"
-    elif prob_val >= 60.0 or is_strong_fav: level = "⭐⭐ น่าลงทุน"
-    else: level = "⭐ ทดลองติดตาม"
+@st.cache_data(ttl=120, max_entries=16, show_spinner=False)
+def infer_batch(model_id: str, quotes_json: str, namespace: str, _registry):
+    rows = json.loads(quotes_json)
+    return _registry.load(model_id).predict(rows)
 
-    desc = "สูง Over" if side == 0 else "ต่ำ Under"
-    if market == "HDP":
-        if line < 0: desc = "ต่อเจ้าบ้าน" if side == 0 else "รองทีมเยือน"
-        elif line > 0: desc = "รองเจ้าบ้าน" if side == 0 else "ต่อทีมเยือน"
-        else: desc = "เจ้าบ้าน" if side == 0 else "ทีมเยือน"
 
-    warnings = []
-    if f_count < 50: warnings.append("ข้อมูลน้อย")
-    if (59.5 <= prob_val <= 60.5) or (64.5 <= prob_val <= 65.5): warnings.append("คาบเส้น")
-    warn_text = f" ⚠️({','.join(warnings)})" if warnings else ""
-    return f"{level} ({desc}) | โอกาส {prob_val:.1f}% | แนะนำ {k_pct:.1f}%{warn_text}" 
+def refresh():
+    load_snapshot.clear()
+    infer_batch.clear()
 
-@st.cache_data(ttl=300, show_spinner=False)
-def compute_ai(df_in):
-    try:
-        df, X = _ml_prepare(df_in)
-        reports, probs = {}, {}
-        for m in ("HDP", "OU"):
-            reports[m], probs[m] = _ml_fit_market(df, X, m)
-    except ValueError as e: return {"status": "few", "level": "warning", "msg": str(e)}
-    
-    pending_pos = np.flatnonzero(df["_ML_Pending"].to_numpy())
-    pending = df.iloc[pending_pos].copy()
-    history = df[~df["_ML_Pending"]].copy()
-    
-    for m, p_col, v_col, c1, c2 in (("HDP", "AI_โอกาสเหย้าชนะHDP(%)", "AI_ฟันธง_HDP", "HDP_Home_Decimal", "HDP_Away_Decimal"),
-                                    ("OU", "AI_โอกาสออกสูง(%)", "AI_ฟันธง_สูงต่ำ", "Over_Decimal", "Under_Decimal")):
-        p = probs[m]
-        prob_home_over = _ml_home_share(p) * 100
-        prob_away_under = 100.0 - prob_home_over
-        
-        # Calculate for pending
-        pending[p_col] = np.round(prob_home_over, 1)
-        choices = _ml_choices(p, X.iloc[pending_pos][c1], X.iloc[pending_pos][c2])
-        side_probs = np.where(choices["side"] == 0, prob_home_over, prob_away_under)
-        
-        pending[v_col] = [
-            _ml_verdict(m, int(choices["side"][i]), side_probs[i], choices["ev"][i], choices["stress_ev"][i],
-                        X.iloc[pos][m + "_Line"], bool(df.iloc[pos]["_ML_Valid_" + m]), reports[m], choices["kelly"][i], 
-                        row_data=df.iloc[pos], features_data=X.iloc[pos])
-            for i, pos in enumerate(pending_pos)
-        ]
-        
-    return {
-        "status": "ok", "df_predict": pending, "df_history": history, "total_train": len(history),
-        "hdp_acc": round(reports["HDP"]["test"]["accuracy"], 1),
-        "ou_acc": round(reports["OU"]["test"]["accuracy"], 1),
-    }
 
-def load_dashboard_data(_workbook, version=0):
-    with JOBS.sheet_lock:
-        return pd.DataFrame(get_ws(_workbook).get_all_records())
+def new_draft(data: dict | None = None):
+    st.session_state.draft_v6 = dict(data or {})
+    st.session_state.draft_token_v6 = random_secrets.token_hex(5)
 
-def get_ai():
-    if not workbook: return None
-    try: 
-        return compute_ai(load_dashboard_data(workbook, JOBS.data_version))
-    except Exception as e: 
-        err_trace = traceback.format_exc()
-        return {
-            "status": "error", 
-            "level": "error", 
-            "msg": f"โหลดข้อมูลไม่สำเร็จ: {type(e).__name__} - {str(e)}", 
-            "trace": err_trace
-        }
 
-# ----------------------------------------
-# UI Components & Gauges
-# ----------------------------------------
-def _pred_tone(text, kind):
-    text = str(text)
-    if "อันตราย" in text: return "err"
-    if "ข้าม" in text: return "skip"
-    if "VIP" in text: return "gs"
-    if "⭐⭐" in text: return "gf"
-    if "⭐" in text: return "cs"
-    return "cf"
+def apply_extraction(data):
+    if "teams_match" in data:
+        draft = dict(st.session_state.get("draft_v6", {}))
+        for key in ("h_win_percent", "h_goals_for", "h_goals_against", "a_win_percent", "a_goals_for", "a_goals_against", "h_matches", "a_matches"):
+            draft[key] = data.get(key)
+        if not draft.get("home"): draft["home"] = data.get("home")
+        if not draft.get("away"): draft["away"] = data.get("away")
+        draft["form_image_sha256"] = data.get("image_sha256")
+        draft["form_extractor_model"] = data.get("extractor_model")
+        new_draft(draft)
+    else:
+        new_draft(data)
 
-_TONE_COLORS = {
-    "hdp": {"gs": GREEN, "gf": "#4ade80", "cs": "#e8bb62", "cf": AMBER, "err": RED, "skip": "#4f6b5c"},
-    "ou": {"gs": "#38bdf8", "gf": CYAN_SOFT, "cs": "#e8bb62", "cf": AMBER, "err": RED, "skip": "#4f6b5c"},
-}
-_TONE_STRENGTH = {"gs": 4, "gf": 3, "cs": 2, "cf": 1, "err": 4, "skip": 0}
 
-def _fmt_num(v, signed=False):
-    try: return f"{float(v):+g}" if signed else f"{float(v):g}"
-    except (TypeError, ValueError): return "-"
-
-_ECG_PATH = "M0 15 H58 L64 15 L70 5 L78 25 L84 15 H128 L134 10 L140 15 H200"
-
-def _ecg_svg():
-    return ("<svg class='ecg' viewBox='0 0 200 30' preserveAspectRatio='none'>"
-            f"<path d='{_ECG_PATH}' fill='none' stroke='#1f3a2c' stroke-width='1.5' vector-effect='non-scaling-stroke'/>"
-            f"<path class='pulse' pathLength='100' d='{_ECG_PATH}' fill='none' stroke='#4ade80' stroke-width='2' vector-effect='non-scaling-stroke'/></svg>")
-
-def _dial_svg(p, color, cls="dial"):
-    p = max(0.0, min(float(p), 100.0))
-    arc = 157.08 * p / 100
-    rot = -90 + p * 1.8
-    return (f"<svg class='{cls}' viewBox='0 0 120 72'>"
-            "<path d='M10 62 A50 50 0 0 1 110 62' fill='none' stroke='#17241d' stroke-width='9' stroke-linecap='round'/>"
-            "<line x1='60' y1='6' x2='60' y2='12' stroke='#2a4136' stroke-width='2'/>"
-            f"<path class='dial-arc' d='M10 62 A50 50 0 0 1 110 62' fill='none' stroke='{color}' stroke-width='9' stroke-linecap='round' stroke-dasharray='{arc:.2f} 200'/>"
-            f"<g class='needle' style='--rot:{rot:.1f}deg'><line x1='60' y1='62' x2='60' y2='27' stroke='#e6f2ea' stroke-width='2' stroke-linecap='round'/></g>"
-            f"<circle cx='60' cy='62' r='5' fill='#0c130f' stroke='{color}' stroke-width='2'/></svg>")
-
-def _vu(p, n=20, cls=""):
-    lit = int(round(max(0.0, min(float(p), 100.0)) / 100 * n))
-    # เปลี่ยนจาก <i> เป็น <div class='v-bar'> ป้องกัน Streamlit ลบทิ้ง
-    cells = "".join(f"<div class='v-bar {'on' if i < lit else ''}' style='--i:{i}'></div>" for i in range(n))
-    return f"<div class='vu {cls}' style='--n:{n}'>{cells}</div>"
-
-def _channel_html(ch, name, line_txt, prob, verdict, color, desc, lo_lbl, hi_lbl):
-    p = max(0.0, min(float(prob), 100.0))
-    return (f"<div class='ch' style='--c:{color}'>"
-            f"<div class='ch-h'><span class='ch-k'>{ch}</span><span>{name}</span><span class='ch-l'>{esc(line_txt)}</span></div>"
-            "<div class='ch-body'>"
-            f"{_dial_svg(p, color)}"
-            f"<div class='ch-info'><div class='ch-val'>{p:g}<small>%</small></div><div class='ch-d'>{desc}</div><div class='ch-v'>{esc(verdict)}</div></div>"
-            "</div>"
-            f"{_vu(p, 20)}<div class='vu-l'><span>{lo_lbl}</span><span>50%</span><span>{hi_lbl}</span></div></div>")
-
-def _match_card_html(n, home, away, hdp_line, ou_line, hdp_prob, ou_prob, hdp_verdict, ou_verdict, solo=False):
-    t1, t2 = _pred_tone(hdp_verdict, "hdp"), _pred_tone(ou_verdict, "ou")
-    strength = max(_TONE_STRENGTH[t1], _TONE_STRENGTH[t2])
-    # เปลี่ยนจาก <i> เป็น <div class='s-bar'> 
-    bars = "".join(f"<div class='s-bar {'on' if k < strength else ''}'></div>" for k in range(4))
-    status = "<span class='mon-st on'>มีสัญญาณ</span>" if strength > 0 else "<span class='mon-st'>ข้าม</span>"
-    tag = "บันทึกแล้ว" if solo else "รอผลสกอร์"
-    return (f"<div class='mon{' solo' if solo else ''}'><span class='cn tl'></span><span class='cn tr'></span><span class='cn bl'></span><span class='cn br'></span>"
-            f"<div class='mon-bar'><span class='led'></span><span class='mon-id'>MATCH #{n:02d}</span>{status}<span>{tag}</span><span class='sig'>{bars}</span></div>"
-            f"<div class='mon-teams'><span class='mon-t'>{esc(home)}</span>{_ecg_svg()}<span class='mon-t r'>{esc(away)}</span></div>"
-            "<div class='mon-ch'>"
-            + _channel_html("CH1", "HANDICAP", f"เหย้า {_fmt_num(hdp_line, True)}", hdp_prob, hdp_verdict,
-                            _TONE_COLORS["hdp"][t1], "โอกาสคว้ากำไรแฮนดิแคป", "เยือน", "เหย้า")
-            + _channel_html("CH2", "OVER / UNDER", f"ไลน์ {_fmt_num(ou_line)}", ou_prob, ou_verdict,
-                            _TONE_COLORS["ou"][t2], "โอกาสคว้ากำไรสูงต่ำ", "ต่ำ", "สูง")
-            + "</div></div>")
-
-def _card_from_row(n, r, solo=False):
-    return _match_card_html(n, str(r.get('ทีมเหย้า', '-')), str(r.get('ทีมเยือน', '-')),
-                            r.get('แฮนดิแคป (เหย้า)', 0), r.get('โกลสูง/ต่ำ', 0),
-                            float(r.get('AI_โอกาสเหย้าชนะHDP(%)', 50)), float(r.get('AI_โอกาสออกสูง(%)', 50)),
-                            str(r.get('AI_ฟันธง_HDP', '-')), str(r.get('AI_ฟันธง_สูงต่ำ', '-')), solo)
-
-def render_monitor_header(df_pred):
-    n_hdp = sum(1 for v in df_pred['AI_ฟันธง_HDP'] if _pred_tone(v, "hdp") != "skip")
-    n_ou = sum(1 for v in df_pred['AI_ฟันธง_สูงต่ำ'] if _pred_tone(v, "ou") != "skip")
-    st.markdown(f"<div class='mon-status'><span class='led'></span><b>MONITORING</b>"
-                f"<span>แมตช์ที่รอทำนาย<em>{len(df_pred)}</em></span>"
-                f"<span>สัญญาณแฮนดิแคป<em>{n_hdp}</em></span>"
-                f"<span>สัญญาณสูง-ต่ำ<em>{n_ou}</em></span></div>", unsafe_allow_html=True)
-    items = []
-    for _, r in df_pred.iterrows():
-        v1, v2 = str(r.get('AI_ฟันธง_HDP', '-')), str(r.get('AI_ฟันธง_สูงต่ำ', '-'))
-        c1 = _TONE_COLORS["hdp"][_pred_tone(v1, "hdp")]
-        c2 = _TONE_COLORS["ou"][_pred_tone(v2, "ou")]
-        items.append(f"<span class='tk'><b>{esc(str(r.get('ทีมเหย้า', '-')))} vs {esc(str(r.get('ทีมเยือน', '-')))}</b>"
-                     f"<span class='d' style='--c:{c1}'></span>HDP {float(r.get('AI_โอกาสเหย้าชนะHDP(%)', 50)):g}%"
-                     f"<span class='d' style='--c:{c2}'></span>O/U {float(r.get('AI_โอกาสออกสูง(%)', 50)):g}%</span>")
-    if items:
-        track = "".join(items) * 2
-        st.markdown(f"<div class='ticker-container'><div class='ticker-track' style='--dur:{max(24, len(items) * 7)}s'>{track}</div></div>", unsafe_allow_html=True)
-
-def _pair(h, a): return (str(h).strip(), str(a).strip())
-def _visible_matches(df_pred):
-    hidden = st.session_state.setdefault("hidden_matches", set())
-    pairs = [_pair(h, a) for h, a in zip(df_pred.get('ทีมเหย้า', []), df_pred.get('ทีมเยือน', []))]
-    hidden.intersection_update(pairs)
-    if len(pairs) != len(df_pred): return df_pred
-    return df_pred[[p not in hidden for p in pairs]]
-
-def render_prediction_cards(df_pred, workbook):
-    for n, (idx, r) in enumerate(df_pred.iterrows(), start=1):
-        home, away = str(r.get('ทีมเหย้า', '-')), str(r.get('ทีมเยือน', '-'))
-        with st.container():
-            st.markdown(_card_from_row(n, r), unsafe_allow_html=True)
-            with st.form(key=f"score_form_{idx}_{home}_{away}"):
-                sc1, sc2 = st.columns([3, 2])
-                with sc1: score_input = st.text_input("กรอกผลสกอร์ เหย้า-เยือน (เช่น 2-1)", placeholder="0-0", key=f"score_input_{idx}")
-                with sc2: submitted = st.form_submit_button("💾 บันทึกผลลงชีต", use_container_width=True)
-                if submitted:
-                    if score_input.strip():
-                        success = update_match_score_in_sheet(workbook, home, away, score_input.strip())
-                        if success:
-                            st.session_state.setdefault("hidden_matches", set()).add(_pair(home, away))
-                            JOBS.bump_version()
-                            st.toast(f"บันทึกผลสกอร์ {score_input.strip()} ของ {home} vs {away} เรียบร้อยแล้ว", icon="✅")
-                            st.rerun()
-                        else: st.error("ไม่พบคู่นี้ที่ยังไม่มีสกอร์ใน Google Sheets กรุณาตรวจสอบชื่อทีม")
-                    else: st.warning("กรุณากรอกผลสกอร์ก่อนกดบันทึก")
-            st.write("") # ให้เว้นบรรทัดธรรมดาแทนการใช้ div แบบเดิม
-
-# ----------------------------------------
-# Dashboard : KPI & Charts
-# ----------------------------------------
-def _kpi_html(hdp_acc, ou_acc, total_train):
-    return ("<div class='kpi-wrap'>"
-            f"<div class='kpi hero'><div class='kpi-label'><span class='led'></span>HDP · ความแม่นยำชุดทดสอบ</div>"
-            f"<div class='kpi-value'>{hdp_acc}<span class='kpi-unit'>%</span></div><div class='kpi-bar'><div style='width:{min(hdp_acc, 100)}%'></div></div></div>"
-            f"<div class='kpi hero-cyan'><div class='kpi-label'><span class='led'></span>O/U · ความแม่นยำชุดทดสอบ</div>"
-            f"<div class='kpi-value'>{ou_acc}<span class='kpi-unit'>%</span></div><div class='kpi-bar'><div style='width:{min(ou_acc, 100)}%'></div></div></div>"
-            f"<div class='kpi'><div class='kpi-label'><span class='led'></span>เรียนรู้จากข้อมูลผลลัพธ์แล้ว</div>"
-            f"<div class='kpi-value'>{total_train}<span class='kpi-unit'>คู่</span></div></div></div>")
-
-def render_dashboard(ai):
-    if ai["status"] != "ok":
-        st.warning("⚠️ ยังไม่มีข้อมูลสรุปสำหรับ Dashboard (หรือโหลดไม่สำเร็จ)")
+@st.fragment(run_every=2)
+def extraction_status():
+    jobs = OCR_QUEUE.snapshot(OWNER)
+    if not jobs:
         return
-        
-    stamp = datetime.now(timezone(timedelta(hours=7))).strftime("%H:%M:%S")
-    st.markdown(f"<div class='mon-status'><span class='led'></span><b>DASHBOARD</b>"
-                f"<span>เรียนรู้จาก<em>{ai.get('total_train', 0)}</em>คู่</span><span>อัปเดตล่าสุด<em>{stamp}</em></span></div>", unsafe_allow_html=True)
-    st.markdown(_kpi_html(ai.get("hdp_acc", 0), ai.get("ou_acc", 0), ai.get("total_train", 0)), unsafe_allow_html=True)
-    
-    st.success("✅ **ระบบ V5.0 Ultimate Hybrid ทำงานสมบูรณ์แบบ:**")
-    st.markdown("""
-    - **Ensemble Voting:** ใช้ HistGradientBoosting 3 โมเดลช่วยกันโหวตกรองความผิดพลาด (Soft Voting)
-    - **Risk Management & Ranking:** กรองบิลที่โอกาสชนะ < 55% ทิ้ง 100% พร้อมจัดระดับ ⭐⭐⭐ VIP
-    - **Confidence Indicators:** แจ้งเตือนสัญญาณเสี่ยงสวิงด้วยแท็ก `⚠️(ข้อมูลน้อย)` และ `⚠️(คาบเส้น)` อัตโนมัติ
-    - **System Guardrails:** ตรวจจับและบล็อก 'ราคาล่อแมงเม่า' ช่วยเซฟทุนจากบิลหลอก
-    """)
+    st.subheader("Image reading jobs / \u0e2a\u0e16\u0e32\u0e19\u0e30\u0e2d\u0e48\u0e32\u0e19\u0e20\u0e32\u0e1e")
+    for job in jobs:
+        with st.container(border=True):
+            st.write(f"{job['name']} | {job['status']}")
+            if job["status"] == "error":
+                st.warning(job["error"])
+            elif job["status"] == "done":
+                data = job["result"]
+                with st.expander("Extracted values and uncertain fields"):
+                    st.json(data)
+                mismatch = "teams_match" in data and not data["teams_match"]
+                if mismatch:
+                    st.warning("Image team names do not exactly match the intended fixture. No automatic mapping is allowed.")
+                approved = not mismatch or st.checkbox("I checked both team identities and their home/away mapping", key="map_" + job["id"])
+                if st.button("Use in review form", key="use_" + job["id"], disabled=not CAN_EDIT or not approved):
+                    apply_extraction(data)
+                    st.rerun()
+    if st.button("Clear finished image jobs"):
+        OCR_QUEUE.clear_finished(OWNER); st.rerun()
 
-    st.markdown("---")
-    st.markdown("<h3 style='color: #4ade80;'>📊 ข้อมูลเชิงลึก & เทรนด์ตลาด (Market Insights)</h3>", unsafe_allow_html=True)
 
-    df_hist = ai.get("df_history", pd.DataFrame())
-    
-    if len(df_hist) > 0 and 'Target_HDP' in df_hist.columns:
-        # 1. โดนัทชาร์ต
-        label_map = {0: "เสียเต็ม", 1: "เสียครึ่ง", 2: "คืนทุน", 3: "ได้ครึ่ง", 4: "ได้เต็ม"}
-        results = {"ได้เต็ม": 0, "ได้ครึ่ง": 0, "คืนทุน": 0, "เสียครึ่ง": 0, "เสียเต็ม": 0}
-        
-        for t in df_hist['Target_HDP'].dropna():
-            if t in label_map: results[label_map[t]] += 1
-        for t in df_hist['Target_OU'].dropna():
-            if t in label_map: results[label_map[t]] += 1
+@st.fragment(run_every=2)
+def training_status():
+    for job in TRAIN_QUEUE.snapshot(OWNER):
+        with st.container(border=True):
+            st.write(f"{job['name']} | {job['status']}")
+            if job["status"] == "error": st.warning(job["error"])
+            if job["status"] == "done":
+                result = job["result"]
+                st.success("Artifact saved: " + result["model_id"])
+                st.caption("Ready for paper evaluation" if result["gate_pass"] else "Research only: statistical readiness gate did not pass.")
+                if st.button("Activate this model", key="activatejob_" + job["id"], disabled=ROLE != "admin"):
+                    try:
+                        require_role("admin", writes=False)
+                        REGISTRY.activate(result["model_id"])
+                        infer_batch.clear(); st.rerun()
+                    except Exception as exc: error_message(exc, "Model activation")
 
-        # ปรับสัดส่วนคอลัมน์ให้กราฟเทรนด์กว้างขึ้น (1:2)
-        col1, col2 = st.columns([1, 2])
-        
-        with col1:
-            st.markdown("**สัดส่วนผลประกอบการจริง**")
-            labels = list(results.keys())
-            values = list(results.values())
-            colors = ['#22c55e', '#86efac', '#7f9a8b', '#d9a441', '#e5484d']
-            
-            fig1 = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.5, marker_colors=colors)])
-            fig1.update_layout(
-                paper_bgcolor='rgba(0,0,0,0)', 
-                font_color='#e6f2ea', 
-                margin=dict(t=20, b=20, l=10, r=10),
-                legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5)
-            )
-            st.plotly_chart(fig1, use_container_width=True)
 
-        with col2:
-            # 2. กราฟ Market Trend รวม 2 เส้น
-            st.markdown("**📈 กราฟเทรนด์ตลาดรวม (Market Trend Analysis)**")
-            
-            # Note ข้อความอธิบายแต่ละเส้น
-            st.markdown(
-                "<div style='font-size: 0.85rem; color: #a7c4b5; margin-bottom: 10px; padding: 10px; background: #0c130f; border: 1px solid #1b2a22; border-radius: 8px;'>"
-                "🔵 <b>เส้นสีฟ้า (แฮนดิแคป):</b> ชี้ขึ้น = เจ้าบ้านทำเงิน | ปักลง = ทีมเยือนทำเงิน<br>"
-                "🟣 <b>เส้นสีม่วง (สูง/ต่ำ):</b> ชี้ขึ้น = สกอร์สูงทำเงิน | ปักลง = สกอร์ต่ำทำเงิน"
-                "</div>", unsafe_allow_html=True
-            )
-            
-            unit_map = {0: -1.0, 1: -0.5, 2: 0.0, 3: 0.5, 4: 1.0}
-            home_profits = []
-            over_profits = []
-            
-            for _, row in df_hist.iterrows():
-                h_p = unit_map.get(row.get('Target_HDP'), 0) if pd.notna(row.get('Target_HDP')) else 0
-                o_p = unit_map.get(row.get('Target_OU'), 0) if pd.notna(row.get('Target_OU')) else 0
-                home_profits.append(h_p)
-                over_profits.append(o_p)
-                
-            trend_hdp = np.cumsum(home_profits)
-            trend_ou = np.cumsum(over_profits)
-            
-            fig2 = go.Figure()
-            
-            # เส้นที่ 1: HDP (Home vs Away)
-            fig2.add_trace(go.Scatter(
-                y=trend_hdp, mode='lines', name='เทรนด์แฮนดิแคป (เจ้าบ้าน/เยือน)',
-                line=dict(color='#0ea5e9', width=2.5),
-                fill='tozeroy', fillcolor='rgba(14, 165, 233, 0.08)'
-            ))
-            
-            # เส้นที่ 2: OU (Over vs Under)
-            fig2.add_trace(go.Scatter(
-                y=trend_ou, mode='lines', name='เทรนด์สกอร์รวม (สูง/ต่ำ)',
-                line=dict(color='#d946ef', width=2.5),
-                fill='tozeroy', fillcolor='rgba(217, 70, 239, 0.08)'
-            ))
-            
-            fig2.update_layout(
-                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                font_color='#e6f2ea', yaxis_title="Trend Index (Units)", xaxis_title="จำนวนบิล (Match)", 
-                margin=dict(t=10, b=20, l=20, r=20),
-                legend=dict(
-                    orientation="h",
-                    yanchor="bottom",
-                    y=1.02,
-                    xanchor="right",
-                    x=1,
-                    bgcolor='rgba(0,0,0,0.5)'
-                ),
-                hovermode="x unified"  # เพิ่ม Tooltip ให้แสดงเทียบกันสองเส้นเมื่อเอาเมาส์ชี้
-            )
-            st.plotly_chart(fig2, use_container_width=True)
-            
+def text_number(label, key, value=None, help=None):
+    return st.text_input(label, value="" if value in (None, "") else str(value), key=key, help=help)
+
+
+def entry_page(records):
+    st.header("Capture & review / \u0e23\u0e31\u0e1a\u0e41\u0e25\u0e30\u0e15\u0e23\u0e27\u0e08\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25")
+    st.caption("Original DATA is read-only. New quotes are saved to AI_DATA_V6; no old formulas are changed.")
+    api_key = os.environ.get("GEMINI_API_KEY") or str(SECRET_VALUES.get("GEMINI_API_KEY", ""))
+    model = st.session_state.get("gemini_model_selected", SETTINGS.gemini_model)
+    files = st.file_uploader("Price screenshots (PNG/JPEG, <=12 MB each; at most 3 per batch)", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
+    if files:
+        preview_index = st.selectbox("Preview uploaded image", list(range(len(files))), format_func=lambda i: files[i].name)
+        st.image(files[preview_index], caption="Review the original image before saving", width=600)
+    if st.button("Read selected price images", disabled=not CAN_EDIT or not api_key or not model):
+        try:
+            require_role(writes=False)
+            if len(files or []) > 3: raise ValidationError("At most 3 images per batch.")
+            for f in files or []:
+                data = f.getvalue()
+                if len(data) > 12 * 1024 * 1024: raise ValidationError("Image exceeds 12 MB.")
+                OCR_QUEUE.submit(OWNER, image_key(data, model, "odds"), f.name, extract_image, data, api_key, model)
+            st.rerun()
+        except Exception as exc: error_message(exc, "Queue image reading")
+    if not api_key or not model:
+        st.info("Image AI is optional. Configure the key/model in Settings or enter the values manually below.")
+    extraction_status()
+    if "draft_token_v6" not in st.session_state: new_draft()
+    d = dict(st.session_state.get("draft_v6", {})); token = st.session_state.draft_token_v6
+    if st.button("Clear review form"):
+        new_draft(); st.rerun()
+    if d.get("period") in {"OTHER", "UNKNOWN"}:
+        st.warning("The market period was not confirmed as full-time 90 minutes. Verify manually before saving.")
+    if d.get("uncertain_fields"): st.warning("AI marked uncertain fields: " + ", ".join(d["uncertain_fields"]))
+    zone = ZoneInfo("Asia/Bangkok"); local_now = datetime.now(zone)
+    # Optional form image extraction is tied to the reviewed team names, not filenames.
+    with st.expander("Read a form-statistics image (optional)"):
+        stat_file = st.file_uploader("Form image", type=["png", "jpg", "jpeg"], key="form_image_" + token)
+        expected_home = st.text_input("Expected home team in form image", value=d.get("home") or "", key="form_home_" + token)
+        expected_away = st.text_input("Expected away team in form image", value=d.get("away") or "", key="form_away_" + token)
+        if stat_file:
+            st.image(stat_file, caption="Verify team identities and totals", width=600)
+        if st.button("Read form image", disabled=not CAN_EDIT or not api_key or not model or not stat_file or not expected_home.strip() or not expected_away.strip()):
+            try:
+                require_role(writes=False)
+                data = stat_file.getvalue()
+                context = expected_home.strip() + "|" + expected_away.strip()
+                OCR_QUEUE.submit(OWNER, image_key(data, model, "form", context), "Form: " + stat_file.name,
+                                 extract_image, data, api_key, model, "form", expected_home.strip(), expected_away.strip())
+                st.rerun()
+            except Exception as exc: error_message(exc, "Queue form image")
+    with st.form("review_" + token, clear_on_submit=False):
+        a, b = st.columns(2)
+        with a:
+            home = st.text_input("Home team", value=d.get("home") or "")
+            competition = st.text_input("Competition / season", value=d.get("competition") or "")
+            kickoff_date = st.date_input("Kickoff date (Bangkok time)", value=None)
+            kickoff_time = st.time_input("Kickoff time", value=clock_time(18, 0))
+        with b:
+            away = st.text_input("Away team", value=d.get("away") or "")
+            source = st.text_input("Price source / bookmaker / screenshot reference", value="")
+            capture_date = st.date_input("Actual price capture date", value=local_now.date())
+            capture_time = st.time_input("Actual price capture time", value=local_now.time().replace(microsecond=0), help="Use the screenshot's actual observation time, not an invented historical timestamp.")
+        format_options = ["UNKNOWN", "MY", "HK", "ID", "EU"]
+        fmt = st.selectbox("Original HDP / O-U price format (confirm, do not guess)", format_options,
+                           index=format_options.index(d.get("odds_format", "UNKNOWN")))
+        st.caption("1X2 prices must always be decimal. Blank means unknown; zero is never used as a missing price.")
+        a, b, c = st.columns(3)
+        with a: p_home = text_number("1X2 home", token + "1h", d.get("home_1x2"))
+        with b: p_draw = text_number("1X2 draw", token + "1d", d.get("draw_1x2"))
+        with c: p_away = text_number("1X2 away", token + "1a", d.get("away_1x2"))
+        a, b = st.columns(2)
+        with a:
+            st.markdown("#### Handicap")
+            h_line = text_number("Home handicap line", token + "hl", d.get("hdp_line"))
+            a_line = text_number("Away handicap line", token + "al", d.get("hdp_away_line"))
+            h_price = text_number("Home handicap price", token + "hp", d.get("hdp_home_raw"))
+            a_price = text_number("Away handicap price", token + "ap", d.get("hdp_away_raw"))
+        with b:
+            st.markdown("#### Total goals")
+            o_line = text_number("Over/under line", token + "ol", d.get("ou_line"))
+            o_price = text_number("Over price", token + "op", d.get("over_raw"))
+            u_price = text_number("Under price", token + "up", d.get("under_raw"))
+        st.markdown("#### Recent completed matches (optional; leave unavailable fields blank)")
+        forms = {}
+        a, b = st.columns(2)
+        for prefix, area, label in (("h", a, "Home"), ("a", b, "Away")):
+            with area:
+                forms[prefix + "_win_percent"] = text_number(label + " win rate (%)", token + prefix + "wr", d.get(prefix + "_win_percent"))
+                forms[prefix + "_goals_for"] = text_number(label + " TOTAL goals for", token + prefix + "gf", d.get(prefix + "_goals_for"))
+                forms[prefix + "_goals_against"] = text_number(label + " TOTAL goals against", token + prefix + "ga", d.get(prefix + "_goals_against"))
+                forms[prefix + "_matches"] = st.number_input(label + " recent match count", min_value=1, max_value=5, value=int(d.get(prefix + "_matches") or 5), step=1)
+        form_date = st.date_input("Form statistics as-of date", value=local_now.date())
+        form_time = st.time_input("Form statistics as-of time", value=local_now.time().replace(microsecond=0))
+        form_verified = st.checkbox("I verified the form totals and excluded this fixture's outcome")
+        reviewed = st.checkbox("I checked teams, prices, +/- signs, source, timestamps, and full-time 90-minute market")
+        submitted = st.form_submit_button("Save reviewed quote / \u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25", type="primary", disabled=not CAN_WRITE)
+    if submitted:
+        try:
+            require_role()
+            if not reviewed: raise ValidationError("Review and confirm the observed inputs first.")
+            if kickoff_date is None: raise ValidationError("Select the actual kickoff date.")
+            if fmt == "UNKNOWN": raise ValidationError("Explicitly choose the observed price format.")
+            hl = number(h_line, optional=True); al = number(a_line, optional=True)
+            if hl is not None and (al is None or abs(hl + al) > 1e-8):
+                raise ValidationError("Home and away handicap lines must be exact opposites.")
+            def convert(text):
+                return None if not text.strip() else to_decimal(text, fmt)
+            record = {"home": home.strip(), "away": away.strip(), "competition": competition.strip(), "source": source.strip(),
+                      "kickoff_utc": datetime.combine(kickoff_date, kickoff_time, zone).isoformat(),
+                      "captured_at_utc": datetime.combine(capture_date, capture_time, zone).isoformat(),
+                      "home_1x2": number(p_home), "draw_1x2": number(p_draw), "away_1x2": number(p_away),
+                      "hdp_line": hl, "hdp_home_decimal": convert(h_price), "hdp_away_decimal": convert(a_price),
+                      "ou_line": number(o_line, optional=True), "over_decimal": convert(o_price), "under_decimal": convert(u_price),
+                      "original_format": fmt, "prematch_verified": reviewed, "form_verified": form_verified,
+                      "form_asof_utc": datetime.combine(form_date, form_time, zone).isoformat(),
+                      "image_sha256": d.get("image_sha256", ""), "extractor_model": d.get("extractor_model", "manual"),
+                      "form_image_sha256": d.get("form_image_sha256", ""), "form_extractor_model": d.get("form_extractor_model", "manual")}
+            for prefix in ("h", "a"):
+                percent = number(forms[prefix + "_win_percent"], optional=True)
+                record[prefix + "_win_rate"] = percent / 100 if percent is not None else None
+                for suffix in ("goals_for", "goals_against", "matches"):
+                    record[prefix + "_" + suffix] = number(forms[prefix + "_" + suffix], optional=True)
+            result = save_quote(STORE, record, ACTOR)
+            st.success("Saved quote " + result["id"] + ". Original DATA was not changed.")
+            refresh(); new_draft()
+        except Exception as exc: error_message(exc, "Save quote")
+
+
+def prediction_page(records):
+    st.header("Predictions / \u0e1c\u0e25\u0e17\u0e33\u0e19\u0e32\u0e22")
+    active = REGISTRY.active(); artifacts = {}
+    for market, model_id in active.items():
+        try: artifacts[market] = REGISTRY.load(model_id)
+        except Exception as exc: error_message(exc, market + " model load")
+    pending = pending_latest(records)
+    if not pending:
+        st.info("No valid pending fixtures. Invalid records appear in Data quality, not as completed matches."); return
+    if not artifacts:
+        st.info("Train a model explicitly in Model lab, then activate it. Loading this page never trains a model.")
+    probabilities = {}
+    for market, artifact in artifacts.items():
+        usable = [r for r in pending if not market_errors(r, market)]
+        try:
+            # Exactly one batch inference per active market; no network reads inside cards.
+            probs = infer_batch(artifact.model_id, canonical_json(usable), SETTINGS.namespace, REGISTRY)
+            probabilities[market] = dict(zip((r["id"] for r in usable), probs))
+        except Exception as exc: error_message(exc, market + " prediction")
+    filter_text = st.text_input("Filter teams")
+    view = [r for r in pending if filter_text.casefold() in (r["home"] + " " + r["away"]).casefold()]
+    per_page = 10; pages = max(1, (len(view) + per_page - 1) // per_page)
+    page = st.number_input("Page", min_value=1, max_value=pages, step=1)
+    st.caption(f"{len(view)} pending fixtures; {per_page} per page. Times are displayed as stored UTC offsets.")
+    for row in view[(page - 1) * per_page:page * per_page]:
+        with st.container(border=True):
+            st.subheader(row["home"] + "  vs  " + row["away"])
+            st.caption(f"Fixture: {row['fixture_id']} | Kickoff: {row.get('kickoff_utc') or 'unknown (legacy)'}")
+            cols = st.columns(2)
+            for area, market in zip(cols, ("HDP", "OU")):
+                with area:
+                    artifact = artifacts.get(market); p = probabilities.get(market, {}).get(row["id"])
+                    st.markdown("#### " + market)
+                    if artifact is None or p is None:
+                        st.info("No active model or valid input for this market."); continue
+                    choice = assess_prediction(artifact, row, p, SETTINGS.policy)
+                    side_label = ("Home", "Away") if market == "HDP" else ("Over", "Under")
+                    st.write(f"Reference side: **{side_label[choice['side']]}** | **{choice['status']}**")
+                    st.metric("P(positive return), including all outcomes", f"{choice['positive_probability']:.1%}")
+                    st.caption(f"P(push) {choice['push_probability']:.1%} | P(negative) {choice['negative_probability']:.1%}")
+                    st.write(f"Conditional P(positive | no push): {choice['positive_given_no_push']:.1%}")
+                    st.write(f"EV / unit: {choice['ev']:+.3f} | Stress EV: {choice['stress_ev']:+.3f}")
+                    if choice["reasons"]: st.caption(" | ".join(choice["reasons"]))
+                    if choice["paper_fraction"]:
+                        st.caption(f"Unreserved paper-only Kelly cap: {choice['paper_fraction']:.2%}. Portfolio limits are applied when saved.")
+                    with st.expander("Five-state probabilities and model identity"):
+                        st.dataframe(pd.DataFrame({"state": list(choice["state_probabilities"]), "probability": list(choice["state_probabilities"].values())}), hide_index=True)
+                        st.code(artifact.model_id)
+            if st.button("Freeze pre-match prediction for later evaluation", key="freeze_" + row["id"], disabled=not CAN_WRITE or not artifacts):
+                try:
+                    require_role()
+                    saved = freeze_predictions(STORE, row["id"], artifacts, SETTINGS.policy, ACTOR)
+                    st.success(f"Saved/reused {len(saved)} immutable prediction records. No actual bet was placed.")
+                    refresh()
+                except Exception as exc: error_message(exc, "Freeze prediction")
+            with st.form("score_" + row["id"]):
+                score = st.text_input("Verified full-time score (home-away)")
+                reason = st.text_input("Result source / verification note")
+                if st.form_submit_button("Save result", disabled=not CAN_WRITE):
+                    try:
+                        require_role()
+                        save_result(STORE, row["fixture_id"], score, "FINAL", ACTOR, reason, expected_previous_id="")
+                        refresh(); st.rerun()
+                    except Exception as exc: error_message(exc, "Save result")
+
+
+def run_training(rows, market, config, policy):
+    data_hash = training_digest(rows, market, config)
+    for manifest in REGISTRY.list():
+        if manifest["training_digest"] == data_hash and manifest["report"]["policy_config"] == asdict(policy):
+            artifact = REGISTRY.load(manifest["model_id"])
+            return {"model_id": artifact.model_id, "gate_pass": artifact.report["gate_pass"]}
+    artifact = train_market(rows, market, config, policy)
+    artifact = REGISTRY.save(artifact)
+    return {"model_id": artifact.model_id, "gate_pass": artifact.report["gate_pass"]}
+
+
+def model_page(records):
+    st.header("Model lab / \u0e1d\u0e36\u0e01\u0e41\u0e25\u0e30\u0e1b\u0e23\u0e30\u0e40\u0e21\u0e34\u0e19\u0e42\u0e21\u0e40\u0e14\u0e25")
+    st.info("Legacy history without verified times is RESEARCH ONLY. No dates are fabricated. Only explicit training creates model artifacts.")
+    st.caption("Candidates: smoothed line-family baseline, one HGB, and optional three-model soft voting. Selection uses validation log loss; the final test is not tuned.")
+    a, b = st.columns(2)
+    for area, market in zip((a, b), ("HDP", "OU")):
+        with area:
+            usable, mode = training_records(records, market, SETTINGS.training)
+            st.metric(market + " usable unique fixtures", len(usable))
+            st.caption(mode)
+            if st.button("Train / evaluate " + market, disabled=ROLE != "admin" or len(usable) < SETTINGS.training.min_rows):
+                try:
+                    require_role("admin", writes=False)
+                    key = digest([market, training_digest(records, market, SETTINGS.training), asdict(SETTINGS.policy)])
+                    TRAIN_QUEUE.submit(OWNER, key, "Training " + market, run_training, records, market, SETTINGS.training, SETTINGS.policy)
+                    st.rerun()
+                except Exception as exc: error_message(exc, market + " training")
+    training_status()
+    manifests = REGISTRY.list()
+    if not manifests: return
+    selected = st.selectbox("Inspect saved model / rollback target", [m["model_id"] for m in manifests])
+    manifest = next(m for m in manifests if m["model_id"] == selected)
+    r = manifest["report"]
+    st.write(f"**{r['selected_model']}** | {r['mode']} | trained {manifest['trained_at_utc']}")
+    if r["gate_pass"]: st.success("Statistical readiness gate passed for PAPER evaluation only.")
+    else: st.warning("Research only: " + ", ".join(r["gate_reasons"]))
+    st.dataframe(pd.DataFrame([{"partition": k, "n": v} for k, v in r["partition_counts"].items()]), hide_index=True)
+    st.dataframe(pd.DataFrame([
+        {"model": "selected", "n_test": r["test"]["n"], "log_loss": r["test"]["log_loss"], "brier": r["test"]["brier"], "5-state accuracy": r["test"]["five_state_accuracy"]},
+        {"model": "family baseline", "n_test": r["test_baseline"]["n"], "log_loss": r["test_baseline"]["log_loss"], "brier": r["test_baseline"]["brier"], "5-state accuracy": r["test_baseline"]["five_state_accuracy"]},
+    ]), hide_index=True)
+    st.caption(f"Directional KPI: {r['test']['directional_correct']}/{r['test']['directional_n']} (conditional threshold >=55%, excludes pushes). Not the full policy hit rate.")
+    st.write("Numerical-policy test (before live safety gates):", r["test_policy"])
+    reliability = pd.DataFrame(r["test"]["reliability"])
+    if not reliability.empty:
+        st.markdown("#### Reliability: conditional positive return, excluding pushes")
+        st.dataframe(reliability, hide_index=True)
+        st.line_chart(reliability.set_index("forecast")[["observed"]])
+    if st.button("Activate selected model (or rollback)", disabled=ROLE != "admin"):
+        try:
+            require_role("admin", writes=False)
+            REGISTRY.activate(selected); infer_batch.clear(); st.success("Activated. Research models remain gated.")
+        except Exception as exc: error_message(exc, "Activate model")
+    st.download_button("Download model evaluation manifest", canonical_json(manifest), file_name=selected + ".json", mime="application/json")
+
+
+def dashboard_page(snapshot, records, issues):
+    st.header("Data quality & evaluation / \u0e04\u0e38\u0e13\u0e20\u0e32\u0e1e\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25")
+    a, b, c, d = st.columns(4)
+    a.metric("Observations (not unique fixtures)", len(records))
+    b.metric("Settled observations", sum(r["status"] == "SETTLED" for r in records))
+    c.metric("Pending fixtures", len(pending_latest(records)))
+    d.metric("Invalid observations", sum(r["status"] == "INVALID" for r in records))
+    if issues:
+        with st.expander(f"Quality issues ({len(issues)} findings; multiple findings may affect one row)", expanded=True):
+            st.dataframe(pd.DataFrame(issues), hide_index=True, height=240)
+    form_n = sum(all(r.get(k) not in (None, "") for k in FORM_COLUMNS) for r in records)
+    st.caption(f"Complete form: {form_n}/{len(records)} observations. Missing form is not silently filled with zero.")
+    st.markdown("#### Frozen pre-match forecasts with observed results")
+    evaluated = evaluate_frozen(snapshot)
+    st.caption(f"Evaluable frozen forecasts: {len(evaluated)}/{len(snapshot['predictions'])}. Pending/void outcomes, missing sources, changed quotes, and invalid forecast records are excluded; they are not counted as losses or wins.")
+    if not evaluated:
+        st.info("No eligible frozen forecasts with outcomes yet. This is not replaced by old spreadsheet-rule results or by re-predicting training rows.")
     else:
-        st.info("ยังไม่มีข้อมูลสถิติที่บันทึกผลสกอร์เพียงพอสำหรับสร้างกราฟ")
-
-# ----------------------------------------
-# หัวข้อหลัก (Tabs)
-# ----------------------------------------
-st.markdown("<h1 class='page-title'>⚽ ระบบวิเคราะห์ราคาบอล VIP & AI (v5.0 The Ultimate Hybrid)</h1>", unsafe_allow_html=True)
-st.markdown("<p class='page-sub'>อัปเกรด Ensemble AI โหวต 3 ระดับ พร้อมระบบคำนวณเงินเดิมพันอัตโนมัติ, Ranking และ Confidence Indicator</p>", unsafe_allow_html=True)
-
-AI = get_ai()
-
-tab1, tab2, tab3 = st.tabs(["📸 อัปโหลดราคาบอล", "📡 สัญญาณการทำนาย", "📊 Dashboard"])
-
-with tab1:
-    st.info("💡 **Tips V5.0:** ถ่ายภาพตารางราคาให้เห็น 1 คู่ชัดเจน เพื่อให้ AI ดึงข้อมูลและคำนวณขนาดไม้ลงทุนให้อย่างแม่นยำ")
-    fmt_choice = st.selectbox("รูปแบบค่าน้ำ", list(FMT_CHOICES.keys()))
-    up_n = st.session_state.get("up_n", 0)
-    uploaded_files = st.file_uploader("เลือกไฟล์รูปภาพตารางราคาบอล", type=['png', 'jpg', 'jpeg'], accept_multiple_files=True, key=f"uploader_{up_n}")
-    if uploaded_files and workbook:
-        for f in uploaded_files: JOBS.pool.submit(process_job, JOBS.create(f.name, f.getvalue(), FMT_CHOICES[fmt_choice], st.session_state["form5_owner_id"]), workbook, model)
-        st.session_state["up_n"] = up_n + 1
-        st.rerun()
-
-    my_jobs = [j for j in JOBS.snapshot() if j.get("owner_id") == st.session_state["form5_owner_id"]]
-    if my_jobs or st.session_state.get("form5_editing"):
-        st.button("🧹 เคลียข้อมูลหน้านี้", key="clear_upload", on_click=clear_upload_page, help="ล้างรายการงาน การ์ดสัญญาณ ฟอร์ม 5 นัด และไฟล์ที่เลือกไว้ในหน้านี้")
-
-    polling = any(j["status"] in ("queued", "reading", "saving") for j in my_jobs)
-    if hasattr(st, "fragment"): st.fragment(run_every=2 if polling else None)(render_jobs)(polling)
-    else: render_jobs(polling)
-    render_form5_editor()
-
-with tab2:
-    panel_header("📡 สัญญาณการทำนาย (AI Predictions)", "แมตช์ที่รอผลสกอร์ — บันทึกผลแล้วการ์ดจะหายไปเอง")
-    if not workbook:
-        st.error("ไม่สามารถเชื่อมต่อ Google Sheets ได้")
-    else:
-        st.button("🔄 รีเฟรชข้อมูล", key="refresh_signals", on_click=st.cache_data.clear)
-        if AI["status"] != "ok":
-            st.warning(AI["msg"])
-            if "trace" in AI:
-                with st.expander("🛠️ กางดู Error Log ที่นี่ (ส่งข้อมูลนี้ให้ผู้พัฒนา)"): 
-                    st.code(AI["trace"], language="python")
+        frame = pd.DataFrame(evaluated)
+        model_filter = st.selectbox("Model version", sorted(frame.model_id.unique()))
+        frame = frame[frame.model_id == model_filter]
+        policies = sorted(frame.policy_version.unique())
+        policy_filter = st.selectbox("Policy version", policies)
+        frame = frame[frame.policy_version == policy_filter]
+        paper_only = st.checkbox("Show paper candidates only", value=True)
+        if paper_only: frame = frame[frame.status == "PAPER_CANDIDATE"]
+        if frame.empty:
+            st.info("No records meet this filter. Research forecasts are stored separately.")
         else:
-            df_view = _visible_matches(AI["df_predict"]) if len(AI["df_predict"]) > 0 else AI["df_predict"]
-            if len(df_view) > 0:
-                render_monitor_header(df_view)
-                render_prediction_cards(df_view, workbook)
-            else:
-                st.success("🎉 ไม่มีคู่ค้างที่ยังไม่ลงผลสกอร์ ทุกคู่ใน Google Sheets บันทึกผลครบถ้วนแล้ว!")
+            a, b, c = st.columns(3)
+            a.metric("Forecasts / unique fixtures", f"{len(frame)} / {frame.fixture_id.nunique()}")
+            c.metric("Average log loss", f"{frame.log_loss.mean():.4f}")
+            b.metric("Flat-unit SIMULATED yield", f"{frame.flat_unit_return.mean():+.2%}")
+            st.caption("Yield assumes one unit at the saved observed price per displayed forecast. It is not actual profit or a compound bankroll result.")
+            st.dataframe(frame, hide_index=True)
+            # Aggregate simultaneous/overlapping forecasts by settlement-availability date.
+            chart = frame.assign(day=frame.result_available_at_utc.str[:10]).groupby("day").flat_unit_return.sum().cumsum()
+            st.line_chart(chart.rename("cumulative simulated units"))
+    with st.expander("Inspect input observations (old formulas are excluded)"):
+        cols = ["id", "fixture_id", "home", "away", "source_row", "status", "score", "kickoff_utc", "hdp_line", "ou_line"]
+        st.dataframe(pd.DataFrame(records).reindex(columns=cols), hide_index=True, height=300)
+    st.download_button("Download data-quality findings (JSON)", canonical_json(issues), "data_quality.json", "application/json")
 
-with tab3:
-    panel_header("📊 Dashboard", "ความแม่นยำของโมเดล V5.0 และสถานะการเรียนรู้")
-    if not workbook:
-        st.error("ไม่สามารถเชื่อมต่อ Google Sheets ได้")
+
+def settings_page(snapshot, records):
+    st.header("Settings & operations / \u0e15\u0e31\u0e49\u0e07\u0e04\u0e48\u0e32")
+    st.write(f"Backend: **{SETTINGS.backend}** | role: **{ROLE}** | writes: **{SETTINGS.enable_writes}**")
+    st.warning("Use only ONE app process/replica as writer for Google Sheets. Process locks do not coordinate other deployments or manual edits.")
+    if SETTINGS.backend == "sheets":
+        st.caption("Initialize creates only AI_DATA_V6, AI_RESULTS_V6 and AI_PREDICTIONS_V6. Existing DATA and formulas remain untouched.")
+        acknowledged = st.checkbox("I backed up the workbook and approve creating the three v6 tabs")
+        if st.button("Initialize v6 tabs", disabled=ROLE != "admin" or not SETTINGS.enable_writes or not acknowledged):
+            try:
+                require_role("admin"); STORE.initialize(); refresh(); st.success("v6 tabs initialized.")
+            except Exception as exc: error_message(exc, "Initialize tabs")
     else:
-        st.button("🔄 รีเฟรชข้อมูล", key="refresh_dashboard", on_click=st.cache_data.clear)
-        if AI["status"] != "ok":
-            st.warning(AI["msg"])
-            if "trace" in AI:
-                with st.expander("🛠️ กางดู Error Log ที่นี่ (ส่งข้อมูลนี้ให้ผู้พัฒนา)"): 
-                    st.code(AI["trace"], language="python")
-        else:
-            render_dashboard(AI)
+        st.caption("Local backend stores NEW records in runtime/<namespace>/observations.sqlite3. The uploaded DATA workbook is kept read-only.")
+        workbook_file = st.file_uploader("Import original DATA workbook (.xlsx)", type=["xlsx"])
+        if st.button("Validate and import workbook", disabled=ROLE != "admin" or not SETTINGS.enable_writes or workbook_file is None):
+            try:
+                require_role("admin")
+                loaded, found = STORE.import_legacy(workbook_file.getvalue())
+                refresh(); st.success(f"Imported {len(loaded)} observations; {len(found)} quality findings. No original formulas were edited.")
+                st.rerun()
+            except Exception as exc: error_message(exc, "Import workbook")
+    if SETTINGS.backend == "sheets" and STORE.uncertain:
+        st.error("An earlier write has an unknown outcome. Further writes are blocked until reconciled.")
+        operation_id = STORE.uncertain["record"]["id"]
+        st.code(operation_id)
+        if st.button("Reconcile unknown write", disabled=ROLE != "admin"):
+            try:
+                require_role("admin", writes=False)
+                if STORE.reconcile_uncertain():
+                    refresh(); st.rerun()
+                else:
+                    st.warning("The record is not visible yet. This alone does not prove that the earlier write failed.")
+            except Exception as exc: error_message(exc, "Reconcile uncertain write")
+        recovery_reason = st.text_input("Administrator's reconciliation evidence / reason")
+        confirm_absent = st.checkbox("I independently inspected the workbook and confirmed the earlier operation did not commit")
+        if st.button("Release blocked operation after manual review", disabled=ROLE != "admin" or not confirm_absent):
+            try:
+                require_role("admin")
+                STORE.release_uncertain_after_review(operation_id, ACTOR, recovery_reason)
+                refresh(); st.rerun()
+            except Exception as exc: error_message(exc, "Release uncertain write")
+    api_key = os.environ.get("GEMINI_API_KEY") or str(SECRET_VALUES.get("GEMINI_API_KEY", ""))
+    st.markdown("#### Gemini (optional)")
+    model = st.text_input("Model ID accessible to your API project", value=st.session_state.get("gemini_model_selected", SETTINGS.gemini_model))
+    if st.button("Use this model for this session", disabled=not CAN_EDIT):
+        st.session_state.gemini_model_selected = model.strip(); st.success("Session model selected. Extraction validates the request at runtime.")
+    if st.button("List model IDs from the API", disabled=not CAN_EDIT or not api_key):
+        try:
+            require_role(writes=False)
+            st.write(available_models(api_key))
+        except Exception as exc: error_message(exc, "List Gemini models")
+    st.caption("Secrets are read from environment variables or .streamlit/secrets.toml. Do not upload credentials or commit them to source control.")
+    with st.expander("Result correction / void (administrator only)"):
+        fixtures = {}
+        for r in records: fixtures.setdefault(r["fixture_id"], r)
+        selected = st.selectbox("Fixture to correct", [""] + list(fixtures), format_func=lambda key: "Select..." if not key else f"{fixtures[key]['home']} vs {fixtures[key]['away']} | {fixtures[key]['status']} | {key[-8:]}")
+        if selected:
+            events = [r for r in snapshot["results"] if r["fixture_id"] == selected]
+            previous_id = events[-1]["id"] if events else ""
+            with st.form("correction_" + selected):
+                score = st.text_input("Correct verified full-time score", value=fixtures[selected].get("score", ""))
+                status = st.selectbox("Outcome status", ["FINAL", "VOID"])
+                reason = st.text_input("Required verification source and correction explanation")
+                confirm = st.checkbox("I verified this correction; preserve the previous entry in the audit trail")
+                if st.form_submit_button("Append correction event", disabled=ROLE != "admin" or not SETTINGS.enable_writes):
+                    try:
+                        require_role("admin")
+                        if not confirm: raise ValidationError("Explicit confirmation is required.")
+                        save_result(STORE, selected, score, status, ACTOR, reason, allow_correction=True, expected_previous_id=previous_id)
+                        refresh(); st.rerun()
+                    except Exception as exc: error_message(exc, "Correct result")
+    with st.expander("Model and policy configuration (read-only here)"):
+        st.json({"training": asdict(SETTINGS.training), "policy": asdict(SETTINGS.policy)})
+    st.download_button("Backup app-managed data as JSON", canonical_json({k: snapshot[k] for k in ("quotes", "results", "predictions")}),
+                       "football_ai_v6_backup.json", "application/json")
+    st.caption("Back up runtime/ and the complete Google workbook separately. JSON above excludes credentials and model binaries.")
+
+
+st.title("Football AI v6")
+st.caption("Validated data. Explicit training. Honest probabilities. Frozen pre-match evaluation. No guaranteed accuracy or profit.")
+with st.sidebar:
+    st.markdown("### Python AI workspace")
+    st.caption(f"v{__version__} | {ACTOR} | {ROLE}")
+    page = st.radio("Workspace", ["Capture & review", "Predictions", "Data quality & evaluation", "Model lab", "Settings"])
+    if st.button("Refresh data (does not retrain)"):
+        refresh(); st.rerun()
+    active = REGISTRY.active()
+    for market in ("HDP", "OU"):
+        st.caption(f"{market}: {active.get(market, 'no active model')}")
+    if not SETTINGS.enable_writes: st.warning("Read-only data mode. Set enable_writes=true to save/import.")
+    if SETTINGS.local_only: st.info("Local admin mode: do not expose this service through a public proxy.")
+    elif st.button("Sign out"): st.logout()
+try:
+    SNAPSHOT = load_snapshot(SETTINGS.namespace, STORE.revision, STORE)
+    RECORDS, ISSUES = materialize(SNAPSHOT)
+except Exception as exc:
+    error_message(exc, "Load data")
+    st.info("The application fails closed on storage/schema errors. Check the DATA headers and access permissions.")
+    st.stop()
+
+# Only the selected page executes. No eager hidden tabs and no automatic model training.
+if page == "Capture & review": entry_page(RECORDS)
+elif page == "Predictions": prediction_page(RECORDS)
+elif page == "Data quality & evaluation": dashboard_page(SNAPSHOT, RECORDS, ISSUES)
+elif page == "Model lab": model_page(RECORDS)
+else: settings_page(SNAPSHOT, RECORDS)
