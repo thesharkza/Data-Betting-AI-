@@ -1056,7 +1056,7 @@ def _channel_html(ch, name, line_txt, prob, verdict, color, desc, lo_lbl, hi_lbl
             f"<div class='ch-h'><span class='ch-k'>{ch}</span><span>{name}</span><span class='ch-l'>{esc(line_txt)}</span></div>"
             "<div class='ch-body'>"
             f"{_dial_svg(p, color)}"
-            f"<div><div class='ch-val'>{p:g}<small>%</small></div><div class='ch-d'>{desc}</div><span class='ch-v'>{esc(verdict)}</span></div>"
+            f"<div class='ch-info'><div class='ch-val'>{p:g}<small>%</small></div><div class='ch-d'>{desc}</div><div class='ch-v'>{esc(verdict)}</div></div>"
             "</div>"
             f"{_vu(p, 20)}<div class='vu-l'><span>{lo_lbl}</span><span>50%</span><span>{hi_lbl}</span></div></div>")
 
@@ -1099,7 +1099,7 @@ def render_monitor_header(df_pred):
                      f"<span class='d' style='--c:{c2}'></span>O/U {float(r.get('AI_โอกาสออกสูง(%)', 50)):g}%</span>")
     if items:
         track = "".join(items) * 2
-        st.markdown(f"<div class='ticker'><div class='ticker-track' style='--dur:{max(24, len(items) * 7)}s'>{track}</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='ticker-container'><div class='ticker-track' style='--dur:{max(24, len(items) * 7)}s'>{track}</div></div>", unsafe_allow_html=True)
 
 def _pair(h, a): return (str(h).strip(), str(a).strip())
 def _visible_matches(df_pred):
@@ -1128,7 +1128,7 @@ def render_prediction_cards(df_pred, workbook):
                             st.rerun()
                         else: st.error("ไม่พบคู่นี้ที่ยังไม่มีสกอร์ใน Google Sheets กรุณาตรวจสอบชื่อทีม")
                     else: st.warning("กรุณากรอกผลสกอร์ก่อนกดบันทึก")
-            st.markdown("<div style='height: 18px;'></div>", unsafe_allow_html=True)
+            st.write("") # ให้เว้นบรรทัดธรรมดาแทนการใช้ div แบบเดิม
 
 # ----------------------------------------
 # Dashboard : KPI & Charts
