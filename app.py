@@ -132,8 +132,25 @@ p, label, span { color: inherit; }
 .ch-info { flex: 1; min-width: 0; }
 .ch-val { font-family: 'JetBrains Mono', monospace; font-size: 1.8rem; font-weight: 700; line-height: 1; color: var(--c); text-shadow: 0 0 18px color-mix(in srgb, var(--c) 55%, transparent); }
 .ch-val small { font-size: .9rem; color: #7f9a8b; margin-left: 2px; }
+/* 🌟 แก้บั๊กข้อความถูกตัด และปุ่มล้น */
 .ch-d { font-size: .78rem; color: #7f9a8b; margin: 6px 0 9px; line-height: 1.3; }
 .ch-v { display: block; padding: 6px 12px; border-radius: 8px; font-size: .82rem; font-weight: 500; color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); line-height: 1.4; word-wrap: break-word; margin-top: 4px; }
+
+/* 🌟 แก้บั๊ก Streamlit ลบแท็ก <i> ทำให้กราฟหาย (เปลี่ยนมาใช้ div .v-bar แทน) */
+.vu { display: grid; grid-template-columns: repeat(var(--n, 20), 1fr); gap: 3px; margin-top: 12px; }
+.vu .v-bar { height: 9px; border-radius: 2px; background: #17241d; }
+.vu .v-bar.on { background: var(--c); box-shadow: 0 0 8px color-mix(in srgb, var(--c) 60%, transparent); animation: vuon .35s calc(var(--i) * 40ms) both; }
+.vu-l { display: flex; justify-content: space-between; font-family: 'JetBrains Mono', monospace; font-size: .7rem; color: #7f9a8b; margin-top: 5px; padding: 0 2px; }
+
+/* 🌟 แก้บั๊กเสาสัญญาณ (มุมขวาบน) หาย */
+.sig { margin-left: auto; display: flex; align-items: flex-end; gap: 3px; height: 14px; }
+.sig .s-bar { width: 4px; border-radius: 1px; background: #1f2e26; }
+.sig .s-bar:nth-child(1) { height: 5px; } .sig .s-bar:nth-child(2) { height: 8px; } .sig .s-bar:nth-child(3) { height: 11px; } .sig .s-bar:nth-child(4) { height: 14px; }
+.sig .s-bar.on { background: #4ade80; box-shadow: 0 0 6px rgba(74,222,128,0.7); }
+
+/* 🌟 แก้แถบโหลดงาน (หลอดวิ่งๆ) หาย */
+.job-bar { height: 3px; border-radius: 3px; margin-top: 12px; background: #17241d; overflow: hidden; }
+.job-bar .j-bar { display: block; height: 100%; width: 40%; border-radius: 3px; background: linear-gradient(90deg, transparent, #22c55e, #86efac, transparent); animation: sweep 1.4s ease-in-out infinite; }
 
 /* 📱 Responsive Mobile Layout Fix */
 @media (max-width: 768px) {
