@@ -855,19 +855,24 @@ ML_CONFIG = {
     "min_calibration": 30,
     "min_form_training_rows": 60,
     "min_line_examples": 15,
-    "min_probability": 55.0,
-    "min_ev": 0.02,
-    "probability_stress": 0.03,
+    
+    # 🎯 [จุดสำคัญที่ปรับจูน] 
+    "min_probability": 58.0,        # [ปรับจาก 55.0] ให้เข้าทำเฉพาะคู่ที่โมเดลมั่นใจเกิน 58% เพื่อสู้กับค่าน้ำ
+    "min_ev": 0.04,                 # [ปรับจาก 0.02] เข้าทำเมื่อได้ Value Bet (ผลตอบแทนคาดหวัง) คุ้มค่าความเสี่ยงมากขึ้น
+    "probability_stress": 0.05,     # [ปรับจาก 0.03] เผื่อ Margin of Error ให้กว้างขึ้น ป้องกันราคาไหลหลอก
     "baseline_smoothing": 1.0,
-    "baseline_mix": 0.10,
+    "baseline_mix": 0.05,           # [ปรับจาก 0.10] ลดการพึ่งพาค่าเฉลี่ยสถิติพื้นฐาน ให้ AI ตัดสินใจจาก Data เชิงลึกมากขึ้น
+    
     "min_validation_gain": 0.005,
     "max_brier_degradation": 0.005,
     "max_top_label_ece": 0.15,
     "temperatures": (0.75, 1.0, 1.25, 1.5, 2.0, 3.0),
     "max_iter": 120,
     "threads": 2,
-    "fractional_kelly": 0.25,
-    "max_theoretical_fraction": 0.01,
+    
+    # 🎯 [Money Management]
+    "fractional_kelly": 0.25,       # ใช้ Kelly 1/4 เพื่อป้องกันพอร์ตแตกจากความแปรปรวน
+    "max_theoretical_fraction": 0.03, # จำกัดไม่ให้ไม้ไหนเกิน 3% ของพอร์ตรวม แม้ AI จะมั่นใจมากก็ตาม
 }
 # Thresholds above are engineering defaults, NOT statistically proven guarantees.
 # No chronology is invented: this legacy schema supports grouped research only.
