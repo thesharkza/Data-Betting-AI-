@@ -52,7 +52,7 @@ style
 html, body, [class=css], .stApp, .stMarkdown, button, input, textarea { font-family 'Prompt', 'Segoe UI', sans-serif !important; }
 .stApp { background #050907; color #e6f2ea; }
 header[data-testid=stHeader] { background transparent; }
-.block-container { padding-top 2.2rem; max-width 1280px; }
+.block-container { padding-top: 2.2rem; max-width: 1280px; }
 h1, h2, h3, h4 { color #e6f2ea !important; letter-spacing -0.01em; }
 p, label, span { color inherit; }
  
