@@ -29,7 +29,7 @@ import plotly.graph_objects as go
 # ----------------------------------------
 # ตั้งค่าหน้าเว็บ
 # ----------------------------------------
-st.set_page_config(page_title=ระบบวิเคราะห์ราคาบอล VIP & AI, page_icon=⚽, layout=wide)
+st.set_page_config(page_title="ระบบวิเคราะห์ราคาบอล VIP & AI", page_icon="⚽", layout="wide")
  
 # ----------------------------------------
 # THEME  Black & Emerald (Cyberpunk Monitor)
