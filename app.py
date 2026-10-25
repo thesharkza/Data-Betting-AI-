@@ -1198,6 +1198,16 @@ def _ml_prepare(df_in):
     X["Form_WinRate_Difference"] = X[FORM5_HEADERS[0]] - X[FORM5_HEADERS[3]]
     X["Expected_Total_Goals"] = (h_for + a_against + a_for + h_against) / 2.0
     X["Form_Total_vs_Line"] = X["Expected_Total_Goals"] - X["OU_Line"]
+    X["Form_Total_vs_Line"] = X["Expected_Total_Goals"] - X["OU_Line"]
+    
+    # 🚨 [เพิ่มตัวแปรจับผิดราคาหลอก (Bookie Trap Indicator)]
+    # หากสถิติ WinRate เหย้าดีกว่าเยือนมากๆ (ค่าบวก) แต่โต๊ะเปิด HDP น้อยผิดปกติ โมเดลจะรับรู้ถึงความขัดแย้งนี้
+    X["HDP_vs_Form_Mismatch"] = X["Form_WinRate_Difference"] + (X["HDP_Line"] / 2.5) 
+    
+    # 🚨 [เพิ่มตัวแปรวัดโมเมนตัมการทำประตู (Goal Pressure Index)]
+    # ประเมินว่าทีมไหนกำลังท็อปฟอร์มเกมรุกหรือกำลังเป๋ในเกมรับ
+    X["Home_Goal_Pressure"] = X["Form_Home_Goal_Avg"] - (X[FORM5_HEADERS[2]] / 5.0)
+    X["Away_Goal_Pressure"] = X["Form_Away_Goal_Avg"] - (X[FORM5_HEADERS[5]] / 5.0)
     # No artificial 2.5-goal fallback. These are coarse features, not hard rules.
     means = X["Expected_Total_Goals"].to_numpy(float)
     lines = X["OU_Line"].to_numpy(float)
