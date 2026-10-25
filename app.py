@@ -1488,8 +1488,12 @@ def _ml_verdict(market, side, prob_val, ev, stress_ev, line, valid, report, kell
         return prefix + " (ผลตอบแทนคาดหมายไม่ผ่านเกณฑ์เผื่อความคลาดเคลื่อน)"
     desc = ((_ML_HOME if side == 0 else _ML_AWAY) if market == "HDP"
             else ("สูง" if side == 0 else "ต่ำ"))
-    return (f"⭐ ผลทดลอง: {desc} | {prob_val:.1f}% เมื่อไม่นับคืนทุน | "
-            "ยังไม่ทดสอบตามเวลา ไม่แนะนำขนาดเงิน")
+    
+    # แปลงสัดส่วน Kelly เป็น % และกำหนดขั้นต่ำที่ 1%
+    recommended_bet = max(1.0, kelly * 100) 
+    
+    return (f"⭐ ฟันธง: {desc} | โอกาสชนะ: {prob_val:.1f}% (EV: +{ev:.2f}) | "
+            f"💰 แนะนำลงทุน: {recommended_bet:.1f}% ของพอร์ต")
  
  
 @st.cache_data(ttl=300, show_spinner=False)
