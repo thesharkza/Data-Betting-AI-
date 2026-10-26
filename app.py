@@ -17,7 +17,7 @@ from math import isfinite
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 from html import escape as esc
- 
+
 # 🚀 นำเข้า Machine Learning Ensemble & Models (V5.0 Ultimate Hybrid)
 from sklearn.ensemble import HistGradientBoostingClassifier, VotingClassifier
 from sklearn.model_selection import GroupShuffleSplit
@@ -25,12 +25,12 @@ from threadpoolctl import threadpool_limits
 import scipy.stats as stats
 import plotly.express as px
 import plotly.graph_objects as go
- 
+
 # ----------------------------------------
 # ตั้งค่าหน้าเว็บ
 # ----------------------------------------
 st.set_page_config(page_title="ระบบวิเคราะห์ราคาบอล VIP & AI", page_icon="⚽", layout="wide")
- 
+
 # ----------------------------------------
 # THEME : Black & Emerald (Cyberpunk Monitor)
 # ----------------------------------------
@@ -45,7 +45,7 @@ AMBER = "#d9a441"
 RED = "#e5484d"
 CYAN = "#0ea5e9"
 CYAN_SOFT = "#7dd3fc"
- 
+
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
@@ -55,11 +55,11 @@ header[data-testid="stHeader"] { background: transparent; }
 .block-container { padding-top: 2.2rem; max-width: 1280px; }
 h1, h2, h3, h4 { color: #e6f2ea !important; letter-spacing: -0.01em; }
 p, label, span { color: inherit; }
- 
+
 /* 🌟 แก้ปัญหาข้อความเททับกันใน Streamlit Container */
 .element-container { overflow: visible !important; }
 .stMarkdown div { line-height: 1.5; }
- 
+
 .stTabs [data-baseweb="tab-list"] { gap: 6px; border-bottom: 1px solid #1b2a22; }
 .stTabs [data-baseweb="tab"] { background: transparent; color: #7f9a8b; padding: 10px 18px; border-radius: 10px 10px 0 0; font-weight: 500; }
 .stTabs [aria-selected="true"] { color: #22c55e !important; background: #0c130f; }
@@ -73,7 +73,7 @@ p, label, span { color: inherit; }
 [data-testid="stAlert"] { background: #0c130f; border: 1px solid #1b2a22; border-radius: 12px; }
 .page-title { font-size: 1.9rem; font-weight: 600; margin: 0; color: #e6f2ea; }
 .page-sub { color: #7f9a8b; margin: 4px 0 22px 0; font-size: 0.95rem; }
- 
+
 /* ================= INPUTS (ช่องกรอกข้อมูล) กลับมาแล้ว ================= */
 label[data-testid="stWidgetLabel"] p { color: #a7c4b5; font-size: 0.85rem; font-weight: 400; }
 [data-baseweb="input"], [data-baseweb="base-input"] { background-color: #080e0b !important; border-radius: 10px !important; }
@@ -84,23 +84,23 @@ label[data-testid="stWidgetLabel"] p { color: #a7c4b5; font-size: 0.85rem; font-
 [data-testid="stNumberInput"] button:hover { background: rgba(34,197,94,0.14) !important; color: #4ade80 !important; }
 [data-baseweb="select"] > div { background-color: #080e0b !important; border: 1px solid #1b2a22 !important; border-radius: 10px !important; }
 [data-baseweb="select"] > div:focus-within { border-color: #22c55e !important; box-shadow: 0 0 22px -8px rgba(34,197,94,0.6); }
- 
+
 /* ฟอร์ม = แผงควบคุม */
 [data-testid="stForm"] { position: relative; background: linear-gradient(180deg, #0b120e, #080e0b); border: 1px solid #1b2a22; border-radius: 16px; padding: 18px 20px 10px; }
 [data-testid="stForm"]::before { content: ""; position: absolute; left: 20px; right: 20px; top: -1px; height: 2px; background: linear-gradient(90deg, transparent, #22c55e, transparent); opacity: .7; }
- 
+
 /* ช่องกรอกผลสกอร์ = สกอร์บอร์ด */
 [class*="st-key-score_input_"] input { font-family: 'JetBrains Mono', monospace !important; font-size: 1.55rem !important; font-weight: 700 !important; text-align: center; letter-spacing: .32em; color: #4ade80 !important; text-shadow: 0 0 14px rgba(74,222,128,0.5); }
 [class*="st-key-score_input_"] input::placeholder { color: #2a4136 !important; text-shadow: none; }
 [class*="st-key-score_form_"] [data-testid="stForm"], [data-testid="stForm"][class*="st-key-score_form_"] { border-radius: 0 0 18px 18px; border-top: 1px dashed #1b2a22; background: #080e0b; padding: 16px 20px 8px; }
 [class*="st-key-score_form_"] [data-testid="stForm"]::before, [data-testid="stForm"][class*="st-key-score_form_"]::before { display: none; }
 [class*="st-key-score_form_"] [data-testid="stFormSubmitButton"] { margin-top: 1.75rem; }
- 
+
 /* หัวฟอร์ม 5 นัด */
 .fx-side { --c: #22c55e; display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 12px; margin-bottom: 10px; border: 1px solid color-mix(in srgb, var(--c) 45%, #1b2a22); background: color-mix(in srgb, var(--c) 9%, transparent); font-weight: 500; color: #e6f2ea; }
 .fx-side.away { --c: #d9a441; }
 .fx-side small { font-family: 'JetBrains Mono', monospace; color: var(--c); letter-spacing: .1em; font-size: .72rem; }
- 
+
 /* ================= JOB CARDS (การ์ด Tab 1 กลับมาแล้ว) ================= */
 .job-card { position: relative; overflow: hidden; background: #0c130f; border: 1px solid #1b2a22; border-left: 4px solid #1b2a22; border-radius: 14px; padding: 14px 20px 16px; margin-bottom: 10px; }
 .job-card.ok { border-left-color: #22c55e; }
@@ -119,7 +119,7 @@ label[data-testid="stWidgetLabel"] p { color: #a7c4b5; font-size: 0.85rem; font-
 .job-bar { height: 3px; border-radius: 3px; margin-top: 12px; background: #17241d; overflow: hidden; }
 .job-bar .j-bar { display: block; height: 100%; width: 40%; border-radius: 3px; background: linear-gradient(90deg, transparent, #22c55e, #86efac, transparent); animation: sweep 1.4s ease-in-out infinite; }
 @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
- 
+
 /* ================= KPI (monitor tiles) ================= */
 .kpi-wrap { display: flex; flex-wrap: wrap; gap: 16px; margin: 12px 0 22px; width: 100%; }
 .kpi { flex: 1 1 calc(33.333% - 16px); min-width: 250px; --k: #7f9a8b; position: relative; overflow: hidden; border: 1px solid #1b2a22; border-radius: 16px; padding: 20px 24px 22px; background-color: #0c130f; background-image: linear-gradient(rgba(34,197,94,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(34,197,94,0.04) 1px, transparent 1px); background-size: 100% 24px, 24px 100%; box-sizing: border-box; }
@@ -136,21 +136,21 @@ label[data-testid="stWidgetLabel"] p { color: #a7c4b5; font-size: 0.85rem; font-
 .kpi-bar { height: 6px; background: #17241d; border-radius: 6px; margin-top: 14px; overflow: hidden; }
 .kpi-bar > div { height: 100%; background: linear-gradient(90deg, #16a34a, #4ade80); border-radius: 6px; }
 .kpi.hero-cyan .kpi-bar > div { background: linear-gradient(90deg, #0284c7, #38bdf8); }
- 
+
 /* ================= MONITOR & TICKER ================= */
 .led { --lc: var(--k, #22c55e); display: inline-block; flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--lc); box-shadow: 0 0 0 0 color-mix(in srgb, var(--lc) 70%, transparent); animation: ping 1.8s infinite; }
 @keyframes ping { 70% { box-shadow: 0 0 0 9px color-mix(in srgb, var(--lc) 0%, transparent); } 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--lc) 0%, transparent); } }
 .mon-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding: 11px 18px; margin: 6px 0 10px; background: #0a110d; border: 1px solid #1b2a22; border-radius: 14px; font-family: 'JetBrains Mono', monospace; font-size: .8rem; color: #7f9a8b; }
 .mon-status b { color: #4ade80; letter-spacing: .1em; font-weight: 700; }
 .mon-status em { font-style: normal; color: #e6f2ea; margin-left: 6px; }
- 
+
 .ticker-container { width: 100%; overflow: hidden; border-top: 1px solid #14211a; border-bottom: 1px solid #14211a; background: #080e0b; margin-bottom: 16px; position: relative; }
 .ticker-track { display: flex; white-space: nowrap; width: max-content; padding: 9px 0; animation: marquee var(--dur, 40s) linear infinite; }
 @keyframes marquee { to { transform: translateX(-50%); } }
 .tk { display: inline-flex; align-items: center; font-size: .84rem; color: #a7c4b5; margin-right: 38px; }
 .tk b { color: #e6f2ea; font-weight: 500; margin-right: 6px; }
 .tk .d { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin: 0 6px 0 12px; background: var(--c); box-shadow: 0 0 8px var(--c); }
- 
+
 /* ================= MATCH CARDS ================= */
 .mon { position: relative; overflow: hidden; border-radius: 18px; padding: 14px 22px 22px; margin-bottom: 16px; background: linear-gradient(rgba(34,197,94,0.045) 1px, transparent 1px) 0 0 / 100% 26px, linear-gradient(90deg, rgba(34,197,94,0.045) 1px, transparent 1px) 0 0 / 26px 100%, linear-gradient(180deg, #0e1712, #0b110e); border: 1px solid #1b2a22; }
 .mon::after { content: ""; position: absolute; left: 0; right: 0; top: -40%; height: 40%; pointer-events: none; background: linear-gradient(180deg, transparent, rgba(74,222,128,0.07), transparent); animation: scan 5.5s linear infinite; }
@@ -164,19 +164,19 @@ label[data-testid="stWidgetLabel"] p { color: #a7c4b5; font-size: 0.85rem; font-
 .mon-id { color: #cfe3d6; letter-spacing: .1em; }
 .mon-st { padding: 2px 10px; border-radius: 999px; border: 1px solid #1b2a22; font-family: 'Prompt', sans-serif; }
 .mon-st.on { color: #4ade80; border-color: rgba(34,197,94,0.45); background: rgba(34,197,94,0.1); }
- 
+
 .sig { margin-left: auto; display: flex; align-items: flex-end; gap: 3px; height: 14px; }
 .sig .s-bar { width: 4px; border-radius: 1px; background: #1f2e26; }
 .sig .s-bar:nth-child(1) { height: 5px; } .sig .s-bar:nth-child(2) { height: 8px; } .sig .s-bar:nth-child(3) { height: 11px; } .sig .s-bar:nth-child(4) { height: 14px; }
 .sig .s-bar.on { background: #4ade80; box-shadow: 0 0 6px rgba(74,222,128,0.7); }
- 
+
 .mon-teams { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 16px 0 14px; padding: 0 6px; width: 100%; }
 .mon-t { flex: 1; font-weight: 600; font-size: 1.1rem; color: #e6f2ea; line-height: 1.3; }
 .mon-t.r { text-align: right; }
 .ecg { flex: 0 0 60px; height: 30px; }
 .ecg .pulse { stroke-dasharray: 22 78; animation: ecg 2.6s linear infinite; filter: drop-shadow(0 0 4px #4ade80); }
 @keyframes ecg { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
- 
+
 .mon-ch { display: flex; flex-direction: row; gap: 14px; width: 100%; box-sizing: border-box; }
 .ch { flex: 1; min-width: 0; --c: #22c55e; padding: 14px 16px; border-radius: 14px; background: rgba(5,9,7,0.72); border: 1px solid #14211a; box-sizing: border-box; }
 .ch-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-family: 'JetBrains Mono', monospace; font-size: .72rem; color: #7f9a8b; letter-spacing: .04em; }
@@ -187,18 +187,18 @@ label[data-testid="stWidgetLabel"] p { color: #a7c4b5; font-size: 0.85rem; font-
 .ch-info { flex: 1; min-width: 0; }
 .ch-val { font-family: 'JetBrains Mono', monospace; font-size: 1.8rem; font-weight: 700; line-height: 1; color: var(--c); text-shadow: 0 0 18px color-mix(in srgb, var(--c) 55%, transparent); }
 .ch-val small { font-size: .9rem; color: #7f9a8b; margin-left: 2px; }
- 
+
 .ch-d { font-size: .78rem; color: #7f9a8b; margin: 6px 0 9px; line-height: 1.3; }
 .ch-v { display: block; padding: 6px 12px; border-radius: 8px; font-size: .82rem; font-weight: 500; color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); line-height: 1.4; word-wrap: break-word; margin-top: 4px; }
- 
+
 .vu { display: grid; grid-template-columns: repeat(var(--n, 20), 1fr); gap: 3px; margin-top: 12px; }
 .vu .v-bar { height: 9px; border-radius: 2px; background: #17241d; }
 .vu .v-bar.on { background: var(--c); box-shadow: 0 0 8px color-mix(in srgb, var(--c) 60%, transparent); animation: vuon .35s calc(var(--i) * 40ms) both; }
 @keyframes vuon { from { background: #17241d; box-shadow: none; } }
 .vu-l { display: flex; justify-content: space-between; font-family: 'JetBrains Mono', monospace; font-size: .7rem; color: #7f9a8b; margin-top: 5px; padding: 0 2px; }
- 
+
 .mon.solo { border-radius: 18px; margin-bottom: 10px; }
- 
+
 /* 📱 Responsive Mobile Layout Fix */
 @media (max-width: 768px) {
     .kpi { flex: 1 1 100%; min-width: 100%; }
@@ -212,7 +212,7 @@ label[data-testid="stWidgetLabel"] p { color: #a7c4b5; font-size: 0.85rem; font-
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
 """, unsafe_allow_html=True)
- 
+
 # =============================================================================
 # PART 1 / 2 — CYBER MONITOR CSS (override layer)
 # วางต่อท้าย st.markdown("""<style> ... </style>""") ก้อนเดิมทันที
@@ -222,7 +222,7 @@ CYBER_CSS = """
 <style>
 /* ================= CYBER MONITOR V6 : override layer ================= */
 :root { --cy:#00e5ff; --mg:#ff2bd6; --gn:#39ff88; --yl:#fcee0a; --rd:#ff3b5c; }
- 
+
 /* พื้นหลัง: เรืองแสงมุมจอ + สแกนไลน์บางๆ */
 .stApp {
   background:
@@ -234,7 +234,7 @@ CYBER_CSS = """
   content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
   background: repeating-linear-gradient(0deg, rgba(0,229,255,.028) 0 1px, transparent 1px 3px);
 }
- 
+
 /* หัวเรื่อง */
 .page-title {
   background: linear-gradient(90deg, #00e5ff, #39ff88 55%, #ff2bd6);
@@ -244,11 +244,11 @@ CYBER_CSS = """
   font-weight: 700; line-height: 1.25;
 }
 .page-sub { border-left: 2px solid #ff2bd6; padding-left: 10px; }
- 
+
 /* แท็บ: ไฮไลต์ไซแอน */
 .stTabs [aria-selected="true"] { color:#00e5ff !important; text-shadow:0 0 12px rgba(0,229,255,.6); }
 .stTabs [data-baseweb="tab-highlight"] { background-color:#00e5ff !important; box-shadow:0 0 12px #00e5ff; }
- 
+
 /* การ์ดเดิม: มุมตัดเฉียงแบบ HUD */
 .kpi, .mon, .job-card {
   clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
@@ -259,7 +259,7 @@ CYBER_CSS = """
 .kpi.hero .kpi-value { color:#39ff88; text-shadow:0 0 22px rgba(57,255,136,.55); }
 .kpi.hero-cyan .kpi-value { color:#00e5ff; text-shadow:0 0 22px rgba(0,229,255,.55); }
 .kpi-bar, .kpi-bar > div { border-radius: 0; }
- 
+
 /* ================= HUD PANEL (st.container(key="hud_...")) ================= */
 [class*="st-key-hud_"] {
   position: relative; margin: 14px 0; padding: 16px 18px 10px;
@@ -278,7 +278,7 @@ CYBER_CSS = """
   font-family:'Prompt',sans-serif; font-size:.74rem; }
 .hud-note { color:#7f9a8b; font-size:.76rem; margin:2px 0 8px; line-height:1.5; }
 .hud-note b { color:#a7c4b5; font-weight:500; }
- 
+
 /* ชิปตัวเลข */
 .chip-row { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:10px 0 6px; }
 .chip { --c:#00e5ff; padding:9px 12px; border-left:3px solid var(--c);
@@ -289,7 +289,7 @@ CYBER_CSS = """
 .chip-k { font-size:.7rem; color:#7f9a8b; line-height:1.3; }
 .chip-v { font-family:'JetBrains Mono',monospace; font-size:1.25rem; font-weight:700; color:var(--c);
   text-shadow:0 0 14px color-mix(in srgb, var(--c) 55%, transparent); }
- 
+
 /* แถบผลย้อนหลัง (streak strip) */
 .fs-wrap { margin:6px 0 14px; }
 .fs-h { display:flex; justify-content:space-between; gap:8px; margin-bottom:6px;
@@ -302,7 +302,7 @@ CYBER_CSS = """
 .fs-legend { display:flex; flex-wrap:wrap; gap:6px 14px; margin-top:8px; font-size:.72rem; color:#7f9a8b; }
 .fs-legend span::before { content:""; display:inline-block; width:9px; height:9px; margin-right:6px;
   background:var(--c); box-shadow:0 0 6px var(--c); }
- 
+
 /* สถานะโมเดล */
 .mdl-wrap { display:grid; grid-template-columns:repeat(2,1fr); gap:12px; margin:8px 0; }
 .mdl { --c:#39ff88; padding:14px 16px; border-left:3px solid var(--c);
@@ -317,11 +317,11 @@ CYBER_CSS = """
 .mdl-r { display:flex; justify-content:space-between; gap:8px; margin-top:7px; font-size:.8rem; color:#a7c4b5; }
 .mdl-r b { font-family:'JetBrains Mono',monospace; color:#e6f2ea; font-weight:500; }
 .mdl-n { margin-top:9px; font-size:.76rem; color:#7f9a8b; line-height:1.5; word-break:break-word; }
- 
+
 /* Plotly: ให้กลืนกับธีม และไม่ล้นจอ */
 [data-testid="stPlotlyChart"] { width:100%; overflow:hidden; }
 .js-plotly-plot .plotly .modebar { display:none !important; }
- 
+
 /* ================= MOBILE ================= */
 @media (max-width: 768px) {
   .block-container { padding: 1.2rem .8rem 3rem; }
@@ -330,12 +330,12 @@ CYBER_CSS = """
   .stTabs [data-baseweb="tab-list"] { overflow-x:auto; flex-wrap:nowrap; scrollbar-width:none; }
   .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar { display:none; }
   .stTabs [data-baseweb="tab"] { white-space:nowrap; padding:8px 12px; font-size:.85rem; }
- 
+
   .kpi { padding:16px 18px 18px; }
   .kpi-value { font-size:1.9rem; }
   .kpi.hero .kpi-value, .kpi.hero-cyan .kpi-value { font-size:2.5rem; }
   .mon-status { font-size:.72rem; padding:9px 12px; gap:6px 14px; }
- 
+
   [class*="st-key-hud_"] { padding:14px 12px 6px; margin:12px 0; }
   .hud-title { flex-wrap:wrap; font-size:.74rem; }
   .hud-title .sub { margin-left:0; text-align:left; flex-basis:100%; }
@@ -354,7 +354,7 @@ CYBER_CSS = """
 </style>
 """
 st.markdown(CYBER_CSS, unsafe_allow_html=True)
- 
+
 # ----------------------------------------
 # การตั้งค่า API และ Google Sheets
 # ----------------------------------------
@@ -363,11 +363,11 @@ if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 else:
     st.error("❌ ไม่พบ GEMINI_API_KEY กรุณาตั้งค่าใน Streamlit Secrets")
- 
+
 def _has_gspread_secret():
     try: return "gspread" in st.secrets
     except Exception: return False
- 
+
 @st.cache_resource
 def init_gspread():
     if _has_gspread_secret():
@@ -376,30 +376,30 @@ def init_gspread():
         base_dir = os.path.dirname(os.path.abspath(__file__))
         client = gspread.service_account(filename=os.path.join(base_dir, 'credentials.json'))
     return client.open("ข้อมูลราคาบอลสกัดจากภาพ")
- 
+
 try:
     workbook = init_gspread()
 except Exception as e:
     st.error(f"❌ เชื่อมต่อ Google Sheets ไม่สำเร็จ: {e}")
     workbook = None
- 
+
 def get_ws(wb):
     try: return wb.worksheet("DATA")
     except gspread.exceptions.WorksheetNotFound: return wb.sheet1
- 
+
 # ----------------------------------------
 # การจัดการ Data Extraction & Google Sheets
 # ----------------------------------------
 model = genai.GenerativeModel('gemini-3.7-flash')
- 
+
 # ประกาศตัวแปร FIELD_NAMES และ CRITICAL_IDX เพื่อป้องกันแอปพังตอนอ่านค่า
 WATER_IDX = [6, 8, 10, 11]
 CRITICAL_IDX = [5, 6, 7, 8, 9, 10, 11]
 FIELD_NAMES = ["ทีมเหย้า", "ทีมเยือน", "1X2เหย้า", "1X2เสมอ", "1X2เยือน", "HDPเหย้า", "น้ำHDPเหย้า", "HDPเยือน", "น้ำHDPเยือน", "โกลสูงต่ำ", "น้ำสูง", "น้ำต่ำ"]
- 
+
 FMT_LABELS = {"MY": "มาเลเซีย", "HK": "ฮ่องกง", "ID": "อินโดนีเซีย", "EU": "ยุโรป (Decimal)"}
 FMT_CHOICES = { "อัตโนมัติ (ให้ AI ตรวจจับ)": None, "มาเลเซีย (Malay)": "MY", "ฮ่องกง (HK)": "HK", "อินโดนีเซีย (Indo)": "ID", "ยุโรป (Decimal)": "EU" }
- 
+
 def to_malay(x, fmt):
     x = float(x)
     if fmt == "MY": return round(x, 2)
@@ -407,12 +407,12 @@ def to_malay(x, fmt):
     elif fmt == "ID": hk = x if x > 0 else (1 / abs(x) if x != 0 else 0)
     else: hk = x
     return round(hk, 2) if hk <= 1 else round(-1 / hk, 2)
- 
+
 def guess_format(nums):
     if nums and all(v > 1 for v in nums): return "EU"
     if any(v < -1 for v in nums): return "ID"
     return "MY"
- 
+
 def clean_raw_data(raw_text):
     text = raw_text.strip()
     text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.IGNORECASE)
@@ -438,7 +438,7 @@ def clean_raw_data(raw_text):
         
     home = str(data[0]).strip()
     away = str(data[1]).strip()
- 
+
     numbers, bad = [], []
     for i in range(2, 12):
         val_str = str(data[i]).replace('−', '-').replace(',', '').strip()
@@ -449,16 +449,16 @@ def clean_raw_data(raw_text):
         except (TypeError, ValueError):
             numbers.append(None)      # ไม่ใช่ 0.0 อีกต่อไป
             bad.append(i)
- 
+
     critical_bad = [FIELD_NAMES[i] for i in bad if i in CRITICAL_IDX]
     if critical_bad:   # raise -> extract_row จะ retry ให้อัตโนมัติ และถ้ายังพลาดงานจะขึ้น error
         raise ValueError(f"อ่านค่าไม่ได้: {', '.join(critical_bad)} -> AI ตอบ: {str(data)[:80]}")
     warn = ("ช่องที่อ่านไม่ได้ (เว้นว่างในชีต): " + ", ".join(FIELD_NAMES[i] for i in bad)) if bad else None
- 
+
     ai_fmt = str(data[12]).strip().upper() if len(data) > 12 else "UNK"
     if ai_fmt not in ["MY", "HK", "ID", "EU"]: ai_fmt = "UNK"
     return [home, away] + numbers, ai_fmt, warn
- 
+
 def convert_water_to_malay(row, user_fmt, ai_fmt):
     new_row = list(row)
     idx = [i for i in WATER_IDX if i < len(new_row) and isinstance(new_row[i], (int, float))]
@@ -468,15 +468,15 @@ def convert_water_to_malay(row, user_fmt, ai_fmt):
         fmt, source = guess_format([new_row[i] for i in idx]), "ระบบประเมินเอง"
     for i in idx: new_row[i] = to_malay(new_row[i], fmt)
     return new_row, f"อิงรูปแบบ: {FMT_LABELS.get(fmt, fmt)} ({source})", None
- 
+
 FORM5_HEADERS = ["H_WinRate_Last5", "H_GoalsFor_Last5", "H_GoalsAgainst_Last5", "A_WinRate_Last5", "A_GoalsFor_Last5", "A_GoalsAgainst_Last5"]
- 
+
 def validate_form5(values):
     if len(values) != 6 or any(v is None or v == "" or isinstance(v, bool) for v in values):
         raise ValueError('กรุณากรอกข้อมูลให้ครบ 6 ช่อง')
     nums = [float(v) for v in values]
     return [nums[0] / 100, int(nums[1]), int(nums[2]), nums[3] / 100, int(nums[4]), int(nums[5])]
- 
+
 def save_row_to_sheet(ws, row, form5):
     normalized = validate_form5(form5)
     with JOBS.sheet_lock:
@@ -486,19 +486,19 @@ def save_row_to_sheet(ws, row, form5):
     target_row = next((i + 1 for i in range(1, len(col_a)) if str(col_a[i]).strip() == new_home and (str(col_b[i]).strip() if i < len(col_b) else "") == new_away), None)
     overwritten = target_row is not None
     if not overwritten: target_row = max(2, last_row + 1)
- 
+
     requests = []
     if ws.col_count < 29: requests.append({"appendDimension": {"sheetId": ws.id, "dimension": "COLUMNS", "length": 29 - ws.col_count}})
     if target_row > ws.row_count: requests.append({"appendDimension": {"sheetId": ws.id, "dimension": "ROWS", "length": target_row - ws.row_count}})
- 
+
     def typed(value):
         if value is None or (isinstance(value, float) and not isfinite(value)): return {}   # เซลล์ว่าง
         if isinstance(value, (int, float)) and not isinstance(value, bool): return {"userEnteredValue": {"numberValue": value}}
         return {"userEnteredValue": {"stringValue": str(value)}}
- 
+
     def update(start_row, start_col, cells, fields):
         return {"updateCells": {"start": {"sheetId": ws.id, "rowIndex": start_row, "columnIndex": start_col}, "rows": [{"values": cells}], "fields": fields}}
- 
+
     requests.append(update(0, 23, [typed(h) for h in FORM5_HEADERS], "userEnteredValue"))
     requests.append(update(target_row - 1, 0, [typed(v) for v in row[:12]], "userEnteredValue"))
     
@@ -508,10 +508,10 @@ def save_row_to_sheet(ws, row, form5):
     requests.append(update(target_row - 1, 23, form_cells, "userEnteredValue,userEnteredFormat.numberFormat"))
     ws.spreadsheet.batch_update({"requests": requests})
     return target_row, overwritten
- 
+
 def update_match_score_in_sheet(workbook, home_team, away_team, score_text, *, sheet_row=None, expected_snapshot=None):
     """Tab 2 only: validate row identity; write one RAW text cell; verify by reading.
- 
+
     Compatible with the former four-argument call. With no row reference, refuse
     ambiguous pairs rather than taking their first matching occurrence. Locking
     only protects threads using the same JOBS instance, not other app replicas or
@@ -531,7 +531,7 @@ def update_match_score_in_sheet(workbook, home_team, away_team, score_text, *, s
         if sheet_row is None:
             data = _t2_data_from_grid(_t2_values(ws, 'A1:AC'))
             matches = data.loc[data['ทีมเหย้า'].map(lambda v: _t2_canonical(v, name=True)).eq(home)
-                               & data['ทีมเยือน'].map(lambda v: _t2_canonical(v, name=True)).eq(away)]
+                                               & data['ทีมเยือน'].map(lambda v: _t2_canonical(v, name=True)).eq(away)]
             if matches.empty:
                 return False
             if len(matches) != 1:
@@ -597,7 +597,7 @@ def update_match_score_in_sheet(workbook, home_team, away_team, score_text, *, s
             raise ScoreWriteUncertainError('ข้อมูลที่อ่านกลับไม่ตรงกับแถวและสกอร์ที่ส่ง จึงยังไม่แจ้งว่าสำเร็จ กรุณาตรวจ DATA ก่อนดำเนินการต่อ')
         journal.pop(write_key, None)
         return True
- 
+
 # ----------------------------------------
 # Job Manager (คิวงานเบื้องหลัง)
 # ----------------------------------------
@@ -608,7 +608,7 @@ class JobManager:
         self.sheet_lock = threading.RLock()
         self.pool = ThreadPoolExecutor(max_workers=3)
         self.data_version = 0
- 
+
     def create(self, name, img_bytes, user_fmt, owner_id):
         job_id = uuid.uuid4().hex[:8]
         with self.lock:
@@ -623,13 +623,13 @@ class JobManager:
         with self.lock: self.data_version += 1
     def snapshot(self):
         with self.lock: return sorted((dict(j) for j in self.jobs.values()), key=lambda j: j["created"], reverse=True)
- 
+
 @st.cache_resource
 def get_job_manager(): return JobManager()
- 
+
 JOBS = get_job_manager()
 if "form5_owner_id" not in st.session_state: st.session_state["form5_owner_id"] = uuid.uuid4().hex
- 
+
 def extract_row(img_bytes, user_fmt, model):
     img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
     img.thumbnail((1600, 1600))
@@ -669,7 +669,7 @@ def extract_row(img_bytes, user_fmt, model):
             time.sleep(2)
             
     raise RuntimeError(f"{last_error}")
- 
+
 def extract_form_stats(img_bytes, model):
     img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
     img.thumbnail((1600, 1600))
@@ -709,7 +709,7 @@ def extract_form_stats(img_bytes, model):
             time.sleep(2)
             
     raise RuntimeError(f"ไม่สามารถอ่านภาพสถิติได้: {last_error}")
- 
+
 def process_job(job_id, workbook, model):
     try:
         job = JOBS.get(job_id)
@@ -719,7 +719,7 @@ def process_job(job_id, workbook, model):
     except Exception as e:
         JOBS.update(job_id, status="error", msg=f"{e}", finished=time.time())
     finally: gc.collect()
- 
+
 def save_confirmed_job(job_id, workbook):
     job = JOBS.get(job_id)
     if not job or job["status"] != "saving": return
@@ -731,21 +731,21 @@ def save_confirmed_job(job_id, workbook):
         JOBS.update(job_id, status="done", msg="บันทึกสำเร็จ", finished=time.time(), result={"home": str(job["row_data"][0]), "away": str(job["row_data"][1]), "row": target_row, "overwritten": overwritten})
     except Exception as exc:
         JOBS.update(job_id, status="error", msg=f"Save error: {exc}", finished=time.time())
- 
+
 def submit_form5(job_id, values, owner_id):
     job = JOBS.get(job_id)
     if job and job.get("owner_id") == owner_id:
         JOBS.update(job_id, status="saving", msg="Saving...", form5=list(values))
         JOBS.pool.submit(save_confirmed_job, job_id, workbook)
- 
+
 # ----------------------------------------
 # UI: Upload & Tasks
 # ----------------------------------------
 STATUS_UI = {"queued": ("รอคิว", "run"), "reading": ("กำลังอ่านภาพ", "run"), "ready": ("อ่านราคาแล้ว", "ok"),
              "saving": ("กำลังบันทึก", "run"), "done": ("บันทึกแล้ว", "ok"), "error": ("ไม่สำเร็จ", "err")}
- 
+
 def panel_header(title, sub): st.markdown(f"<p class='panel-title'>{title}</p><p class='panel-sub'>{sub}</p>", unsafe_allow_html=True)
- 
+
 def _render_job_signal(res):
     ai = get_ai()
     if ai is None or ai["status"] != "ok": return
@@ -754,7 +754,7 @@ def _render_job_signal(res):
     m = dfp[(dfp['ทีมเหย้า'].astype(str).str.strip() == str(res['home']).strip()) & (dfp['ทีมเยือน'].astype(str).str.strip() == str(res['away']).strip())]
     if m.empty: return
     st.markdown(_card_from_row(int(res['row']), m.iloc[-1], solo=True), unsafe_allow_html=True)
- 
+
 def render_jobs(polling=False):
     jobs = [j for j in JOBS.snapshot() if j.get("owner_id") == st.session_state["form5_owner_id"]]
     if not jobs: return
@@ -783,17 +783,17 @@ def render_jobs(polling=False):
             if st.button('กรอกฟอร์ม 5 นัด', key=f"open_form5_{j['id']}"):
                 st.session_state["form5_editing"] = j["id"]
                 st.rerun()
- 
+
 def clear_owner_jobs(owner_id):
     with JOBS.lock:
         for k in [k for k, j in JOBS.jobs.items() if j.get("owner_id") == owner_id and j["status"] != "saving"]:
             JOBS.jobs.pop(k)
- 
+
 def clear_upload_page():
     clear_owner_jobs(st.session_state["form5_owner_id"])
     st.session_state.pop("form5_editing", None)
     st.session_state["up_n"] = st.session_state.get("up_n", 0) + 1
- 
+
 def render_form5_editor():
     job_id = st.session_state.get("form5_editing")
     job = JOBS.get(job_id) if job_id else None
@@ -818,7 +818,7 @@ def render_form5_editor():
                 st.rerun()
             except Exception as e:
                 st.error(f"เกิดข้อผิดพลาด: {e}")
- 
+
     with st.form(f"form5_{job_id}"):
         left, right = st.columns(2, gap="large")
         with left:
@@ -836,16 +836,16 @@ def render_form5_editor():
             submit_form5(job_id, [h_win, h_for, h_ag, a_win, a_for, a_ag], st.session_state["form5_owner_id"])
             st.session_state.pop("form5_editing", None)
             st.rerun()
- 
+
 # ----------------------------------------
-# AI : V5.2-AI-ONLY (UI / OCR / sheet writes are not modified)
+# AI : V5.3-AI-TRAPS (UI / OCR / sheet writes are not modified)
 # -----------------------------------------------------------------------------
 # This block is the complete prediction engine. It intentionally does not write
 # to Sheets, change widgets, invent missing odds, or train on legacy formulas.
 import copy as _ml_copy
 import hashlib as _ml_hashlib
- 
-ML_PATCH_VERSION = "V5.2-AI-ONLY"
+
+ML_PATCH_VERSION = "V5.3-AI-TRAPS"
 ML_CONFIG = {
     "seed": 42,
     "min_rows": 100,
@@ -871,7 +871,7 @@ ML_CONFIG = {
     "threads": 2,
     
     # 🎯 [Money Management]
-    "fractional_kelly": 0.25,       # ใช้ Kelly 1/4 เพื่อป้องกันพอร์ตแตกจากความแปรปรวน
+    "fractional_kelly": 0.25,        # ใช้ Kelly 1/4 เพื่อป้องกันพอร์ตแตกจากความแปรปรวน
     "max_theoretical_fraction": 0.03, # จำกัดไม่ให้ไม้ไหนเกิน 3% ของพอร์ตรวม แม้ AI จะมั่นใจมากก็ตาม
 }
 # Thresholds above are engineering defaults, NOT statistically proven guarantees.
@@ -890,8 +890,8 @@ _ML_VERDICT_COLS = {
     "HDP": "AI_ฟันธง_HDP",
     "OU": "AI_ฟันธง_สูงต่ำ",
 }
- 
- 
+
+
 def _ml_number(value):
     if isinstance(value, (bool, np.bool_)) or value is None:
         return np.nan
@@ -900,14 +900,14 @@ def _ml_number(value):
         return result if np.isfinite(result) else np.nan
     except (TypeError, ValueError, OverflowError):
         return np.nan
- 
- 
+
+
 def _ml_blank(value):
     if value is None:
         return True
     return str(value).strip().lower() in ("", "nan", "none", "null", "<na>", "nat")
- 
- 
+
+
 def _ml_win_rate(value):
     text = str(value).strip()
     percent = text.endswith("%")
@@ -917,24 +917,24 @@ def _ml_win_rate(value):
     if percent or number > 1:
         number /= 100.0
     return number if 0 <= number <= 1 else np.nan
- 
- 
+
+
 def _ml_goal_count(value):
     number = _ml_number(value)
     return number if np.isfinite(number) and 0 <= number <= 500 and float(number).is_integer() else np.nan
- 
- 
+
+
 def _ml_malay_decimal(value):
     """DATA's four water columns are Malay, converted by the frozen uploader.
- 
+
     Out-of-range inputs are rejected, not guessed to be HK/Decimal/Indonesian.
     """
     value = _ml_number(value)
     if not np.isfinite(value) or value == 0 or abs(value) > 1:
         return np.nan
     return 1.0 + (value if value > 0 else 1.0 / abs(value))
- 
- 
+
+
 def _ml_score(value):
     # Reject datetime, Excel serial numbers and booleans before string conversion.
     if not isinstance(value, str):
@@ -942,8 +942,8 @@ def _ml_score(value):
     text = value.strip().replace("−", "-").replace("–", "-")
     match = re.fullmatch(r"([0-9]{1,2})\s*[-:]\s*([0-9]{1,2})", text)
     return tuple(map(int, match.groups())) if match else None
- 
- 
+
+
 def _ml_valid_line(value, market):
     if market not in ("HDP", "OU"):
         return False
@@ -951,8 +951,8 @@ def _ml_valid_line(value, market):
     return bool(np.isfinite(value) and abs(value) <= 100
                 and abs(value * 4 - round(value * 4)) < 1e-7
                 and (market == "HDP" or value > 0))
- 
- 
+
+
 def _ml_settlement(score, line, market):
     if score is None or not _ml_valid_line(line, market):
         return np.nan
@@ -965,8 +965,8 @@ def _ml_settlement(score, line, market):
     differences = ([score[0] - score[1] + p for p in parts] if market == "HDP"
                    else [sum(score) - p for p in parts])
     return int(round(float(np.mean(np.sign(differences))) * 2)) + 2
- 
- 
+
+
 def _ml_allowed(line, market):
     if not _ml_valid_line(line, market):
         raise ValueError("ไลน์ไม่ถูกต้อง")
@@ -980,8 +980,8 @@ def _ml_allowed(line, market):
     if market == "OU" and np.isclose(float(line), 0.25):
         allowed[0] = False
     return allowed
- 
- 
+
+
 def _ml_probability(raw, lines, market, temperature=1.0):
     raw = np.asarray(raw, dtype=float)
     lines = np.asarray(lines, dtype=float)
@@ -997,8 +997,8 @@ def _ml_probability(raw, lines, market, temperature=1.0):
     logits -= logits.max(axis=1, keepdims=True)
     result = np.exp(logits)
     return result / result.sum(axis=1, keepdims=True)
- 
- 
+
+
 def _ml_raw_probabilities(estimator, X):
     raw = np.full((len(X), 5), 1e-12, dtype=float)
     if len(X):
@@ -1007,13 +1007,13 @@ def _ml_raw_probabilities(estimator, X):
             raise ValueError("Invalid model class mapping")
         raw[:, classes] = estimator.predict_proba(X)
     return raw
- 
- 
+
+
 def _ml_log_loss(y, probabilities):
     y = np.asarray(y, dtype=int)
     return float(-np.log(np.clip(probabilities[np.arange(len(y)), y], 1e-12, 1)).mean()) if len(y) else np.nan
- 
- 
+
+
 def _ml_home_share(probabilities):
     """Legacy display contract: P(home/over positive | not a push)."""
     p = np.asarray(probabilities, dtype=float)
@@ -1021,11 +1021,11 @@ def _ml_home_share(probabilities):
     result = np.full(len(p), np.nan)
     np.divide(p[:, 3:].sum(axis=1), decisive, out=result, where=decisive > 1e-12)
     return result
- 
- 
+
+
 def _ml_metrics(y, probabilities):
     """Keep the legacy >=55% directional KPI; add explicit denominators.
- 
+
     Policy results are computed separately by _ml_policy_metrics. Never relabel
     this filtered directional KPI as the win rate of recommended selections.
     """
@@ -1057,15 +1057,15 @@ def _ml_metrics(y, probabilities):
             "log_loss": _ml_log_loss(y, p),
             "brier": float(np.square(p - np.eye(5)[y]).sum(axis=1).mean()),
             "ece": float(ece)}
- 
- 
+
+
 def _ml_returns(decimal):
     value = _ml_number(decimal)
     if not np.isfinite(value) or value <= 1:
         return np.full(5, np.nan)
     return np.array([-1., -.5, 0., (value - 1) / 2, value - 1])
- 
- 
+
+
 def _ml_expected_value(probabilities, decimal, reverse=False):
     p = np.asarray(probabilities, dtype=float)
     r = _ml_returns(decimal)
@@ -1073,11 +1073,11 @@ def _ml_expected_value(probabilities, decimal, reverse=False):
             or not np.isclose(p.sum(), 1) or not np.isfinite(r).all()):
         return np.nan
     return float((p[::-1] if reverse else p) @ r)
- 
- 
+
+
 def _ml_kelly_fraction(probabilities, decimal, side, config=None):
     """Bounded fractional expected-log optimum, not the old mean/variance proxy.
- 
+
     Kept for diagnostics only. Research verdicts never recommend a bankroll size.
     """
     cfg = ML_CONFIG if config is None else config
@@ -1098,11 +1098,11 @@ def _ml_kelly_fraction(probabilities, decimal, side, config=None):
         else:
             hi = middle
     return float(min((lo + hi) / 2 * cfg["fractional_kelly"], cfg["max_theoretical_fraction"]))
- 
- 
+
+
 def _ml_stress_ev(p, decimal, reverse=False, amount=None):
     """Worst expected return in a total-variation ball, moving mass high to low.
- 
+
     A sensitivity test using a user-set radius, NOT a confidence interval.
     """
     p = np.asarray(p, dtype=float)
@@ -1124,8 +1124,8 @@ def _ml_stress_ev(p, decimal, reverse=False, amount=None):
         if remaining <= 1e-12:
             break
     return float(q @ _ml_returns(decimal))
- 
- 
+
+
 def _ml_choices(probabilities, first_prices, second_prices, config=None):
     cfg = ML_CONFIG if config is None else config
     p = np.asarray(probabilities, dtype=float)
@@ -1142,11 +1142,11 @@ def _ml_choices(probabilities, first_prices, second_prices, config=None):
     kelly = np.array([_ml_kelly_fraction(x, v, int(s), cfg) for x, v, s in zip(p, price, side)])
     return {"side": side, "ev": ev, "stress_ev": stressed, "price": price,
             "candidate": candidate, "kelly": kelly}
- 
- 
+
+
 def _ml_prepare(df_in):
     """Derive labels from checked scores only. Raw source columns remain intact.
- 
+
     Keeping the raw source values and _Snapshot is essential: Tab2's unchanged
     optimistic-write checks must compare the actual sheet snapshot, not model
     preprocessing (e.g. a fraction converted from a displayed percentage).
@@ -1208,6 +1208,24 @@ def _ml_prepare(df_in):
     # ประเมินว่าทีมไหนกำลังท็อปฟอร์มเกมรุกหรือกำลังเป๋ในเกมรับ
     X["Home_Goal_Pressure"] = X["Form_Home_Goal_Avg"] - (X[FORM5_HEADERS[2]] / 5.0)
     X["Away_Goal_Pressure"] = X["Form_Away_Goal_Avg"] - (X[FORM5_HEADERS[5]] / 5.0)
+
+    # 🚨 [Trap 1: ความขัดแย้งระหว่างราคาพูล 1X2 กับแฮนดิแคป (1X2 vs HDP Anomaly)]
+    # โต๊ะมักจะใช้ราคา 1X2 เพื่อหลอกล่อให้คนมั่นใจ แต่ปรับค่าน้ำ HDP ไปอีกทางเพื่อกินส่วนต่าง
+    X["HDP_Home_Implied_Prob"] = 1.0 / X["HDP_Home_Decimal"]
+    X["1X2_vs_HDP_Anomaly"] = X["Market_Home_Prob"] - X["HDP_Home_Implied_Prob"]
+    
+    # 🚨 [Trap 2: สัดส่วนแต้มต่อต่อสกอร์รวม (HDP to O/U Constraint)]
+    # เช่น ทีมต่อ -1.5 แต่ราคาเตะมุมหรือสกอร์รวมตั้งไว้ต่ำมาก (เช่น 2.25)
+    X["HDP_to_OU_Ratio"] = X["HDP_Line"].abs() / (X["OU_Line"] + 0.001) # บวก 0.001 ป้องกันหารศูนย์
+    
+    # 🚨 [Trap 3: สัญญาณล่อเม็ดเงินจากค่าน้ำ (Juice/Vigorish Bait)]
+    # ผสานฟอร์มทีมเข้ากับส่วนต่างค่าน้ำ (Water_HDP_Diff มีในระบบอยู่แล้ว)
+    X["Form_vs_Juice_Bait"] = X["Form_WinRate_Difference"] * X["Water_HDP_Diff"]
+    
+    # 🚨 [Trap 4: ความเปราะบางของเกมรับ (Defensive Fragility Index)]
+    # เอาอัตราการเสียประตูของทั้งคู่มาคูณกัน ยิ่งค่าสูง แปลว่าหลังหลวมทั้งคู่
+    X["Defensive_Fragility"] = (X[FORM5_HEADERS[2]] / 5.0) * (X[FORM5_HEADERS[5]] / 5.0)
+    
     # No artificial 2.5-goal fallback. These are coarse features, not hard rules.
     means = X["Expected_Total_Goals"].to_numpy(float)
     lines = X["OU_Line"].to_numpy(float)
@@ -1225,7 +1243,7 @@ def _ml_prepare(df_in):
     names_ok = ~df[_ML_HOME].map(_ml_blank) & ~df[_ML_AWAY].map(_ml_blank)
     names_ok &= df[_ML_HOME].astype(str).str.strip().str.casefold().ne(df[_ML_AWAY].astype(str).str.strip().str.casefold())
     df["_ML_Group"] = [json.dumps(sorted([re.sub(r"\s+", " ", str(h).strip().casefold()),
-                                         re.sub(r"\s+", " ", str(a).strip().casefold())]), ensure_ascii=False)
+                                          re.sub(r"\s+", " ", str(a).strip().casefold())]), ensure_ascii=False)
                         for h, a in zip(df[_ML_HOME], df[_ML_AWAY])]
     score = df[_ML_SCORE].map(_ml_score)
     score_blank = df[_ML_SCORE].map(_ml_blank)
@@ -1243,8 +1261,8 @@ def _ml_prepare(df_in):
                   for s, v, valid in zip(score, X[market + "_Line"], ok)]
         df["Target_" + market] = target
     return df, X
- 
- 
+
+
 def _ml_split(groups, config=None):
     """Stable four-way GROUP split, explicitly NOT a chronological backtest."""
     cfg = ML_CONFIG if config is None else config
@@ -1262,8 +1280,8 @@ def _ml_split(groups, config=None):
     if min(map(len, parts.values())) < cfg["min_partition"]:
         raise ValueError("จำนวนข้อมูลในชุดฝึกหรือทดสอบไม่พอ")
     return parts
- 
- 
+
+
 def _ml_training_payload(df, X, market):
     valid = df["_ML_Valid_" + market] & df["Target_" + market].notna()
     buckets = {}
@@ -1287,27 +1305,27 @@ def _ml_training_payload(df, X, market):
              "conflicting_input_groups": conflicts,
              "excluded_or_collapsed": int(valid.sum()) - len(rows)}
     return payload, audit
- 
- 
+
+
 def _ml_baseline_fit(y, lines, smoothing):
     counts = np.full((4, 5), float(smoothing))
     for label, line in zip(y, lines):
         counts[int(round(float(line) * 4)) % 4, int(label)] += 1
     return counts
- 
- 
+
+
 def _ml_baseline_raw(counts, lines):
     families = np.round(np.asarray(lines) * 4).astype(int) % 4
     values = counts[families]
     return values / values.sum(axis=1, keepdims=True)
- 
- 
+
+
 @st.cache_resource(show_spinner=False)
 def _ml_execution_lock():
     # threadpoolctl changes process-level limits: serialize its scoped use here.
     return threading.RLock()
- 
- 
+
+
 def _ml_candidate_raw(bundle, name, X, lines):
     base = _ml_baseline_raw(bundle["baseline"], lines)
     if name == "baseline":
@@ -1322,14 +1340,14 @@ def _ml_candidate_raw(bundle, name, X, lines):
         estimator, columns = bundle["models"][name]
         raw = _ml_raw_probabilities(estimator, X[columns])
     return (1 - mix) * raw + mix * base
- 
- 
+
+
 def _ml_predict_bundle(bundle, X, lines):
     with _ml_execution_lock(), threadpool_limits(limits=bundle["config"]["threads"]):
         raw = _ml_candidate_raw(bundle, bundle["selected"], X, lines)
         return _ml_probability(raw, lines, bundle["market"], bundle["temperature"])
- 
- 
+
+
 def _ml_selection_mask(p, first, second, lines, report, config=None):
     cfg = ML_CONFIG if config is None else config
     choices = _ml_choices(p, first, second, cfg)
@@ -1341,8 +1359,8 @@ def _ml_selection_mask(p, first, second, lines, report, config=None):
     mask = (choices["candidate"] & (selected_prob >= cfg["min_probability"])
             & (support >= cfg["min_line_examples"]) & in_range & bool(report["gate_pass"]))
     return mask, choices, selected_prob
- 
- 
+
+
 def _ml_policy_metrics(y, p, first, second, lines, report, config=None):
     mask, choices, _ = _ml_selection_mask(p, first, second, lines, report, config)
     selected = np.flatnonzero(mask)
@@ -1357,12 +1375,12 @@ def _ml_policy_metrics(y, p, first, second, lines, report, config=None):
             "unit_return_mean": float(returns.mean()) if len(returns) else None,
             "stake_recommendations": 0,
             "note": "Grouped held-out simulation; no timestamps; not live prediction history."}
- 
- 
+
+
 @st.cache_resource(max_entries=4, show_spinner=False)
 def _ml_train_cached(payload, market, config_json, engine_version):
     """Only canonical labeled training records affect this resource cache.
- 
+
     Pending rows, legacy formulas, row order and sheet row numbers do not.
     No pickle/model file is loaded. A process restart retrains lazily.
     """
@@ -1457,8 +1475,8 @@ def _ml_train_cached(payload, market, config_json, engine_version):
         for key, indices in parts.items()}
     bundle["report"] = report
     return bundle
- 
- 
+
+
 def _ml_fit_market(df, X, market):
     payload, audit = _ml_training_payload(df, X, market)
     config_json = json.dumps(ML_CONFIG, sort_keys=True, allow_nan=False)
@@ -1472,8 +1490,8 @@ def _ml_fit_market(df, X, market):
         positions = pending[use]
         p[use] = _ml_predict_bundle(bundle, X.iloc[positions], X.iloc[positions][market + "_Line"].to_numpy(float))
     return report, p
- 
- 
+
+
 def _ml_verdict(market, side, prob_val, ev, stress_ev, line, valid, report, kelly,
                 row_data=None, features_data=None, min_prob=55.0, min_ev=None):
     """Neutral research results. No unsupported market-story rules or VIP stakes."""
@@ -1504,8 +1522,8 @@ def _ml_verdict(market, side, prob_val, ev, stress_ev, line, valid, report, kell
     
     return (f"⭐ ฟันธง: {desc} | โอกาสชนะ: {prob_val:.1f}% (EV: +{ev:.2f}) | "
             f"💰 แนะนำลงทุน: {recommended_bet:.1f}% ของพอร์ต")
- 
- 
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def compute_ai(df_in):
     try:
@@ -1568,14 +1586,14 @@ def compute_ai(df_in):
                              "invalid_scores": int(df["_ML_InvalidScore"].sum()),
                              "cards_without_both_probabilities": int((~complete).sum())},
             "evaluation_mode": "GROUPED_RESEARCH_ONLY"}
- 
- 
+
+
 # The original DATA loader is retained for compatibility with callers.
 def load_dashboard_data(_workbook, version=0):
     with JOBS.sheet_lock:
         return pd.DataFrame(get_ws(_workbook).get_all_records())
- 
- 
+
+
 def get_ai():
     if not workbook:
         return None
@@ -1587,8 +1605,8 @@ def get_ai():
     except Exception as exc:
         return {"status": "error", "level": "error", "engine_version": ML_PATCH_VERSION,
                 "msg": "โหลดข้อมูลสำหรับ AI ไม่สำเร็จ: " + type(exc).__name__}
- 
- 
+
+
 # ----------------------------------------
 # UI Components & Gauges
 # ----------------------------------------
@@ -1600,24 +1618,24 @@ def _pred_tone(text, kind):
     if "⭐⭐" in text: return "gf"
     if "⭐" in text: return "cs"
     return "cf"
- 
+
 _TONE_COLORS = {
     "hdp": {"gs": GREEN, "gf": "#4ade80", "cs": "#e8bb62", "cf": AMBER, "err": RED, "skip": "#4f6b5c"},
     "ou": {"gs": "#38bdf8", "gf": CYAN_SOFT, "cs": "#e8bb62", "cf": AMBER, "err": RED, "skip": "#4f6b5c"},
 }
 _TONE_STRENGTH = {"gs": 4, "gf": 3, "cs": 2, "cf": 1, "err": 4, "skip": 0}
- 
+
 def _fmt_num(v, signed=False):
     try: return f"{float(v):+g}" if signed else f"{float(v):g}"
     except (TypeError, ValueError): return "-"
- 
+
 _ECG_PATH = "M0 15 H58 L64 15 L70 5 L78 25 L84 15 H128 L134 10 L140 15 H200"
- 
+
 def _ecg_svg():
     return ("<svg class='ecg' viewBox='0 0 200 30' preserveAspectRatio='none'>"
             f"<path d='{_ECG_PATH}' fill='none' stroke='#1f3a2c' stroke-width='1.5' vector-effect='non-scaling-stroke'/>"
             f"<path class='pulse' pathLength='100' d='{_ECG_PATH}' fill='none' stroke='#4ade80' stroke-width='2' vector-effect='non-scaling-stroke'/></svg>")
- 
+
 def _dial_svg(p, color, cls="dial"):
     p = max(0.0, min(float(p), 100.0))
     arc = 157.08 * p / 100
@@ -1628,13 +1646,13 @@ def _dial_svg(p, color, cls="dial"):
             f"<path class='dial-arc' d='M10 62 A50 50 0 0 1 110 62' fill='none' stroke='{color}' stroke-width='9' stroke-linecap='round' stroke-dasharray='{arc:.2f} 200'/>"
             f"<g class='needle' style='--rot:{rot:.1f}deg'><line x1='60' y1='62' x2='60' y2='27' stroke='#e6f2ea' stroke-width='2' stroke-linecap='round'/></g>"
             f"<circle cx='60' cy='62' r='5' fill='#0c130f' stroke='{color}' stroke-width='2'/></svg>")
- 
+
 def _vu(p, n=20, cls=""):
     lit = int(round(max(0.0, min(float(p), 100.0)) / 100 * n))
     # เปลี่ยนจาก <i> เป็น <div class='v-bar'> ป้องกัน Streamlit ลบทิ้ง
     cells = "".join(f"<div class='v-bar {'on' if i < lit else ''}' style='--i:{i}'></div>" for i in range(n))
     return f"<div class='vu {cls}' style='--n:{n}'>{cells}</div>"
- 
+
 def _channel_html(ch, name, line_txt, prob, verdict, color, desc, lo_lbl, hi_lbl):
     p = max(0.0, min(float(prob), 100.0))
     return (f"<div class='ch' style='--c:{color}'>"
@@ -1644,7 +1662,7 @@ def _channel_html(ch, name, line_txt, prob, verdict, color, desc, lo_lbl, hi_lbl
             f"<div class='ch-info'><div class='ch-val'>{p:g}<small>%</small></div><div class='ch-d'>{desc}</div><div class='ch-v'>{esc(verdict)}</div></div>"
             "</div>"
             f"{_vu(p, 20)}<div class='vu-l'><span>{lo_lbl}</span><span>50%</span><span>{hi_lbl}</span></div></div>")
- 
+
 def _match_card_html(n, home, away, hdp_line, ou_line, hdp_prob, ou_prob, hdp_verdict, ou_verdict, solo=False):
     t1, t2 = _pred_tone(hdp_verdict, "hdp"), _pred_tone(ou_verdict, "ou")
     strength = max(_TONE_STRENGTH[t1], _TONE_STRENGTH[t2])
@@ -1661,13 +1679,13 @@ def _match_card_html(n, home, away, hdp_line, ou_line, hdp_prob, ou_prob, hdp_ve
             + _channel_html("CH2", "OVER / UNDER", f"ไลน์ {_fmt_num(ou_line)}", ou_prob, ou_verdict,
                             _TONE_COLORS["ou"][t2], "โอกาสคว้ากำไรสูงต่ำ", "ต่ำ", "สูง")
             + "</div></div>")
- 
+
 def _card_from_row(n, r, solo=False):
     return _match_card_html(n, str(r.get('ทีมเหย้า', '-')), str(r.get('ทีมเยือน', '-')),
                             r.get('แฮนดิแคป (เหย้า)', 0), r.get('โกลสูง/ต่ำ', 0),
                             float(r.get('AI_โอกาสเหย้าชนะHDP(%)', 50)), float(r.get('AI_โอกาสออกสูง(%)', 50)),
                             str(r.get('AI_ฟันธง_HDP', '-')), str(r.get('AI_ฟันธง_สูงต่ำ', '-')), solo)
- 
+
 def render_monitor_header(df_pred):
     n_hdp = sum(1 for v in df_pred['AI_ฟันธง_HDP'] if _pred_tone(v, "hdp") != "skip")
     n_ou = sum(1 for v in df_pred['AI_ฟันธง_สูงต่ำ'] if _pred_tone(v, "ou") != "skip")
@@ -1686,7 +1704,7 @@ def render_monitor_header(df_pred):
     if items:
         track = "".join(items) * 2
         st.markdown(f"<div class='ticker-container'><div class='ticker-track' style='--dur:{max(24, len(items) * 7)}s'>{track}</div></div>", unsafe_allow_html=True)
- 
+
 def _pair(h, a): return (str(h).strip(), str(a).strip())
 def _visible_matches(df_pred):
     hidden = st.session_state.setdefault("hidden_matches", set())
@@ -1694,7 +1712,7 @@ def _visible_matches(df_pred):
     hidden.intersection_update(pairs)
     if len(pairs) != len(df_pred): return df_pred
     return df_pred[[p not in hidden for p in pairs]]
- 
+
 def render_prediction_cards(df_pred, workbook):
     """Tab 2 only. The original Tab 1 renderers and upload form are unchanged."""
     for n, (_, row) in enumerate(df_pred.iterrows(), start=1):
@@ -1733,7 +1751,7 @@ def render_prediction_cards(df_pred, workbook):
                 elif saved is False:
                     st.caption('หากยังไม่ยืนยันว่าบันทึกสำเร็จ ให้ตรวจข้อความด้านบนก่อนส่งคำสั่งใหม่')
             st.write('')
- 
+
 # ----------------------------------------
 # Dashboard : KPI & Charts
 # ----------------------------------------
@@ -1745,7 +1763,7 @@ def _kpi_html(hdp_acc, ou_acc, total_train):
             f"<div class='kpi-value'>{ou_acc}<span class='kpi-unit'>%</span></div><div class='kpi-bar'><div style='width:{min(ou_acc, 100)}%'></div></div></div>"
             f"<div class='kpi'><div class='kpi-label'><span class='led'></span>รายการประวัติที่โมเดลเดิมส่งมา</div>"
             f"<div class='kpi-value'>{total_train}<span class='kpi-unit'>คู่</span></div></div></div>")
- 
+
 # =============================================================================
 # PART 2 / 2 — CYBER MONITOR DASHBOARD
 # แทนที่ฟังก์ชัน render_dashboard(ai) เดิมทั้งฟังก์ชัน ด้วยโค้ดทั้งก้อนนี้
@@ -1753,26 +1771,26 @@ def _kpi_html(hdp_acc, ou_acc, total_train):
 # ใช้ของเดิม: _kpi_html, esc, np, pd, go, datetime/timezone/timedelta
 # =============================================================================
 from plotly.subplots import make_subplots
- 
+
 NEON_CYAN, NEON_MAG, NEON_GREEN = "#00e5ff", "#ff2bd6", "#39ff88"
 NEON_YEL, NEON_RED, NEON_GREY = "#fcee0a", "#ff3b5c", "#6b7f74"
 _CY_MONO = "JetBrains Mono, Prompt, monospace"
 _CY_GRID = "rgba(0,229,255,0.09)"
 _CY_BG = "#050907"
 CY_PLOT_CONFIG = {"displayModeBar": False, "responsive": True, "scrollZoom": False}
- 
+
 # 4 = ได้เต็ม ... 0 = เสียเต็ม (ตรงกับ Target_HDP / Target_OU เดิม)
 _OUT_LABELS = {4: "ได้เต็ม", 3: "ได้ครึ่ง", 2: "คืนทุน", 1: "เสียครึ่ง", 0: "เสียเต็ม"}
 _OUT_COLORS = {4: NEON_GREEN, 3: NEON_CYAN, 2: NEON_GREY, 1: NEON_YEL, 0: NEON_RED}
 _OUT_ORDER = [4, 3, 2, 1, 0]
- 
- 
+
+
 def _cy_rgba(hex_color, alpha):
     h = hex_color.lstrip("#")
     r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
     return f"rgba({r},{g},{b},{alpha})"
- 
- 
+
+
 def _cy_layout(fig, height=320, **extra):
     """ธีม Plotly กลาง: โปร่งใส, กริดบาง, ฟอนต์โมโน, ปิดการลาก/ซูม (กันจอมือถือเลื่อนติด)"""
     base = dict(
@@ -1791,8 +1809,8 @@ def _cy_layout(fig, height=320, **extra):
                      zerolinecolor="rgba(255,43,214,0.35)", zerolinewidth=1,
                      linecolor="#1b2a22", tickfont=dict(size=10), fixedrange=True)
     return fig
- 
- 
+
+
 def _cy_units(series):
     """Target 0..4 -> -1, -0.5, 0, +0.5, +1 ; ค่าว่างนับเป็น 0 (เหมือนกราฟเดิม)"""
     if series is None:
@@ -1800,23 +1818,23 @@ def _cy_units(series):
     t = pd.to_numeric(series, errors="coerce")
     t = t.where(t.between(0, 4))
     return ((t - 2) / 2).fillna(0.0).to_numpy(dtype=float)
- 
- 
+
+
 def _cy_counts(series):
     if series is None:
         return {k: 0 for k in _OUT_ORDER}
     t = pd.to_numeric(series, errors="coerce").dropna()
     t = t[t.isin(list(_OUT_ORDER))].astype(int)
     return {k: int((t == k).sum()) for k in _OUT_ORDER}
- 
- 
+
+
 def _cy_drawdown(cum):
     if len(cum) == 0:
         return 0.0
     peak = np.maximum.accumulate(np.concatenate([[0.0], cum]))[1:]
     return float((cum - peak).min())
- 
- 
+
+
 def _cy_glow(fig, x, y, color, name, row, fill=False):
     for width, alpha in ((13, 0.05), (6, 0.13)):
         fig.add_trace(go.Scatter(x=x, y=y, mode="lines", hoverinfo="skip", showlegend=False,
@@ -1825,15 +1843,15 @@ def _cy_glow(fig, x, y, color, name, row, fill=False):
         x=x, y=y, mode="lines", name=name, line=dict(color=color, width=2.2),
         fill="tozeroy" if fill else None, fillcolor=_cy_rgba(color, 0.06) if fill else None,
         hovertemplate="%{y:+.1f}<extra>" + name + "</extra>"), row=row, col=1)
- 
- 
+
+
 def _cy_endpoint(fig, x, y, color, row):
     fig.add_trace(go.Scatter(x=[x], y=[y], mode="markers", hoverinfo="skip", showlegend=False,
                              marker=dict(size=9, color=color, line=dict(color=_CY_BG, width=2))), row=row, col=1)
     fig.add_annotation(x=x, y=y, text=f"{y:+.1f}", showarrow=False, xanchor="left", xshift=9,
                        font=dict(family=_CY_MONO, size=11, color=color), row=row, col=1)
- 
- 
+
+
 def build_trend_figure(df_hist):
     """บน: ดัชนีสะสม HDP/OU (เส้นนีออน) · ล่าง: โมเมนตัมเฉลี่ย 10 แถวล่าสุด"""
     hdp = _cy_units(df_hist["Target_HDP"] if "Target_HDP" in df_hist else None)
@@ -1847,7 +1865,7 @@ def build_trend_figure(df_hist):
     c_hdp, c_ou = np.cumsum(hdp), np.cumsum(ou)
     m_hdp = pd.Series(hdp).rolling(10, min_periods=1).mean().to_numpy()
     m_ou = pd.Series(ou).rolling(10, min_periods=1).mean().to_numpy()
- 
+
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.68, 0.32], vertical_spacing=0.07)
     _cy_glow(fig, x, c_hdp, NEON_CYAN, "แฮนดิแคป", 1, fill=True)
     _cy_glow(fig, x, c_ou, NEON_MAG, "สูง/ต่ำ", 1, fill=True)
@@ -1863,8 +1881,8 @@ def build_trend_figure(df_hist):
     stats = {"n": n, "hdp_last": float(c_hdp[-1]), "ou_last": float(c_ou[-1]),
              "hdp_dd": _cy_drawdown(c_hdp), "ou_dd": _cy_drawdown(c_ou)}
     return fig, stats
- 
- 
+
+
 def build_donut_figure(counts):
     total = sum(counts.values())
     if total == 0:
@@ -1882,8 +1900,8 @@ def build_donut_figure(counts):
     fig.add_annotation(text="ผลรวม 2 ตลาด", x=0.5, y=0.40, showarrow=False,
                        font=dict(family="Prompt, sans-serif", size=11, color="#7f9a8b"))
     return fig
- 
- 
+
+
 def build_stack_figure(hdp_counts, ou_counts):
     fig = go.Figure()
     for k in _OUT_ORDER:
@@ -1901,14 +1919,14 @@ def build_stack_figure(hdp_counts, ou_counts):
     fig.update_xaxes(ticksuffix="%", range=[0, 100])
     fig.update_yaxes(showgrid=False, zeroline=False, autorange="reversed", tickfont=dict(size=12, color="#e6f2ea"))
     return fig
- 
- 
+
+
 # ----------------------------- HTML blocks -----------------------------------
 def _cy_title(text, sub=""):
     return (f"<div class='hud-title'><span class='led'></span><span>{esc(text)}</span>"
             f"<span class='sub'>{esc(sub)}</span></div>")
- 
- 
+
+
 def _cy_chips(stats):
     items = [("ดัชนีสะสมล่าสุด · แฮนดิแคป", stats["hdp_last"], NEON_CYAN),
              ("ดัชนีสะสมล่าสุด · สูง/ต่ำ", stats["ou_last"], NEON_MAG),
@@ -1917,8 +1935,8 @@ def _cy_chips(stats):
     cells = "".join(f"<div class='chip' style='--c:{c}'><div class='chip-k'>{esc(k)}</div>"
                     f"<div class='chip-v'>{v:+.1f}</div></div>" for k, v, c in items)
     return f"<div class='chip-row'>{cells}</div>"
- 
- 
+
+
 def _cy_strip(title, series, n=40):
     t = pd.to_numeric(series, errors="coerce").dropna() if series is not None else pd.Series(dtype=float)
     vals = [int(v) for v in t[t.isin(list(_OUT_ORDER))].tolist()][-n:]
@@ -1930,21 +1948,21 @@ def _cy_strip(title, series, n=40):
     return (f"<div class='fs-wrap'><div class='fs-h'><span>{esc(title)}</span>"
             f"<span>ล่าสุด <b>{_OUT_LABELS[vals[-1]]}</b> · {len(vals)} แถว</span></div>"
             f"<div class='fs-grid'>{cells}</div></div>")
- 
- 
+
+
 def _cy_legend():
     return ("<div class='fs-legend'>" + "".join(
         f"<span style='--c:{_OUT_COLORS[k]}'>{_OUT_LABELS[k]}</span>" for k in _OUT_ORDER) + "</div>")
- 
- 
+
+
 def _cy_fmt(value, digits=3):
     try:
         f = float(value)
         return f"{f:.{digits}f}" if np.isfinite(f) else "-"
     except (TypeError, ValueError):
         return "-"
- 
- 
+
+
 def _cy_model_html(reports):
     tiles = []
     for key, name in (("HDP", "HANDICAP"), ("OU", "OVER / UNDER")):
@@ -1967,18 +1985,18 @@ def _cy_model_html(reports):
             f"<div class='mdl-r'><span>แถวที่ใช้ฝึก/ทดสอบ</span><b>{rows}</b></div>"
             f"<div class='mdl-n'>{esc(note)}</div></div>")
     return f"<div class='mdl-wrap'>{''.join(tiles)}</div>"
- 
- 
+
+
 def _cy_plot(fig):
     st.plotly_chart(fig, use_container_width=True, theme=None, config=CY_PLOT_CONFIG)
- 
- 
+
+
 # ----------------------------- main renderer ---------------------------------
 def render_dashboard(ai):
     if ai["status"] != "ok":
         st.warning("⚠️ ยังไม่มีข้อมูลสรุปสำหรับ Dashboard (หรือโหลดไม่สำเร็จ)")
         return
- 
+
     stamp = datetime.now(timezone(timedelta(hours=7))).strftime("%H:%M:%S")
     st.markdown(f"<div class='mon-status'><span class='led'></span><b>สรุปข้อมูล</b>"
                 f"<span>รายการประวัติ<em>{ai.get('total_train', 0)}</em>คู่</span>"
@@ -1987,11 +2005,11 @@ def render_dashboard(ai):
                 unsafe_allow_html=True)
     st.info("รายงานจากโมเดลเดิม ไม่ใช่ผลรับรองความแม่นยำในอนาคต · อัตราทายถูกฝั่งคิดเฉพาะตัวอย่างทดสอบที่ผ่านเกณฑ์ 55% "
             "และไม่คืนทุน · การแบ่งข้อมูลเป็นการสุ่มตามกลุ่มคู่ทีม ไม่ใช่แบ่งตามเวลา")
- 
+
     df_hist = ai.get("df_history", pd.DataFrame())
     has_hist = (isinstance(df_hist, pd.DataFrame) and len(df_hist) > 0
                 and ("Target_HDP" in df_hist.columns or "Target_OU" in df_hist.columns))
- 
+
     if has_hist:
         # ---------- 1) TREND ----------
         fig, stats = build_trend_figure(df_hist)
@@ -2004,7 +2022,7 @@ def render_dashboard(ai):
                             "&nbsp;|&nbsp; <b>ส่วนล่าง</b> โมเมนตัมเฉลี่ย 10 แถวล่าสุด "
                             "&nbsp;|&nbsp; คะแนน −1…+1 ไม่รวมค่าน้ำ ไม่ใช่กำไรจริง และไม่ใช่ลำดับเวลาแข่งขัน</div>",
                             unsafe_allow_html=True)
- 
+
         # ---------- 2) DISTRIBUTION ----------
         hdp_c = _cy_counts(df_hist["Target_HDP"] if "Target_HDP" in df_hist else None)
         ou_c = _cy_counts(df_hist["Target_OU"] if "Target_OU" in df_hist else None)
@@ -2020,7 +2038,7 @@ def render_dashboard(ai):
                     st.markdown(_cy_title("MARKET SPLIT", "สัดส่วนแยกตามตลาด"), unsafe_allow_html=True)
                     _cy_plot(build_stack_figure(hdp_c, ou_c))
             st.caption("สัดส่วนผลย้อนหลังฝั่งเจ้าบ้านและสูง — ไม่ใช่ผลทำนายของ AI")
- 
+
         # ---------- 3) STREAK STRIP ----------
         strip = (_cy_strip("HANDICAP · 40 ผลล่าสุด", df_hist["Target_HDP"] if "Target_HDP" in df_hist else None)
                  + _cy_strip("OVER / UNDER · 40 ผลล่าสุด", df_hist["Target_OU"] if "Target_OU" in df_hist else None))
@@ -2030,39 +2048,39 @@ def render_dashboard(ai):
                 st.markdown(strip + _cy_legend(), unsafe_allow_html=True)
     else:
         st.info("ยังไม่มีข้อมูลสถิติที่บันทึกผลสกอร์เพียงพอสำหรับสร้างกราฟ")
- 
+
     # ---------- 4) MODEL STATUS ----------
     with st.container(key="hud_model"):
         st.markdown(_cy_title("MODEL STATUS", "ผลจากชุดตรวจสอบ ไม่ใช่ผลอนาคต"), unsafe_allow_html=True)
         st.markdown(_cy_model_html(ai.get("reports")), unsafe_allow_html=True)
- 
+
 # -----------------------------------------------------------------------------
 # PATCH 5.1.4: Tab 2/3 only. Original Tab 1 and all of its dependencies are frozen.
 # No monkey-patching of the upload workflow; no new sheet or metadata columns.
 # -----------------------------------------------------------------------------
 class ScoreConflictError(ValueError):
     """The displayed row no longer matches, or a different score already exists."""
- 
- 
+
+
 class ScoreWriteUncertainError(RuntimeError):
     """A dispatched write cannot yet be confirmed. Do not resend automatically."""
- 
- 
+
+
 @st.cache_resource
 def _t2_score_journal():
     # Shared across sessions in this process; not a distributed/durable lock.
     # Access is always protected by the original JOBS.sheet_lock.
     return {}
- 
- 
+
+
 def _t2_blank(value):
     if value is None:
         return True
     if isinstance(value, (float, np.floating)) and np.isnan(value):
         return True
     return isinstance(value, str) and not value.strip()
- 
- 
+
+
 def _t2_parse_score(value):
     """Accept only a text score, not Excel dates, booleans, numbers or formulas."""
     if not isinstance(value, str):
@@ -2070,8 +2088,8 @@ def _t2_parse_score(value):
     text = value.strip().replace('\u2212', '-').replace('\u2013', '-')
     match = re.fullmatch(r'([0-9]{1,2})\s*[-:]\s*([0-9]{1,2})', text)
     return tuple(map(int, match.groups())) if match else None
- 
- 
+
+
 def _t2_canonical(value, *, name=False):
     if _t2_blank(value):
         return ''
@@ -2086,8 +2104,8 @@ def _t2_canonical(value, *, name=False):
     except (TypeError, ValueError, OverflowError):
         pass
     return str(value).strip()
- 
- 
+
+
 def _t2_fingerprint(values):
     """Fingerprint A:L and X:AC; ignore score and legacy formula columns M:W."""
     import hashlib
@@ -2095,27 +2113,27 @@ def _t2_fingerprint(values):
     inputs = padded[:12] + padded[23:29]
     normalized = [_t2_canonical(v, name=i < 2) for i, v in enumerate(inputs)]
     return hashlib.sha256(json.dumps(normalized, ensure_ascii=False).encode('utf-8')).hexdigest()
- 
- 
+
+
 def _t2_record_fingerprint(record):
     values = [record.get(c, '') for c in ['ทีมเหย้า', 'ทีมเยือน'] + ML_ODDS_COLUMNS]
     values += [''] * 11
     values += [record.get(c, '') for c in FORM5_HEADERS]
     return _t2_fingerprint(values)
- 
- 
+
+
 def _t2_values(ws, cell_range):
     return ws.get(range_name=cell_range, value_render_option='UNFORMATTED_VALUE',
                   date_time_render_option='SERIAL_NUMBER')
- 
- 
+
+
 def _t2_check_headers(values):
     required = ['ทีมเหย้า', 'ทีมเยือน'] + ML_ODDS_COLUMNS + ['ผลสกอร์']
     actual = [str(v).strip() for v in (values[0] if values else [])[:13]]
     if actual != required:
         raise ScoreConflictError('หัวคอลัมน์ A:M ของ DATA ไม่ตรงกับต้นฉบับ จึงหยุดก่อนเขียนข้อมูล กรุณาตรวจตำแหน่งคอลัมน์')
- 
- 
+
+
 def _t2_data_from_grid(grid):
     _t2_check_headers(grid)
     columns = ['ทีมเหย้า', 'ทีมเยือน'] + ML_ODDS_COLUMNS + ['ผลสกอร์'] + FORM5_HEADERS
@@ -2137,8 +2155,8 @@ def _t2_data_from_grid(grid):
                       _ScoreStatus=status, _Issue=issue)
         records.append(record)
     return pd.DataFrame(records, columns=columns)
- 
- 
+
+
 @st.cache_data(ttl=20, show_spinner=False)
 def _t2_load_data(_workbook, workbook_key, data_version=0):
     # Use DATA explicitly: a missing DATA tab must not redirect score writes.
@@ -2146,40 +2164,40 @@ def _t2_load_data(_workbook, workbook_key, data_version=0):
         ws = _workbook.worksheet('DATA')
         grid = _t2_values(ws, 'A1:AC')
     return _t2_data_from_grid(grid)
- 
- 
+
+
 def _t2_workbook_key(wb):
     return str(getattr(wb, 'id', id(wb)))
- 
- 
+
+
 def _t2_refresh():
     _t2_load_data.clear()
     # Preserve the original refresh semantics without replacing its functions.
     st.cache_data.clear()
- 
- 
+
+
 def _t2_read_target(ws, row_number):
     rows = _t2_values(ws, f'A{row_number}:AC{row_number}')
     vals = list(rows[0]) if rows else []
     return vals[:29] + [''] * max(0, 29 - len(vals))
- 
- 
+
+
 def _t2_target_matches(values, home, away, expected_snapshot):
     names = (_t2_canonical(values[0], name=True), _t2_canonical(values[1], name=True))
     return (names == (_t2_canonical(home, name=True), _t2_canonical(away, name=True))
             and (expected_snapshot is None or _t2_fingerprint(values) == expected_snapshot))
- 
- 
+
+
 def _t2_write_key(wb, ws, row_number):
     return (_t2_workbook_key(wb), str(ws.id), int(row_number))
- 
- 
+
+
 def _t2_confirm_pending(ws, entry):
     vals = _t2_read_target(ws, entry['row'])
     return (_t2_fingerprint(vals) == entry['snapshot']
             and _t2_parse_score(vals[12]) == _t2_parse_score(entry['score']))
- 
- 
+
+
 def _t2_reconcile(wb):
     """Read only: never retries an uncertain write."""
     confirmed, unresolved = 0, 0
@@ -2198,8 +2216,8 @@ def _t2_reconcile(wb):
                 unresolved += 1
     _t2_load_data.clear()
     return confirmed, unresolved
- 
- 
+
+
 def _t2_error(exc, context):
     # No exception message/locals/full API response in support details.
     # User-authored validation exceptions contain only fixed, safe messages.
@@ -2227,8 +2245,8 @@ def _t2_error(exc, context):
                'รุ่นไลบรารี': versions, 'รุ่นปรับปรุงแท็บ2': '5.1.4-TAB1-LOCKED'}
     with st.expander('รายละเอียดสำหรับส่งตรวจ (ไม่รวมกุญแจ API หรือข้อมูลบัญชี)'):
         st.code(json.dumps(details, ensure_ascii=False, indent=2), language='json')
- 
- 
+
+
 def _t2_pending_view(raw, ai):
     pending = raw.loc[raw['_ScoreStatus'].eq('pending')].copy()
     prediction_columns = ['AI_โอกาสเหย้าชนะHDP(%)', 'AI_โอกาสออกสูง(%)',
@@ -2249,8 +2267,8 @@ def _t2_pending_view(raw, ai):
             for col in prediction_columns:
                 pending.at[index, col] = candidates[0].get(col, pending.at[index, col])
     return pending
- 
- 
+
+
 def _t2_render_card(number, record):
     probabilities = [record.get('AI_โอกาสเหย้าชนะHDP(%)'), record.get('AI_โอกาสออกสูง(%)')]
     usable = all(isinstance(p, (int, float, np.number)) and np.isfinite(p) for p in probabilities)
@@ -2264,8 +2282,8 @@ def _t2_render_card(number, record):
         home, away = esc(str(record.get('ทีมเหย้า', ''))), esc(str(record.get('ทีมเยือน', '')))
         st.markdown(f"<div class='job-card'><div class='job-title'>{home}<span class='vs'>vs</span>{away}</div></div>", unsafe_allow_html=True)
         st.info('ยังไม่มีผลทำนายที่จับคู่กับข้อมูลแถวนี้ได้แน่นอน แต่สามารถบันทึกผลสกอร์ได้')
- 
- 
+
+
 def _t2_finish_saved(row_number, score_text):
     # Data is already confirmed. Failure to refresh must not be reported as a failed write.
     st.session_state['_t2_saved_notice'] = f'ยืนยันบันทึกผลสกอร์ {score_text} ที่ DATA!M{row_number} แล้ว'
@@ -2274,8 +2292,8 @@ def _t2_finish_saved(row_number, score_text):
         _t2_load_data.clear()
     except Exception:
         st.session_state['_t2_saved_notice'] += ' กรุณารีเฟรชหน้าเว็บเพื่อโหลดข้อมูลล่าสุด'
- 
- 
+
+
 def _t2_render_tab(wb, ai):
     panel_header('สัญญาณการทำนายและบันทึกผลสกอร์', 'รุ่น 5.1.4 — คงหน้าอัปโหลดตามต้นฉบับ แก้เฉพาะแท็บ 2/3')
     if wb is None:
@@ -2323,8 +2341,8 @@ def _t2_render_tab(wb, ai):
     start = (page - 1) * page_size
     st.caption(f'รอผลทั้งหมด {len(pending):,} รายการ — แสดงรายการ {start + 1} ถึง {min(start + page_size, len(pending))}')
     render_prediction_cards(pending.iloc[start:start + page_size], wb)
- 
- 
+
+
 def _t3_quality(wb):
     if wb is None:
         return
@@ -2343,11 +2361,11 @@ def _t3_quality(wb):
 # ----------------------------------------
 st.markdown("<h1 class='page-title'>⚽ ระบบวิเคราะห์ราคาบอล VIP & AI (v5.0 The Ultimate Hybrid)</h1>", unsafe_allow_html=True)
 st.markdown("<p class='page-sub'>อัปเกรด Ensemble AI โหวต 3 ระดับ พร้อมระบบคำนวณเงินเดิมพันอัตโนมัติ, Ranking และ Confidence Indicator</p>", unsafe_allow_html=True)
- 
+
 AI = get_ai()
- 
+
 tab1, tab2, tab3 = st.tabs(["📸 อัปโหลดราคาบอล", "📡 สัญญาณการทำนาย", "📊 Dashboard"])
- 
+
 with tab1:
     st.info("💡 **Tips V5.0:** ถ่ายภาพตารางราคาให้เห็น 1 คู่ชัดเจน เพื่อให้ AI ดึงข้อมูลและคำนวณขนาดไม้ลงทุนให้อย่างแม่นยำ")
     fmt_choice = st.selectbox("รูปแบบค่าน้ำ", list(FMT_CHOICES.keys()))
@@ -2357,19 +2375,19 @@ with tab1:
         for f in uploaded_files: JOBS.pool.submit(process_job, JOBS.create(f.name, f.getvalue(), FMT_CHOICES[fmt_choice], st.session_state["form5_owner_id"]), workbook, model)
         st.session_state["up_n"] = up_n + 1
         st.rerun()
- 
+
     my_jobs = [j for j in JOBS.snapshot() if j.get("owner_id") == st.session_state["form5_owner_id"]]
     if my_jobs or st.session_state.get("form5_editing"):
         st.button("🧹 เคลียข้อมูลหน้านี้", key="clear_upload", on_click=clear_upload_page, help="ล้างรายการงาน การ์ดสัญญาณ ฟอร์ม 5 นัด และไฟล์ที่เลือกไว้ในหน้านี้")
- 
+
     polling = any(j["status"] in ("queued", "reading", "saving") for j in my_jobs)
     if hasattr(st, "fragment"): st.fragment(run_every=2 if polling else None)(render_jobs)(polling)
     else: render_jobs(polling)
     render_form5_editor()
- 
+
 with tab2:
     _t2_render_tab(workbook, AI)
- 
+
 with tab3:
     panel_header("สรุปผลและคุณภาพข้อมูล", "รุ่นคงหน้าแรกตามต้นฉบับ — ข้อมูลดิบและผลโมเดลเดิมแสดงแยกกัน")
     if not workbook:
