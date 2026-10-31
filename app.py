@@ -1021,6 +1021,28 @@ def render_form5_editor():
             except Exception as e:
                 st.error(f"เกิดข้อผิดพลาด: {e}")
 
+    tournament_options = ["League (บอลลีกทั่วไป)", "Cup / ACL (บอลถ้วยทวีป / เอเชีย)"]
+    selected_tournament = st.selectbox("🏆 ประเภทรายการแข่งขัน", tournament_options, key=f"tourn_{job_id}")
+
+    with st.form(f"form5_{job_id}"):
+        left, right = st.columns(2, gap="large")
+        with left:
+            st.markdown(f"<div class='fx-side'><small>HOME</small>{esc(str(job['row_data'][0]))}</div>", unsafe_allow_html=True)
+            h_win = _f5_number('Win Rate เหย้า (%)', f"{job_id}_h_win", 20.)
+            h_for = _f5_number('ประตูได้ (รวม 5 นัด)', f"{job_id}_h_for", 1, as_int=True)
+            h_ag = _f5_number('ประตูเสีย (รวม 5 นัด)', f"{job_id}_h_ag", 1, as_int=True)
+        with right:
+            st.markdown(f"<div class='fx-side away'><small>AWAY</small>{esc(str(job['row_data'][1]))}</div>", unsafe_allow_html=True)
+            a_win = _f5_number('Win Rate เยือน (%)', f"{job_id}_a_win", 20.)
+            a_for = _f5_number('ประตูได้ (รวม 5 นัด)', f"{job_id}_a_for", 1, as_int=True)
+            a_ag = _f5_number('ประตูเสีย (รวม 5 นัด)', f"{job_id}_a_ag", 1, as_int=True)
+            
+        if st.form_submit_button('💾 บันทึกทั้งหมด', type="primary"):
+            t_type = "Cup" if "Cup" in selected_tournament else "League"
+            submit_form5(job_id, [h_win, h_for, h_ag, a_win, a_for, a_ag], st.session_state["form5_owner_id"], t_type)
+            st.session_state.pop("form5_editing", None)
+            st.rerun()
+
     # 🚨 เพิ่มตัวเลือกประเภทการแข่งขันสำหรับกฎ V5.5
     tournament_options = ["League (บอลลีกทั่วไป)", "Cup / ACL (บอลถ้วยทวีป / เอเชีย)"]
     selected_tournament = st.selectbox("🏆 ประเภทรายการแข่งขัน", tournament_options, key=f"tourn_{job_id}")
