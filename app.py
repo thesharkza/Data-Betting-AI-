@@ -1207,12 +1207,7 @@ def _ml_choices(probabilities, first_prices, second_prices, config=None):
  
  
 def _ml_prepare(df_in):
-    """Derive labels from checked scores only. Raw source columns remain intact.
- 
-    Keeping the raw source values and _Snapshot is essential: Tab2's unchanged
-    optimistic-write checks must compare the actual sheet snapshot, not model
-    preprocessing (e.g. a fraction converted from a displayed percentage).
-    """
+    """Derive labels from checked scores only. Raw source columns remain intact."""
     if not isinstance(df_in, pd.DataFrame):
         raise ValueError("DATA must be a DataFrame")
     df = df_in.copy(deep=True).reset_index(drop=True)
@@ -1225,11 +1220,13 @@ def _ml_prepare(df_in):
     for col in ML_ODDS_COLUMNS + FORM5_HEADERS:
         if col not in df:
             df[col] = np.nan
+            
     # Retain invalid named rows for data-quality reporting; drop truly empty rows.
     keep = ~(df[_ML_HOME].map(_ml_blank) & df[_ML_AWAY].map(_ml_blank))
     df = df.loc[keep].reset_index(drop=True)
     num = df[ML_ODDS_COLUMNS].apply(lambda column: column.map(_ml_number))
     X = pd.DataFrame(index=df.index)
+    
     odds = num[ML_ODDS_COLUMNS[:3]].where(lambda values: values > 1)
     inv = 1.0 / odds
     total = inv.sum(axis=1, min_count=3)
@@ -1238,21 +1235,27 @@ def _ml_prepare(df_in):
     X["Bookie_Margin"] = total - 1.0
     X["Has_1X2"] = odds.notna().all(axis=1).astype(float)
     X["1X2_Variance"] = X[["Market_Home_Prob", "Market_Draw_Prob", "Market_Away_Prob"]].var(axis=1)
+    
     for feature, offset in (("HDP_Home_Decimal", 4), ("HDP_Away_Decimal", 6),
                             ("Over_Decimal", 8), ("Under_Decimal", 9)):
         X[feature] = df[ML_ODDS_COLUMNS[offset]].map(_ml_malay_decimal)
+        
     X["Water_HDP_Diff"] = X["HDP_Home_Decimal"] - X["HDP_Away_Decimal"]
     X["Water_OU_Diff"] = X["Over_Decimal"] - X["Under_Decimal"]
+    
     for market, offset in (("HDP", 3), ("OU", 7)):
         line = num[ML_ODDS_COLUMNS[offset]]
         X[market + "_Line"] = line.where(line.map(lambda v: _ml_valid_line(v, market)))
         X[market + "_Family"] = np.round(X[market + "_Line"] * 4) % 4
+        
     for col in FORM5_HEADERS:
         X[col] = df[col].map(_ml_win_rate if "WinRate" in col else _ml_goal_count)
+        
     X["Form_Present_Count"] = X[FORM5_HEADERS].notna().sum(axis=1).astype(float)
     X["Form_Complete"] = X[FORM5_HEADERS].notna().all(axis=1).astype(float)
     for col in FORM5_HEADERS:
         X[col + "_Missing"] = X[col].isna().astype(float)
+        
     h_for, h_against = X[FORM5_HEADERS[1]] / 5.0, X[FORM5_HEADERS[2]] / 5.0
     a_for, a_against = X[FORM5_HEADERS[4]] / 5.0, X[FORM5_HEADERS[5]] / 5.0
     X["Form_Home_Goal_Avg"] = h_for
@@ -1261,32 +1264,36 @@ def _ml_prepare(df_in):
     X["Expected_Total_Goals"] = (h_for + a_against + a_for + h_against) / 2.0
     X["Form_Total_vs_Line"] = X["Expected_Total_Goals"] - X["OU_Line"]
  
-    # 🚨 [เพิ่มตัวแปรจับผิดราคาหลอก (Bookie Trap Indicator)]
-    # หากสถิติ WinRate เหย้าดีกว่าเยือนมากๆ (ค่าบวก) แต่โต๊ะเปิด HDP น้อยผิดปกติ โมเดลจะรับรู้ถึงความขัดแย้งนี้
+    # ==========================================
+    # 🚨 [V5.5 REALITY CHECK & ANTI-BAIT TRAPS] 🚨
+    # ==========================================
+    # 1. HDP vs Form Mismatch & Fake Steam Indicator
     X["HDP_vs_Form_Mismatch"] = X["Form_WinRate_Difference"] + (X["HDP_Line"] / 2.5)
- 
-    # 🚨 [เพิ่มตัวแปรวัดโมเมนตัมการทำประตู (Goal Pressure Index)]
-    # ประเมินว่าทีมไหนกำลังท็อปฟอร์มเกมรุกหรือกำลังเป๋ในเกมรับ
+    X["Is_Fake_Steam"] = (X["HDP_vs_Form_Mismatch"].abs() > 1.0).astype(float)
+
+    # 2. 1X2 Anchor Divergence (Noisy Crash Detection)
+    X["HDP_Home_Implied_Prob"] = 1.0 / (X["HDP_Home_Decimal"] + 0.001)
+    X["1X2_vs_HDP_Anomaly"] = (X["Market_Home_Prob"] - X["HDP_Home_Implied_Prob"]).abs()
+    X["Noisy_Crash_Flag"] = ((X["1X2_vs_HDP_Anomaly"] > 0.15) & (X["Bookie_Margin"] < 0.08)).astype(float)
+
+    # 3. Over-Bait Risk Indicator
+    avg_conceded_total = (X[FORM5_HEADERS[2]] + X[FORM5_HEADERS[5]]) / 10.0
+    X["Over_Bait_Risk"] = ((X["OU_Line"] >= 3.0) & (avg_conceded_total < 1.5)).astype(float)
+
+    # 4. Cup High HDP Penalty Check (ถ้ามีคอลัมน์ Tournament_Type ใน Google Sheet)
+    if "Tournament_Type" in df.columns:
+        is_cup = df["Tournament_Type"].map(lambda v: 1 if str(v).strip().lower() in ["cup", "acl", "ถ้วย"] else 0)
+        X["Cup_High_HDP_Risk"] = ((X["HDP_Line"] <= -1.25) & (is_cup == 1)).astype(float)
+    else:
+        X["Cup_High_HDP_Risk"] = 0.0
+
+    # 5. Feature ดั้งเดิม
     X["Home_Goal_Pressure"] = X["Form_Home_Goal_Avg"] - (X[FORM5_HEADERS[2]] / 5.0)
     X["Away_Goal_Pressure"] = X["Form_Away_Goal_Avg"] - (X[FORM5_HEADERS[5]] / 5.0)
- 
-    # 🚨 [Trap 1: ความขัดแย้งระหว่างราคาพูล 1X2 กับแฮนดิแคป (1X2 vs HDP Anomaly)]
-    # โต๊ะมักจะใช้ราคา 1X2 เพื่อหลอกล่อให้คนมั่นใจ แต่ปรับค่าน้ำ HDP ไปอีกทางเพื่อกินส่วนต่าง
-    X["HDP_Home_Implied_Prob"] = 1.0 / X["HDP_Home_Decimal"]
-    X["1X2_vs_HDP_Anomaly"] = X["Market_Home_Prob"] - X["HDP_Home_Implied_Prob"]
- 
-    # 🚨 [Trap 2: สัดส่วนแต้มต่อต่อสกอร์รวม (HDP to O/U Constraint)]
-    # เช่น ทีมต่อ -1.5 แต่ราคาเตะมุมหรือสกอร์รวมตั้งไว้ต่ำมาก (เช่น 2.25)
-    X["HDP_to_OU_Ratio"] = X["HDP_Line"].abs() / (X["OU_Line"] + 0.001)  # บวก 0.001 ป้องกันหารศูนย์
- 
-    # 🚨 [Trap 3: สัญญาณล่อเม็ดเงินจากค่าน้ำ (Juice/Vigorish Bait)]
-    # ผสานฟอร์มทีมเข้ากับส่วนต่างค่าน้ำ (Water_HDP_Diff มีในระบบอยู่แล้ว)
+    X["HDP_to_OU_Ratio"] = X["HDP_Line"].abs() / (X["OU_Line"] + 0.001)
     X["Form_vs_Juice_Bait"] = X["Form_WinRate_Difference"] * X["Water_HDP_Diff"]
- 
-    # 🚨 [Trap 4: ความเปราะบางของเกมรับ (Defensive Fragility Index)]
-    # เอาอัตราการเสียประตูของทั้งคู่มาคูณกัน ยิ่งค่าสูง แปลว่าหลังหลวมทั้งคู่
     X["Defensive_Fragility"] = (X[FORM5_HEADERS[2]] / 5.0) * (X[FORM5_HEADERS[5]] / 5.0)
-    # No artificial 2.5-goal fallback. These are coarse features, not hard rules.
+
     means = X["Expected_Total_Goals"].to_numpy(float)
     lines = X["OU_Line"].to_numpy(float)
     usable = np.isfinite(means) & (means >= 0) & np.isfinite(lines)
@@ -1299,7 +1306,9 @@ def _ml_prepare(df_in):
         X.loc[usable, "Poisson_Under_Positive"] = stats.poisson.cdf(np.ceil(high) - 1, means[usable])
         whole = np.isclose(low, high) & np.isclose(low, np.round(low))
         X.loc[usable, "Poisson_Push"] = np.where(whole, stats.poisson.pmf(np.round(low), means[usable]), 0.0)
+        
     X = X.replace([np.inf, -np.inf], np.nan).astype(float)
+    
     names_ok = ~df[_ML_HOME].map(_ml_blank) & ~df[_ML_AWAY].map(_ml_blank)
     names_ok &= df[_ML_HOME].astype(str).str.strip().str.casefold().ne(df[_ML_AWAY].astype(str).str.strip().str.casefold())
     df["_ML_Group"] = [json.dumps(sorted([re.sub(r"\s+", " ", str(h).strip().casefold()),
@@ -1309,8 +1318,10 @@ def _ml_prepare(df_in):
     score_blank = df[_ML_SCORE].map(_ml_blank)
     df["_ML_InvalidScore"] = ~score_blank & score.isna()
     df["_ML_Pending"] = names_ok & score_blank
+    
     away_line = num[ML_ODDS_COLUMNS[5]]
     matching_hdp = np.isclose(X["HDP_Line"], -away_line, equal_nan=False)
+    
     for market, first, second in (("HDP", "HDP_Home_Decimal", "HDP_Away_Decimal"),
                                   ("OU", "Over_Decimal", "Under_Decimal")):
         ok = names_ok & X[[market + "_Line", first, second]].notna().all(axis=1)
@@ -1320,6 +1331,7 @@ def _ml_prepare(df_in):
         target = [_ml_settlement(s, v, market) if valid else np.nan
                   for s, v, valid in zip(score, X[market + "_Line"], ok)]
         df["Target_" + market] = target
+        
     return df, X
  
  
@@ -1555,8 +1567,8 @@ def _ml_fit_market(df, X, market):
  
  
 def _ml_verdict(market, side, prob_val, ev, stress_ev, line, valid, report, kelly,
-                row_data=None, features_data=None, min_prob=55.0, min_ev=None):
-    """Neutral research results. No unsupported market-story rules or VIP stakes."""
+                row_data=None, features_data=None, min_prob=58.0, min_ev=None):
+    """Neutral research results with V5.5 Hard Rule Safeguards."""
     prefix = "⚠️ ข้าม"
     if not valid:
         return prefix + " (ราคาหรือไลน์ไม่ครบ/ผิดรูปแบบ)"
@@ -1565,20 +1577,38 @@ def _ml_verdict(market, side, prob_val, ev, stress_ev, line, valid, report, kell
     if not report.get("gate_pass", False):
         reason = "; ".join(report.get("gate_reasons", [])) or "ไม่ผ่านเกณฑ์คุณภาพ"
         return prefix + " (" + reason + ") | ค่าประเมินเพื่อทดลอง"
+        
+    # 🚨 [V5.5 HARD RULES - กรองกับดักราคาหลอกก่อนอนุมัติสัญญาณ]
+    if features_data is not None:
+        try:
+            # 1. ดักจับ Noisy Crash
+            if float(features_data.get("Noisy_Crash_Flag", 0)) > 0:
+                return prefix + " (ตรวจพบ Noisy Crash / ราคาไหลหลอก ขาด 1X2 Anchor รองรับ)"
+            # 2. ดักจับ Over-Baiting (ถ้าจะฟันธงสูง แต่ติดกับดัก Over-Bait)
+            if market == "OU" and side == 0 and float(features_data.get("Over_Bait_Risk", 0)) > 0:
+                return prefix + " (เสี่ยง Over-Bait / สถิติประตูเสียน้อยกว่าเรต OU ที่เปิดล่อ)"
+            # 3. ดักจับ บอลถ้วยต่อแพง
+            if market == "HDP" and float(features_data.get("Cup_High_HDP_Risk", 0)) > 0:
+                return prefix + " (บอลถ้วยทวีปต่อแพงเกิน -1.25 เสี่ยงชนะไม่ขาด/รองเจ้าบ้าน)"
+        except Exception:
+            pass
+
     family = int(round(float(line) * 4)) % 4
     if report["family_counts"].get(family, 0) < ML_CONFIG["min_line_examples"]:
         return prefix + " (ตัวอย่างไลน์ชนิดนี้น้อยเกินไป)"
     bounds = report.get("line_range", [-np.inf, np.inf])
     if not bounds[0] <= float(line) <= bounds[1]:
         return prefix + " (ไลน์นอกช่วงข้อมูลฝึก)"
+        
     min_ev = ML_CONFIG["min_ev"] if min_ev is None else min_ev
     if not np.isfinite(prob_val) or prob_val < min_prob:
         return prefix + " (ความน่าจะเป็นไม่ถึงเกณฑ์)"
     if not np.isfinite(ev) or not np.isfinite(stress_ev) or ev < min_ev or stress_ev <= 0:
         return prefix + " (ผลตอบแทนคาดหมายไม่ผ่านเกณฑ์เผื่อความคลาดเคลื่อน)"
+        
     desc = ((_ML_HOME if side == 0 else _ML_AWAY) if market == "HDP"
             else ("สูง" if side == 0 else "ต่ำ"))
-    # แปลงสัดส่วน Kelly เป็น % และกำหนดขั้นต่ำที่ 1%
+            
     recommended_bet = max(1.0, kelly * 100) 
     
     return (f"⭐ ฟันธง: {desc} | โอกาสชนะ: {prob_val:.1f}% (EV: +{ev:.2f}) | "
