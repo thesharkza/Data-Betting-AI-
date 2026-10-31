@@ -837,7 +837,18 @@ class JobManager:
         self.sheet_lock = threading.RLock()
         self.pool = ThreadPoolExecutor(max_workers=3)
         self.data_version = 0
-        self.upload_writes = {}  # Uncertain uploads; shared in this process only.
+        self._upload_writes = {}  # ใช้ตัวแปรภายใน
+
+    @property
+    def upload_writes(self):
+        """Property ป้องกันปัญหา Streamlit Cache เก่าไม่มี attribute นี้"""
+        if not hasattr(self, "_upload_writes"):
+            self._upload_writes = {}
+        return self._upload_writes
+
+    @upload_writes.setter
+    def upload_writes(self, val):
+        self._upload_writes = val
 
     def create(self, name, img_bytes, user_fmt, owner_id):
         job_id = uuid.uuid4().hex[:8]
