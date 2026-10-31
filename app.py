@@ -837,7 +837,7 @@ class JobManager:
         self.sheet_lock = threading.RLock()
         self.pool = ThreadPoolExecutor(max_workers=3)
         self.data_version = 0
-        self.upload_writes = 0  # 🚨 แก้ไข Error: 'JobManager' object has no attribute 'upload_writes'
+        self.upload_writes = 0  # ✅ ป้องกัน Error: 'JobManager' object has no attribute 'upload_writes'
 
     def create(self, name, img_bytes, user_fmt, owner_id):
         job_id = uuid.uuid4().hex[:8]
