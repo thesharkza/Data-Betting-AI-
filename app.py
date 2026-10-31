@@ -534,7 +534,7 @@ def validate_form5(values):
     nums = [float(v) for v in values]
     return [nums[0] / 100, int(nums[1]), int(nums[2]), nums[3] / 100, int(nums[4]), int(nums[5])]
  
-def save_row_to_sheet(ws, row, form5):
+def save_row_to_sheet(ws, row, form5, tournament_type="League"):
     normalized = validate_form5(form5)
     with JOBS.sheet_lock:
         col_a, col_b = ws.col_values(1), ws.col_values(2)
@@ -545,7 +545,8 @@ def save_row_to_sheet(ws, row, form5):
     if not overwritten: target_row = max(2, last_row + 1)
  
     requests = []
-    if ws.col_count < 29: requests.append({"appendDimension": {"sheetId": ws.id, "dimension": "COLUMNS", "length": 29 - ws.col_count}})
+    # ขยายตารางรองรับถึงคอลัมน์ 30 (AD)
+    if ws.col_count < 30: requests.append({"appendDimension": {"sheetId": ws.id, "dimension": "COLUMNS", "length": 30 - ws.col_count}})
     if target_row > ws.row_count: requests.append({"appendDimension": {"sheetId": ws.id, "dimension": "ROWS", "length": target_row - ws.row_count}})
  
     def typed(value):
@@ -557,18 +558,25 @@ def save_row_to_sheet(ws, row, form5):
         return {"updateCells": {"start": {"sheetId": ws.id, "rowIndex": start_row, "columnIndex": start_col}, "rows": [{"values": cells}], "fields": fields}}
  
     requests.append(update(0, 23, [typed(h) for h in FORM5_HEADERS], "userEnteredValue"))
+    # บันทึกหัวคอลัมน์ Tournament_Type ในช่อง AD1 (คอลัมน์ที่ 30 แถวที่ 1)
+    requests.append(update(0, 29, [typed("Tournament_Type")], "userEnteredValue"))
+    
     requests.append(update(target_row - 1, 0, [typed(v) for v in row[:12]], "userEnteredValue"))
     
     form_cells = [typed(v) for v in normalized]
     for i, cell in enumerate(form_cells):
         cell["userEnteredFormat"] = {"numberFormat": {"type": "PERCENT" if i in (0, 3) else "NUMBER", "pattern": "0.0%" if i in (0, 3) else "0"}}
     requests.append(update(target_row - 1, 23, form_cells, "userEnteredValue,userEnteredFormat.numberFormat"))
+    
+    # บันทึกประเภททัวร์นาเมนต์ (League หรือ Cup) ลงในคอลัมน์ AD (คอลัมน์ที่ 30) ของแถวนั้นๆ
+    requests.append(update(target_row - 1, 29, [typed(tournament_type)], "userEnteredValue"))
+    
     ws.spreadsheet.batch_update({"requests": requests})
     return target_row, overwritten
- 
+
 def update_match_score_in_sheet(workbook, home_team, away_team, score_text, *, sheet_row=None, expected_snapshot=None):
     """Tab 2 only: validate row identity; write one RAW text cell; verify by reading.
- 
+
     Compatible with the former four-argument call. With no row reference, refuse
     ambiguous pairs rather than taking their first matching occurrence. Locking
     only protects threads using the same JOBS instance, not other app replicas or
@@ -654,7 +662,7 @@ def update_match_score_in_sheet(workbook, home_team, away_team, score_text, *, s
             raise ScoreWriteUncertainError('ข้อมูลที่อ่านกลับไม่ตรงกับแถวและสกอร์ที่ส่ง จึงยังไม่แจ้งว่าสำเร็จ กรุณาตรวจ DATA ก่อนดำเนินการต่อ')
         journal.pop(write_key, None)
         return True
- 
+
 # ----------------------------------------
 # Job Manager (คิวงานเบื้องหลัง)
 # ----------------------------------------
@@ -665,11 +673,11 @@ class JobManager:
         self.sheet_lock = threading.RLock()
         self.pool = ThreadPoolExecutor(max_workers=3)
         self.data_version = 0
- 
+
     def create(self, name, img_bytes, user_fmt, owner_id):
         job_id = uuid.uuid4().hex[:8]
         with self.lock:
-            self.jobs[job_id] = {"id": job_id, "name": name, "status": "queued", "msg": "รอคิว...", "created": time.time(), "finished": None, "img": img_bytes, "user_fmt": user_fmt, "result": None, "note": None, "warn": None, "owner_id": owner_id, "row_data": None, "form5": None}
+            self.jobs[job_id] = {"id": job_id, "name": name, "status": "queued", "msg": "รอคิว...", "created": time.time(), "finished": None, "img": img_bytes, "user_fmt": user_fmt, "result": None, "note": None, "warn": None, "owner_id": owner_id, "row_data": None, "form5": None, "tournament_type": "League"}
         return job_id
     def get(self, job_id):
         with self.lock: return dict(self.jobs.get(job_id)) if job_id in self.jobs else None
@@ -680,13 +688,13 @@ class JobManager:
         with self.lock: self.data_version += 1
     def snapshot(self):
         with self.lock: return sorted((dict(j) for j in self.jobs.values()), key=lambda j: j["created"], reverse=True)
- 
+
 @st.cache_resource
 def get_job_manager(): return JobManager()
- 
+
 JOBS = get_job_manager()
 if "form5_owner_id" not in st.session_state: st.session_state["form5_owner_id"] = uuid.uuid4().hex
- 
+
 def extract_row(img_bytes, user_fmt, model):
     img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
     img.thumbnail((1600, 1600))
@@ -726,7 +734,7 @@ def extract_row(img_bytes, user_fmt, model):
             time.sleep(2)
             
     raise RuntimeError(f"{last_error}")
- 
+
 def extract_form_stats(img_bytes, model):
     img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
     img.thumbnail((1600, 1600))
@@ -766,7 +774,7 @@ def extract_form_stats(img_bytes, model):
             time.sleep(2)
             
     raise RuntimeError(f"ไม่สามารถอ่านภาพสถิติได้: {last_error}")
- 
+
 def process_job(job_id, workbook, model):
     try:
         job = JOBS.get(job_id)
@@ -776,23 +784,24 @@ def process_job(job_id, workbook, model):
     except Exception as e:
         JOBS.update(job_id, status="error", msg=f"{e}", finished=time.time())
     finally: gc.collect()
- 
+
 def save_confirmed_job(job_id, workbook):
     job = JOBS.get(job_id)
     if not job or job["status"] != "saving": return
     try:
         with JOBS.sheet_lock:
             ws = get_ws(workbook)
-            target_row, overwritten = save_row_to_sheet(ws, job["row_data"], job["form5"])
+            t_type = job.get("tournament_type", "League")
+            target_row, overwritten = save_row_to_sheet(ws, job["row_data"], job["form5"], t_type)
         JOBS.bump_version()
         JOBS.update(job_id, status="done", msg="บันทึกสำเร็จ", finished=time.time(), result={"home": str(job["row_data"][0]), "away": str(job["row_data"][1]), "row": target_row, "overwritten": overwritten})
     except Exception as exc:
         JOBS.update(job_id, status="error", msg=f"Save error: {exc}", finished=time.time())
- 
-def submit_form5(job_id, values, owner_id):
+
+def submit_form5(job_id, values, owner_id, tournament_type="League"):
     job = JOBS.get(job_id)
     if job and job.get("owner_id") == owner_id:
-        JOBS.update(job_id, status="saving", msg="Saving...", form5=list(values))
+        JOBS.update(job_id, status="saving", msg="Saving...", form5=list(values), tournament_type=tournament_type)
         JOBS.pool.submit(save_confirmed_job, job_id, workbook)
  
 # ----------------------------------------
@@ -861,9 +870,9 @@ def render_form5_editor():
     job = JOBS.get(job_id) if job_id else None
     if not job or job["status"] != "ready": return
     
-    panel_header("ฟอร์ม 5 นัดล่าสุด", "อัปโหลดภาพสถิติเพื่อให้ AI กรอกอัตโนมัติ หรือกรอกข้อมูลเอง")
+    panel_header("ฟอร์ม 5 นัดล่าสุด & บริบทการแข่งขัน", "อัปโหลดภาพสถิติเพื่อให้ AI กรอกอัตโนมัติ พร้อมเลือกประเภทรายการแข่งขัน")
     
-    stat_file = st.file_uploader("📸 อัปโหลดภาพฟอร์มสถิติ", type=['png', 'jpg', 'jpeg'], key=f"stat_up_{job_id}")
+    stat_file = st.file_uploader("📸 อัปโหลดภาพสถิติฟอร์ม 5 นัด", type=['png', 'jpg', 'jpeg'], key=f"stat_up_{job_id}")
     
     if stat_file and st.session_state.get(f"stat_processed_{job_id}") != stat_file.name:
         with st.spinner("🤖 AI กำลังอ่านข้อมูลสถิติ..."):
@@ -880,7 +889,11 @@ def render_form5_editor():
                 st.rerun()
             except Exception as e:
                 st.error(f"เกิดข้อผิดพลาด: {e}")
- 
+
+    # 🚨 เพิ่มตัวเลือกประเภทการแข่งขันสำหรับกฎ V5.5
+    tournament_options = ["League (บอลลีกทั่วไป)", "Cup / ACL (บอลถ้วยทวีป / เอเชีย)"]
+    selected_tournament = st.selectbox("🏆 ประเภทรายการแข่งขัน", tournament_options, key=f"tourn_{job_id}")
+
     with st.form(f"form5_{job_id}"):
         left, right = st.columns(2, gap="large")
         with left:
@@ -895,7 +908,9 @@ def render_form5_editor():
             a_ag = _f5_number('ประตูเสีย (รวม 5 นัด)', f"{job_id}_a_ag", 1, as_int=True)
             
         if st.form_submit_button('💾 บันทึกทั้งหมด', type="primary"):
-            submit_form5(job_id, [h_win, h_for, h_ag, a_win, a_for, a_ag], st.session_state["form5_owner_id"])
+            # แปลงค่าที่เลือกส่งไปบันทึก
+            t_type = "Cup" if "Cup" in selected_tournament else "League"
+            submit_form5(job_id, [h_win, h_for, h_ag, a_win, a_for, a_ag], st.session_state["form5_owner_id"], t_type)
             st.session_state.pop("form5_editing", None)
             st.rerun()
  
