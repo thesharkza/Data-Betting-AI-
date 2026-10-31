@@ -47,6 +47,9 @@ except ModuleNotFoundError:
 
 __version__ = "3.0-original-layout"
 LOGGER = logging.getLogger(__name__)
+# Requested image-extraction endpoint. Never substitute a different model locally.
+# Google may route this deprecated endpoint to a successor; inspect response metadata.
+GEMINI_IMAGE_MODEL = "gemini-3.7-flash"
 workbook = None
 JOBS = None
 AI = None
@@ -1456,9 +1459,21 @@ def list_gemini_models(api_key: str) -> list[str]:
         return sorted(m.name.removeprefix('models/') for m in client.models.list() if m.name)
 
 
-def extract_row(img_bytes: bytes, api_key: str, model_name: str):
-    if not api_key or not model_name.strip():
-        raise ValidationError('Configure GEMINI_API_KEY and select a vision-capable GEMINI_MODEL')
+def resolve_image_model(model_name: str | None = None) -> str:
+    """Pin image requests to the user's requested ID, not an old UI/secret value."""
+    selected = (model_name or GEMINI_IMAGE_MODEL).strip().removeprefix('models/')
+    if not selected:
+        selected = GEMINI_IMAGE_MODEL
+    if selected != GEMINI_IMAGE_MODEL:
+        raise ValidationError(f'This build uses {GEMINI_IMAGE_MODEL} for image extraction; no model fallback is enabled')
+    return GEMINI_IMAGE_MODEL
+
+
+def extract_row(img_bytes: bytes, api_key: str, model_name: str = GEMINI_IMAGE_MODEL,
+                *, audit: dict[str, str] | None = None):
+    if not api_key or not api_key.strip():
+        raise ValidationError('Configure GEMINI_API_KEY')
+    requested_model = resolve_image_model(model_name)
     from google import genai
     from google.genai import errors, types
     data = prepare_image(img_bytes)
@@ -1476,13 +1491,19 @@ def extract_row(img_bytes: bytes, api_key: str, model_name: str):
         for attempt in range(3):
             try:
                 response = client.models.generate_content(
-                    model=model_name.strip(),
+                    model=requested_model,
                     contents=[prompt, types.Part.from_bytes(data=data, mime_type='image/jpeg')],
                     config={'response_mime_type': 'application/json', 'response_json_schema': EXTRACT_SCHEMA},
                 )
                 if not response.text:
                     raise ValidationError('The provider returned no extractable text')
-                return clean_raw_data(response.text)
+                row, detected_format = clean_raw_data(response.text)
+                if audit is not None:
+                    # Do not infer which backend served the request if the API omits it.
+                    audit.update(requested_model=requested_model,
+                                 response_model=str(getattr(response, 'model_version', None) or ''),
+                                 extracted_at=utc_now())
+                return row, detected_format
             except errors.APIError as exc:
                 code = int(getattr(exc, 'code', 0) or 0)
                 if code not in (429, 500, 502, 503, 504) or attempt == 2:
@@ -1553,14 +1574,16 @@ def get_job_manager():
     return JobManager()
 
 
-def process_job(job_id: str, api_key: str, model_name: str):
+def process_job(job_id: str, api_key: str, model_name: str = GEMINI_IMAGE_MODEL):
     job = JOBS.get(job_id)
     if job is None:
         return
     try:
         JOBS.update(job_id, status='reading', msg='AI: กำลังอ่านภาพ')
-        row, detected = extract_row(job['img'], api_key, model_name)
+        extraction_audit: dict[str, str] = {}
+        row, detected = extract_row(job['img'], api_key, model_name, audit=extraction_audit)
         JOBS.update(job_id, status='ready', row_data=row, ai_fmt=detected,
+                    extraction_audit=extraction_audit,
                     msg='อ่านแล้ว: ตรวจราคาและกรอกฟอร์มก่อนบันทึก')
     except Exception as exc:
         # Remote-service boundary. Do not expose API keys or raw provider responses.
@@ -1935,6 +1958,11 @@ def render_jobs(polling=False):
         title = f"<div class='job-title'>{esc(home)}<span class='vs'>vs</span>{esc(away)}</div>" if home or away else ''
         result = job.get('result')
         note = f"<div class='job-note'>DATA #{int(result['row'])} | {esc(result['match_id'])}</div>" if result else ''
+        extraction_audit = job.get('extraction_audit') or {}
+        if extraction_audit:
+            requested = esc(str(extraction_audit.get('requested_model', GEMINI_IMAGE_MODEL)))
+            reported = esc(str(extraction_audit.get('response_model') or 'not reported by API'))
+            note += f"<div class='job-note'>Requested: {requested} | API reported: {reported}</div>"
         bar = "<div class='job-bar'><i></i></div>" if job['status'] in ('queued', 'reading', 'saving') else ''
         st.markdown(f"<div class='job-card {tone}'><div class='job-head'><span class='job-name'>{esc(job['name'])}</span>"
                     f"<span class='job-pill {tone}'>{label}</span></div>{title}<div class='job-msg'>{esc(job['msg'])}</div>{note}{bar}</div>",
@@ -2151,14 +2179,19 @@ def main():
     with tab1:
         api_key = str(setting('GEMINI_API_KEY'))
         with st.expander('ตั้งค่า Gemini / การอ่านภาพ'):
-            model_name = st.text_input('Gemini model', value=str(setting('GEMINI_MODEL')), key='gemini_model_name',
-                                       help='Choose a model available to your account that supports image input and structured JSON.')
+            model_name = GEMINI_IMAGE_MODEL
+            st.text_input('Gemini model', value=model_name, disabled=True,
+                          help='Pinned image-extraction request ID. The provider may route it to a successor.')
+            old_setting = str(setting('GEMINI_MODEL')).strip().removeprefix('models/')
+            if old_setting and old_setting != GEMINI_IMAGE_MODEL:
+                st.caption(f'GEMINI_MODEL setting ignored in this build; requests use {GEMINI_IMAGE_MODEL}.')
             if st.button('ดูรายชื่อโมเดล', disabled=not api_key):
                 try:
                     st.write(list_gemini_models(api_key))
                 except Exception as exc:
                     st.error(f'Cannot list models ({type(exc).__name__}). Check key and provider access.')
-            st.caption('GEMINI_API_KEY + GEMINI_MODEL | ภาพจะถูกส่งไปยัง Google เมื่อกดอ่านภาพ')
+            st.caption('GEMINI_API_KEY | API model: gemini-3.7-flash | ภาพจะถูกส่งไปยัง Google เมื่อกดอ่านภาพ')
+            st.caption('ตั้งแต่ 8 ตุลาคม 2026 Google ระบุว่าคำขอ gemini-3.7-flash ถูกส่งไป gemini-3.8-flash อัตโนมัติ; ดูรุ่นที่ API รายงานในการ์ดงาน')
         fmt_choice = st.selectbox('รูปแบบค่าน้ำ', list(FMT_CHOICES))
         up_n = st.session_state.get('up_n', 0)
         uploads = st.file_uploader('เลือกภาพตารางราคาบอล', type=['png', 'jpg', 'jpeg'], accept_multiple_files=True, key=f'uploader_{up_n}')
