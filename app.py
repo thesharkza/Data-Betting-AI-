@@ -621,11 +621,7 @@ def _check_form_headers(grid, *, writing=False):
 
 
 def save_row_to_sheet(ws, row, form5, tournament_type="League"):
-    """Keep original columns; update ONE unscored pair or append a new pair.
-
-    Refuse scored/ambiguous pairs. One process only: local locking and the
-    in-memory uncertain-write journal do not protect external writers/restarts.
-    """
+    """บันทึกข้อมูลราคาและฟอร์มเป็นแถวใหม่เสมอ โดยไม่เขียนทับหรือบล็อกคู่ซ้ำ"""
     normalized = validate_form5(form5)
     if getattr(ws, "title", "") != "DATA":
         raise ValueError("อนุญาตให้บันทึกในแท็บ DATA เท่านั้น")
@@ -646,7 +642,6 @@ def save_row_to_sheet(ws, row, form5, tournament_type="League"):
     with JOBS.sheet_lock:
         journal = _ensure_upload_journal(JOBS)
         key = _upload_write_key(ws)
-        # A delayed score write must not land after this upload changes inputs.
         score_journal = _t2_score_journal()
         for score_key, score_entry in list(score_journal.items()):
             if score_key[:2] == key:
@@ -663,27 +658,18 @@ def save_row_to_sheet(ws, row, form5, tournament_type="League"):
         grid = _t2_values(ws, "A1:AD")
         _t2_check_headers(grid)
         header = _check_form_headers(grid, writing=True)
-        matches, last_row = [], 1
+        last_row = 1
         for number, values in enumerate(grid[1:], start=2):
             vals = list(values[:30]) + [""] * max(0, 30 - len(values))
-            # Include orphan inputs/scores, not only column A. Ignore legacy
-            # formula outputs N:W when locating the next input row.
             if any(not _t2_blank(v) for v in vals[:13] + vals[23:30]):
                 last_row = number
-            pair = tuple(_t2_canonical(v, name=True).casefold() for v in vals[:2])
-            if pair == (home.casefold(), away.casefold()):
-                matches.append((number, vals))
-        if len(matches) > 1:
-            raise ScoreConflictError("พบคู่ทีมซ้ำหลายแถว จึงไม่เลือกแถวเขียนทับอัตโนมัติ")
-        overwritten = bool(matches)
-        target_row = matches[0][0] if overwritten else max(2, last_row + 1)
+
+        # 🟢 กำหนดให้บันทึกต่อท้ายเป็นแถวใหม่เสมอ (ไม่ต้องเช็คคู่ซ้ำเพื่อบล็อกหรือเขียนทับ)
+        overwritten = False
+        target_row = max(2, last_row + 1)
+
         current = _t2_read_target(ws, target_row) if target_row <= ws.row_count else [""] * 30
-        if overwritten:
-            if _t2_fingerprint(current) != _t2_fingerprint(matches[0][1]):
-                raise ScoreConflictError("ข้อมูลแถวนี้เปลี่ยนระหว่างตรวจ กรุณารีเฟรชก่อนบันทึก")
-            if not _t2_blank(current[12]):
-                raise ScoreConflictError("คู่นี้มีผลสกอร์แล้ว จึงไม่เขียนราคาหรือฟอร์มทับประวัติเดิม")
-        elif any(not _t2_blank(v) for v in current[:13] + current[23:30]):
+        if any(not _t2_blank(v) for v in current[:13] + current[23:30]):
             raise ScoreConflictError("แถวปลายทางมีข้อมูลแล้ว กรุณารีเฟรชก่อนบันทึก")
         formulas = (ws.get(range_name=f"A{target_row}:AD{target_row}", value_render_option="FORMULA")
                     if target_row <= ws.row_count else [])
@@ -694,17 +680,15 @@ def save_row_to_sheet(ws, row, form5, tournament_type="League"):
         if any(isinstance(formula_row[i], str) and formula_row[i].startswith("=")
                for i in list(range(12)) + list(range(23, 30))):
             raise ScoreConflictError("ช่องราคาหรือฟอร์มมีสูตร กรุณาตรวจแถวปลายทางก่อนบันทึก")
-        # Re-read after the formula check. This is not an atomic compare-and-swap.
+        
         fresh = _t2_read_target(ws, target_row) if target_row <= ws.row_count else [""] * 30
         if (_t2_fingerprint(fresh) != _t2_fingerprint(current)
                 or not _t2_blank(fresh[12])):
             raise ScoreConflictError("ข้อมูลแถวนี้เปลี่ยนระหว่างตรวจ กรุณารีเฟรชก่อนบันทึก")
         missing_headers = [(i, name) for i, name in enumerate(FORM5_HEADERS + ["Tournament_Type"], 23)
                            if not str(header[i]).strip()]
-        if overwritten and expected_snapshot == _t2_fingerprint(fresh) and not missing_headers:
-            return target_row, True
+        
         requests = []
-        # AD is already part of the original uploader's schema, not a new field.
         if ws.col_count < 30:
             requests.append({"appendDimension": {"sheetId": ws.id, "dimension": "COLUMNS", "length": 30 - ws.col_count}})
         if target_row > ws.row_count:
