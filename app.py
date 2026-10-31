@@ -576,6 +576,29 @@ def validate_form5(values):
         raise ValueError("จำนวนประตูต้องเป็นจำนวนเต็ม 0-500 ไม่ตัดทศนิยมอัตโนมัติ")
     return [nums[0] / 100, int(nums[1]), int(nums[2]), nums[3] / 100, int(nums[4]), int(nums[5])]
  
+def _ensure_upload_journal(manager) -> dict:
+    """Backfill a pre-upgrade cached JobManager without discarding its state.
+
+    This is a free function because cached instances can belong to an older
+    JobManager class that does not have newly added methods. Run it outside
+    the cached factory as well as at each upload-journal entry point.
+
+    Callers must hold manager.sheet_lock while using the returned dictionary.
+    The existing RLock allows this helper to be called inside a sheet write.
+    """
+    with manager.sheet_lock:
+        if not hasattr(manager, "upload_writes"):
+            manager.upload_writes = {}
+        journal = manager.upload_writes
+        if not isinstance(journal, dict):
+            # Never erase an existing journal: it may describe an uncertain write.
+            raise RuntimeError(
+                "JobManager.upload_writes must be a dict; existing state was "
+                "not reset. Stop new writes and inspect pending operations."
+            )
+        return journal
+
+
 def _upload_write_key(ws):
     return (str(ws.spreadsheet.id), str(ws.id))
 
@@ -621,7 +644,7 @@ def save_row_to_sheet(ws, row, form5, tournament_type="League"):
     expected = row + [""] * 11 + normalized + [tournament_type]
     expected_snapshot = _t2_fingerprint(expected)
     with JOBS.sheet_lock:
-        journal = JOBS.upload_writes
+        journal = _ensure_upload_journal(JOBS)
         key = _upload_write_key(ws)
         # A delayed score write must not land after this upload changes inputs.
         score_journal = _t2_score_journal()
@@ -751,11 +774,12 @@ def update_match_score_in_sheet(workbook, home_team, away_team, score_text, *, s
     with JOBS.sheet_lock:
         ws = workbook.worksheet('DATA')
         upload_key = _upload_write_key(ws)
-        upload_entry = JOBS.upload_writes.get(upload_key)
+        upload_journal = _ensure_upload_journal(JOBS)
+        upload_entry = upload_journal.get(upload_key)
         if upload_entry is not None:
             if not _upload_confirm_pending(ws, upload_entry):
                 raise ScoreWriteUncertainError("มีคำสั่งอัปโหลดที่ยังยืนยันไม่ได้ กรุณากดตรวจยืนยันคำสั่งบันทึกค้างในแท็บ 2")
-            JOBS.upload_writes.pop(upload_key, None)
+            upload_journal.pop(upload_key, None)
         _t2_check_headers(_t2_values(ws, 'A1:M1'))
         if sheet_row is None:
             data = _t2_data_from_grid(_t2_values(ws, 'A1:AD'))
@@ -837,18 +861,7 @@ class JobManager:
         self.sheet_lock = threading.RLock()
         self.pool = ThreadPoolExecutor(max_workers=3)
         self.data_version = 0
-        self._upload_writes = {}  # ใช้ตัวแปรภายใน
-
-    @property
-    def upload_writes(self):
-        """Property ป้องกันปัญหา Streamlit Cache เก่าไม่มี attribute นี้"""
-        if not hasattr(self, "_upload_writes"):
-            self._upload_writes = {}
-        return self._upload_writes
-
-    @upload_writes.setter
-    def upload_writes(self, val):
-        self._upload_writes = val
+        self.upload_writes = {}  # Uncertain uploads; shared in this process only.
 
     def create(self, name, img_bytes, user_fmt, owner_id):
         job_id = uuid.uuid4().hex[:8]
@@ -869,6 +882,9 @@ class JobManager:
 def get_job_manager(): return JobManager()
 
 JOBS = get_job_manager()
+# Run on every script rerun, including cache hits from an older class.
+# Do not clear the resource cache or replace the manager/pool/locks.
+_ensure_upload_journal(JOBS)
 if "form5_owner_id" not in st.session_state: st.session_state["form5_owner_id"] = uuid.uuid4().hex
 
 def extract_row(img_bytes, user_fmt, model):
@@ -2764,10 +2780,11 @@ def _t2_reconcile(wb):
             else:
                 unresolved += 1
         upload_key = _upload_write_key(ws)
-        upload_entry = JOBS.upload_writes.get(upload_key)
+        upload_journal = _ensure_upload_journal(JOBS)
+        upload_entry = upload_journal.get(upload_key)
         if upload_entry is not None:
             if _upload_confirm_pending(ws, upload_entry):
-                JOBS.upload_writes.pop(upload_key, None)
+                upload_journal.pop(upload_key, None)
                 confirmed += 1
                 JOBS.bump_version()
             else:
