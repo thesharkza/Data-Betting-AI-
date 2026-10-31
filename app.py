@@ -1,9 +1,14 @@
 # REVIEW CANDIDATE - OFFLINE CORE TESTED, NOT PRODUCTION CERTIFIED
 import streamlit as st
 import gspread
-import google.generativeai as genai
 from PIL import Image
 import io
+import hashlib
+from pathlib import Path
+from zoneinfo import ZoneInfo
+from runtime_config import setting, enabled, connect, require_access
+from live_store import (LiveStore, OperationJournal, StoreConflict, WriteUncertain, META_START, META_HEADERS, WIDTH, END, pad, meta, safe_grid, col_name)
+from gemini_reader import GeminiReader, normalized_image
 import os
 import re
 import json
@@ -31,6 +36,7 @@ import plotly.graph_objects as go
 # ตั้งค่าหน้าเว็บ
 # ----------------------------------------
 st.set_page_config(page_title="ระบบวิเคราะห์ราคาบอล VIP & AI", page_icon="⚽", layout="wide")
+require_access(st)
  
 # ----------------------------------------
 # THEME : Black & Emerald (Cyberpunk Monitor)
@@ -416,43 +422,33 @@ st.markdown(CYBER_CSS, unsafe_allow_html=True)
 # ----------------------------------------
 # การตั้งค่า API และ Google Sheets
 # ----------------------------------------
-# Review candidate: writes require an explicit test-environment opt-in.
-SHEET_WRITES_ENABLED = os.environ.get("ENABLE_SHEET_WRITES", "false").lower() == "true"
+# Real connection mode; writes require initialization and session arming too.
+SHEET_WRITES_ENABLED = enabled(setting(st, 'ENABLE_SHEET_WRITES', True))
 
 def _get_secret_or_env(name):
-    value = os.environ.get(name)
-    if value:
-        return value
-    try:
-        return st.secrets.get(name)
-    except (FileNotFoundError, KeyError):
-        return None
+    return setting(st, name)
 
-GEMINI_API_KEY = _get_secret_or_env("GEMINI_API_KEY")
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-else:
-    st.error("❌ ไม่พบ GEMINI_API_KEY กรุณาตั้งค่าใน Streamlit Secrets")
- 
+
+GEMINI_API_KEY = _get_secret_or_env('GEMINI_API_KEY')
+GEMINI_MODEL = str(setting(st, 'GEMINI_MODEL', 'gemini-3.8-flash'))
+
 def _has_gspread_secret():
     try: return "gspread" in st.secrets
     except Exception: return False
  
-@st.cache_resource
+@st.cache_resource(show_spinner=False)
 def init_gspread():
-    if _has_gspread_secret():
-        client = gspread.service_account_from_dict(dict(st.secrets["gspread"]))
-    else:
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        client = gspread.service_account(filename=os.path.join(base_dir, 'credentials.json'))
-    return client.open("ข้อมูลราคาบอลสกัดจากภาพ")
+    return connect(st, Path(__file__).resolve().parent)
+
  
 try:
     workbook = init_gspread()
-except Exception as e:
-    st.error(f"❌ เชื่อมต่อ Google Sheets ไม่สำเร็จ: {e}")
+    CONNECTION_ERROR = None
+except Exception as exc:
     workbook = None
- 
+    CONNECTION_ERROR = str(exc) if isinstance(exc, (ValueError, FileNotFoundError)) else type(exc).__name__
+
+
 def get_ws(wb):
     # Never redirect writes to an unrelated first tab.
     return wb.worksheet("DATA")
@@ -460,7 +456,17 @@ def get_ws(wb):
 # ----------------------------------------
 # การจัดการ Data Extraction & Google Sheets
 # ----------------------------------------
-model = genai.GenerativeModel('gemini-3.7-flash')
+@st.cache_resource(show_spinner=False)
+def get_image_reader(api_key, model_name):
+    return GeminiReader(api_key, model_name)
+
+try:
+    model = get_image_reader(GEMINI_API_KEY, GEMINI_MODEL) if GEMINI_API_KEY else None
+    READER_ERROR = None
+except Exception as exc:
+    model = None
+    READER_ERROR = type(exc).__name__
+
  
 # ประกาศตัวแปร FIELD_NAMES และ CRITICAL_IDX เพื่อป้องกันแอปพังตอนอ่านค่า
 WATER_IDX = [6, 8, 10, 11]
@@ -583,171 +589,34 @@ def validate_form5(values):
             raise ValueError("Goal counts must be nonnegative whole numbers, at most 500")
     return [nums[0] / 100, int(nums[1]), int(nums[2]), nums[3] / 100, int(nums[4]), int(nums[5])]
  
-def save_row_to_sheet(ws, row, form5, tournament_type="League"):
-    """Append only; refuse repeated pairs until immutable fixture IDs exist.
-
-    A local RLock is not a distributed transaction. Keep one writer and do not
-    sort/edit the sheet concurrently. A failed write must be reconciled manually.
-    """
-    if not SHEET_WRITES_ENABLED:
-        raise ValueError("Read-only review build. Set ENABLE_SHEET_WRITES=true only for an approved test copy")
+def save_row_to_sheet(ws, row, form5, tournament_type='Unknown', *, metadata=None,
+                      operation_id=None, allow_legacy_pair=False, _store=None):
     normalized = validate_form5(form5)
-    if tournament_type not in ("League", "Cup", "ACL"):
-        raise ValueError("Choose a known tournament type explicitly")
-    if getattr(ws, "title", "") != "DATA":
-        raise ValueError("Upload writes are restricted to DATA")
-    if len(row) != 12:
-        raise ValueError("Expected exactly 12 price fields")
-    home = _t2_canonical(row[0], name=True)
-    away = _t2_canonical(row[1], name=True)
-    if not home or not away or home.casefold() == away.casefold():
-        raise ValueError("Both distinct team names are required")
+    checked, _, _ = clean_raw_data(json.dumps(list(row) + ['MY'], allow_nan=False))
+    checked, _, _ = convert_water_to_malay(checked, 'MY', 'MY')
+    if ws.title != 'DATA':
+        raise StoreConflict('Only DATA may receive writes.')
+    if not metadata or not operation_id:
+        raise StoreConflict('Fixture metadata and a stable operation ID are required.')
     with JOBS.sheet_lock:
-        header_grid = _t2_values(ws, "A1:AD1")
-        _t2_check_headers(header_grid)
-        header = header_grid[0]
-        if len(header) < 29 or [str(v).strip() for v in header[23:29]] != FORM5_HEADERS:
-            raise ValueError("Form column positions X:AC do not match the expected schema")
-        if len(header) >= 30 and str(header[29]).strip() not in ("", "Tournament_Type"):
-            raise ValueError("Column AD is not Tournament_Type")
-        # Recheck numeric contracts even when called outside the UI.
-        record = dict(zip([_ML_HOME, _ML_AWAY] + ML_ODDS_COLUMNS, row))
-        prepared, features = _ml_prepare(pd.DataFrame([record]))
-        if not bool(prepared.iloc[0]["_ML_Valid_HDP"]) or not bool(prepared.iloc[0]["_ML_Valid_OU"]):
-            raise ValueError("Price row failed the normalized market schema")
-        col_a, col_b = ws.col_values(1), ws.col_values(2)
-        size = max(len(col_a), len(col_b))
-        last = 1
-        for i in range(1, size):
-            h = _t2_canonical(col_a[i] if i < len(col_a) else "", name=True)
-            a = _t2_canonical(col_b[i] if i < len(col_b) else "", name=True)
-            if h or a:
-                last = i + 1
-            if h.casefold() == home.casefold() and a.casefold() == away.casefold():
-                raise ValueError("Pair already exists: no overwrite is allowed without an immutable fixture ID and revision workflow")
-        target_row = max(2, last + 1)
-        requests = []
-        if ws.col_count < 30:
-            requests.append({"appendDimension": {"sheetId": ws.id, "dimension": "COLUMNS", "length": 30 - ws.col_count}})
-        if target_row > ws.row_count:
-            requests.append({"appendDimension": {"sheetId": ws.id, "dimension": "ROWS", "length": target_row - ws.row_count}})
-        def typed(value):
-            if value is None:
-                return {}
-            if isinstance(value, (int, float)) and not isinstance(value, bool):
-                if not isfinite(value):
-                    raise ValueError("Non-finite value cannot be written")
-                return {"userEnteredValue": {"numberValue": value}}
-            return {"userEnteredValue": {"stringValue": str(value)}}
-        def update(r, c, values, fields="userEnteredValue"):
-            return {"updateCells": {"start": {"sheetId": ws.id, "rowIndex": r, "columnIndex": c},
-                    "rows": [{"values": values}], "fields": fields}}
-        # Only A:L and X:AD. Never clear or reuse an existing result cell.
-        requests.append(update(0, 29, [typed("Tournament_Type")]))
-        requests.append(update(target_row - 1, 0, [typed(v) for v in [home, away] + list(row[2:])]))
-        form_cells = [typed(v) for v in normalized]
-        for i, cell in enumerate(form_cells):
-            cell["userEnteredFormat"] = {"numberFormat": {"type": "PERCENT" if i in (0, 3) else "NUMBER",
-                                                         "pattern": "0.0%" if i in (0, 3) else "0"}}
-        requests.append(update(target_row - 1, 23, form_cells, "userEnteredValue,userEnteredFormat.numberFormat"))
-        requests.append(update(target_row - 1, 29, [typed(tournament_type)]))
-        ws.spreadsheet.batch_update({"requests": requests})
-        confirmed = _t2_read_target(ws, target_row)
-        expected = [home, away] + list(row[2:]) + [""] * 11 + normalized + [tournament_type]
-        if _t2_fingerprint(confirmed) != _t2_fingerprint(expected):
-            raise ScoreWriteUncertainError("Upload dispatched but read-back differs; inspect DATA before any retry")
-        return target_row, False
+        target = (_store or get_store()).append(checked, normalized, tournament_type, metadata,
+                                    operation_id, allow_legacy_pair=allow_legacy_pair)
+    return target, False
+
 
 def update_match_score_in_sheet(workbook, home_team, away_team, score_text, *, sheet_row=None, expected_snapshot=None):
-    """Tab 2 only: validate row identity; write one RAW text cell; verify by reading.
+    require_live_write()
+    try:
+        if sheet_row is None or not expected_snapshot or isinstance(sheet_row, bool):
+            raise StoreConflict('Refresh and choose a card with a DATA row reference.')
+        with JOBS.sheet_lock:
+            return get_store().save_score(int(sheet_row), expected_snapshot, home_team,
+                                         away_team, score_text, st.session_state.get('_live_reviewer', ''))
+    except StoreConflict as exc:
+        raise ScoreConflictError(str(exc)) from exc
+    except WriteUncertain as exc:
+        raise ScoreWriteUncertainError(str(exc)) from exc
 
-    Compatible with the former four-argument call. With no row reference, refuse
-    ambiguous pairs rather than taking their first matching occurrence. Locking
-    only protects threads using the same JOBS instance, not other app replicas or
-    people sorting/editing the sheet. No automatic retries of dispatched writes.
-    """
-    if not SHEET_WRITES_ENABLED:
-        raise ScoreConflictError("Read-only review build: score writes are disabled")
-    score = _t2_parse_score(score_text)
-    if score is None:
-        raise ScoreConflictError('กรอกสกอร์เป็นข้อความ เหย้า-เยือน เช่น 2-1 หรือ 0-0 เท่านั้น')
-    normalized_score = f'{score[0]}-{score[1]}'
-    home = _t2_canonical(home_team, name=True)
-    away = _t2_canonical(away_team, name=True)
-    if not home or not away:
-        raise ScoreConflictError('ชื่อทีมไม่ครบ จึงไม่สามารถระบุแถวที่จะบันทึกได้')
-    with JOBS.sheet_lock:
-        ws = workbook.worksheet('DATA')
-        _t2_check_headers(_t2_values(ws, 'A1:M1'))
-        if sheet_row is None:
-            data = _t2_data_from_grid(_t2_values(ws, 'A1:AD'))
-            matches = data.loc[data['ทีมเหย้า'].map(lambda v: _t2_canonical(v, name=True)).eq(home)
-                               & data['ทีมเยือน'].map(lambda v: _t2_canonical(v, name=True)).eq(away)]
-            if matches.empty:
-                return False
-            if len(matches) != 1:
-                raise ScoreConflictError('พบชื่อคู่ทีมซ้ำหลายแถว กรุณารีเฟรชแล้วเลือกการ์ดที่มีเลขแถวชัดเจน')
-            target = int(matches.iloc[0]['_SheetRow'])
-            if expected_snapshot is None:
-                expected_snapshot = matches.iloc[0]['_Snapshot']
-        else:
-            if isinstance(sheet_row, (bool, np.bool_)):
-                raise ScoreConflictError('เลขแถวไม่ถูกต้อง')
-            text_row = str(sheet_row).strip()
-            if not re.fullmatch(r'[0-9]+', text_row) or int(text_row) < 2:
-                raise ScoreConflictError('เลขแถวไม่ถูกต้อง')
-            target = int(text_row)
-            if not expected_snapshot:
-                raise ScoreConflictError('ไม่มีข้อมูลอ้างอิงของแถว กรุณารีเฟรชก่อนบันทึก')
-        current = _t2_read_target(ws, target)
-        if not _t2_target_matches(current, home, away, expected_snapshot):
-            raise ScoreConflictError('ข้อมูลในแถวนี้เปลี่ยนไปหรือมีการย้ายแถว จึงยังไม่เขียนสกอร์ กรุณารีเฟรชและตรวจคู่แข่งขันอีกครั้ง')
-        write_key = _t2_write_key(workbook, ws, target)
-        journal = _t2_score_journal()
-        previous = journal.get(write_key)
-        if previous is not None:
-            if _t2_confirm_pending(ws, previous):
-                del journal[write_key]
-                if _t2_parse_score(previous['score']) == score:
-                    return True
-                raise ScoreConflictError('ยืนยันว่าคำสั่งก่อนหน้าบันทึกสกอร์อื่นแล้ว จึงไม่เขียนทับ')
-            raise ScoreWriteUncertainError('มีคำสั่งลงสกอร์แถวนี้ที่ยังยืนยันไม่ได้ จึงไม่ส่งซ้ำ กดตรวจยืนยันสกอร์ที่บันทึกค้างและตรวจ DATA ก่อน')
-        old_score = current[12]
-        if not _t2_blank(old_score):
-            if _t2_parse_score(old_score) == score:
-                return True
-            raise ScoreConflictError('แถวนี้มีสกอร์หรือค่าที่ไม่ใช่ช่องว่างอยู่แล้ว จึงไม่เขียนทับ กรุณาตรวจคอลัมน์ M ใน DATA')
-        formula_rows = ws.get(range_name=f'M{target}', value_render_option='FORMULA')
-        formula_value = formula_rows[0][0] if formula_rows and formula_rows[0] else ''
-        if not _t2_blank(formula_value):
-            raise ScoreConflictError('ช่องสกอร์มีสูตรหรือมีข้อมูลเปลี่ยนระหว่างตรวจ จึงไม่เขียนทับ กรุณาตรวจคอลัมน์ M')
-        entry = {'row': target, 'snapshot': _t2_fingerprint(current), 'score': normalized_score}
-        journal[write_key] = entry
-        try:
-            ws.update(range_name=f'M{target}', values=[[normalized_score]], value_input_option='RAW')
-        except Exception as write_error:
-            # A timeout does not prove failure. A read may confirm it succeeded.
-            try:
-                confirmed = _t2_confirm_pending(ws, entry)
-            except Exception:
-                confirmed = False
-            if confirmed:
-                journal.pop(write_key, None)
-                return True
-            response_code = getattr(getattr(write_error, 'response', None), 'status_code', None)
-            if response_code in (400, 401, 403, 404, 422, 429) or isinstance(write_error, TypeError):
-                # Explicit rejection / local argument mismatch: no accepted write.
-                journal.pop(write_key, None)
-                raise
-            raise ScoreWriteUncertainError('ส่งคำสั่งลงสกอร์แล้ว แต่ยังยืนยันผลไม่ได้ จึงไม่เขียนซ้ำ กรุณาตรวจ DATA และกดตรวจยืนยันสกอร์ที่บันทึกค้าง') from write_error
-        try:
-            confirmed = _t2_confirm_pending(ws, entry)
-        except Exception as read_error:
-            raise ScoreWriteUncertainError('บริการตอบรับคำสั่งแล้ว แต่ยังอ่านกลับยืนยันไม่ได้ กรุณาตรวจ DATA ก่อนบันทึกซ้ำ') from read_error
-        if not confirmed:
-            raise ScoreWriteUncertainError('ข้อมูลที่อ่านกลับไม่ตรงกับแถวและสกอร์ที่ส่ง จึงยังไม่แจ้งว่าสำเร็จ กรุณาตรวจ DATA ก่อนดำเนินการต่อ')
-        journal.pop(write_key, None)
-        return True
 
 # ----------------------------------------
 # Job Manager (คิวงานเบื้องหลัง)
@@ -755,25 +624,55 @@ def update_match_score_in_sheet(workbook, home_team, away_team, score_text, *, s
 class JobManager:
     def __init__(self):
         self.jobs = {}
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.sheet_lock = threading.RLock()
-        self.pool = ThreadPoolExecutor(max_workers=3)
+        self.pool = ThreadPoolExecutor(max_workers=2)
         self.data_version = 0
 
     def create(self, name, img_bytes, user_fmt, owner_id):
-        job_id = uuid.uuid4().hex[:8]
+        if img_bytes and len(img_bytes) > 10 * 1024 * 1024:
+            raise ValueError('Maximum upload size is 10 MB per image.')
+        if img_bytes:
+            normalized_image(img_bytes)
         with self.lock:
-            self.jobs[job_id] = {"id": job_id, "name": name, "status": "queued", "msg": "รอคิว...", "created": time.time(), "finished": None, "img": img_bytes, "user_fmt": user_fmt, "result": None, "note": None, "warn": None, "owner_id": owner_id, "row_data": None, "form5": None, "tournament_type": "League"}
+            stale = [k for k,j in self.jobs.items() if j['status'] in ('done','error')
+                     and time.time() - (j.get('finished') or j['created']) > 3600]
+            for k in stale:
+                self.jobs.pop(k)
+            active = [j for j in self.jobs.values() if j['status'] not in ('done','error')]
+            if len(active) >= 50 or sum(j['owner_id'] == owner_id for j in active) >= 10:
+                raise ValueError('Queue is full. Complete or clear existing entries first.')
+            job_id = uuid.uuid4().hex
+            self.jobs[job_id] = {
+                'id': job_id, 'name': name, 'status': 'queued' if img_bytes else 'ready',
+                'msg': 'Waiting for image service' if img_bytes else 'Manual entry',
+                'created': time.time(), 'finished': None, 'img': img_bytes,
+                'user_fmt': user_fmt, 'ai_fmt': 'UNK', 'result': None, 'note': None,
+                'warn': None, 'owner_id': owner_id, 'row_data': ['',''] + [None]*10,
+                'form5': None, 'tournament_type': 'Unknown',
+                'operation_id': uuid.uuid4().hex,
+                'source_sha256': hashlib.sha256(img_bytes).hexdigest() if img_bytes else '',
+                'actual_model': 'manual', 'metadata': {}, 'allow_legacy_pair': False,
+            }
         return job_id
+
     def get(self, job_id):
-        with self.lock: return dict(self.jobs.get(job_id)) if job_id in self.jobs else None
-    def update(self, job_id, **kw):
         with self.lock:
-            if job_id in self.jobs: self.jobs[job_id].update(kw)
+            return dict(self.jobs[job_id]) if job_id in self.jobs else None
+
+    def update(self, job_id, **kwargs):
+        with self.lock:
+            if job_id in self.jobs:
+                self.jobs[job_id].update(kwargs)
+
     def bump_version(self):
-        with self.lock: self.data_version += 1
+        with self.lock:
+            self.data_version += 1
+
     def snapshot(self):
-        with self.lock: return sorted((dict(j) for j in self.jobs.values()), key=lambda j: j["created"], reverse=True)
+        with self.lock:
+            return sorted((dict(j) for j in self.jobs.values()), key=lambda j: j['created'], reverse=True)
+
 
 @st.cache_resource
 def get_job_manager(): return JobManager()
@@ -782,113 +681,72 @@ JOBS = get_job_manager()
 if "form5_owner_id" not in st.session_state: st.session_state["form5_owner_id"] = uuid.uuid4().hex
 
 def extract_row(img_bytes, user_fmt, model):
-    img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
-    img.thumbnail((1600, 1600))
-    buf = io.BytesIO()
-    img.save(buf, format='JPEG', quality=85)
-    
-    prompt = (
-        "กรุณาดึงข้อมูลจากตารางราคาบอลในภาพนี้ เลือกมา 1 คู่ที่เห็นชัดที่สุด\n"
-        "**สำคัญมาก: ตอบกลับเฉพาะข้อมูลแบบ JSON Array เท่านั้น ห้ามพิมพ์คำอธิบายหรือตัวหนังสืออื่นๆ เด็ดขาด**\n"
-        "[\"ทีมเหย้า\", \"ทีมเยือน\", 1X2เหย้า, 1X2เสมอ, 1X2เยือน, HDPเหย้า, น้ำHDPเหย้า, HDPเยือน, น้ำHDPเยือน, โกลสูงต่ำ, น้ำสูง, น้ำต่ำ, \"รูปแบบน้ำเช่น MY\"]\n"
-        "ตัวอย่างที่ต้องการ:\n"
-        "[\"Arsenal\", \"Chelsea\", 2.10, 3.50, 3.20, -0.5, 0.95, 0.5, -0.85, 2.5, 0.80, -0.90, \"MY\"]"
-    )
-    
-    safety_settings = [
-        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"}
-    ]
-    
-    last_error = ""
-    for attempt in range(3):
-        try:
-            resp = model.generate_content([{"mime_type": "image/jpeg", "data": buf.getvalue()}, prompt], safety_settings=safety_settings)
-            if getattr(resp, 'prompt_feedback', None) and resp.prompt_feedback.block_reason:
-                raise ValueError("ภาพถูกเซ็นเซอร์โดยระบบ Safety ของ Google")
-                
-            raw_text = resp.text.strip()
-            if not raw_text: raise ValueError("AI ตอบกลับเป็นค่าว่าง (Empty Response)")
-                
-            row, ai_fmt, parse_warn = clean_raw_data(raw_text)
-            row, note, fmt_warn = convert_water_to_malay(row, user_fmt, ai_fmt)
-            return row, note, (" | ".join(w for w in (parse_warn, fmt_warn) if w) or None)
-        except Exception as e:
-            last_error = str(e)
-            time.sleep(2)
-            
-    raise RuntimeError(f"{last_error}")
+    if model is None:
+        raise ValueError('GEMINI_API_KEY is missing; use manual entry.')
+    return model.prices(img_bytes)
+
 
 def extract_form_stats(img_bytes, model):
-    img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
-    img.thumbnail((1600, 1600))
-    buf = io.BytesIO()
-    img.save(buf, format='JPEG', quality=85)
-    
-    prompt = (
-        "กรุณาดึงข้อมูลสถิติจากภาพ (ฟอร์มการเล่น) โดยตอบกลับเป็น JSON Array ที่มีตัวเลข 6 ตัวแบบนี้เท่านั้น ห้ามพิมพ์คำอธิบายอื่นเด็ดขาด:\n"
-        "[WinRateเหย้า, ประตูได้เหย้า, ประตูเสียเหย้า, WinRateเยือน, ประตูได้เยือน, ประตูเสียเยือน]\n"
-        "หมายเหตุ: ทีมบนคือเหย้า ทีมล่างคือเยือน WinRate ให้ใส่เฉพาะตัวเลข (เช่น 40% ให้ใส่ 40)"
-    )
-    
-    safety_settings = [
-        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"}
-    ]
-    
-    last_error = ""
-    for attempt in range(3):
-        try:
-            resp = model.generate_content([{"mime_type": "image/jpeg", "data": buf.getvalue()}, prompt], safety_settings=safety_settings)
-            raw_text = resp.text.strip()
-            
-            raw_text = re.sub(r'^```(?:json)?\s*', '', raw_text, flags=re.IGNORECASE)
-            raw_text = re.sub(r'\s*```$', '', raw_text).strip()
-            
-            match_array = re.search(r'\[(.*)\]', raw_text, re.DOTALL)
-            if match_array:
-                data = json.loads("[" + match_array.group(1).strip() + "]")
-                if len(data) >= 6:
-                    return [float(data[0]), int(data[1]), int(data[2]), float(data[3]), int(data[4]), int(data[5])]
-            raise ValueError(f"รูปแบบไม่ถูกต้อง: {raw_text}")
-        except Exception as e:
-            last_error = str(e)
-            time.sleep(2)
-            
-    raise RuntimeError(f"ไม่สามารถอ่านภาพสถิติได้: {last_error}")
+    if model is None:
+        raise ValueError('GEMINI_API_KEY is missing; enter form statistics manually.')
+    result = model.form(img_bytes)
+    normalized = validate_form5(result.values)
+    return [normalized[0]*100, normalized[1], normalized[2],
+            normalized[3]*100, normalized[4], normalized[5]]
+
 
 def process_job(job_id, workbook, model):
-    try:
-        job = JOBS.get(job_id)
-        JOBS.update(job_id, status="reading", msg="🤖 AI กำลังอ่านราคา...")
-        row, note, warn = extract_row(job["img"], job["user_fmt"], model)
-        JOBS.update(job_id, status="ready", msg='อ่านราคาแล้ว', row_data=list(row), note=note, warn=warn, img=None)
-    except Exception as e:
-        JOBS.update(job_id, status="error", msg=f"{e}", finished=time.time())
-    finally: gc.collect()
-
-def save_confirmed_job(job_id, workbook):
     job = JOBS.get(job_id)
-    if not job or job["status"] != "saving": return
+    if not job:
+        return
     try:
-        with JOBS.sheet_lock:
-            ws = get_ws(workbook)
-            t_type = job.get("tournament_type", "League")
-            target_row, overwritten = save_row_to_sheet(ws, job["row_data"], job["form5"], t_type)
-        JOBS.bump_version()
-        JOBS.update(job_id, status="done", msg="บันทึกสำเร็จ", finished=time.time(), result={"home": str(job["row_data"][0]), "away": str(job["row_data"][1]), "row": target_row, "overwritten": overwritten})
+        JOBS.update(job_id, status='reading', msg='Reading image; no database write')
+        result = extract_row(job['img'], job['user_fmt'], model)
+        JOBS.update(job_id, status='ready', msg='Review all fields before saving',
+                    row_data=result.values, ai_fmt=result.odds_format,
+                    actual_model=result.actual_model,
+                    note=f'Model: {result.actual_model}; detected format: {result.odds_format}')
     except Exception as exc:
-        JOBS.update(job_id, status="error", msg=f"Save error: {exc}", finished=time.time())
+        JOBS.update(job_id, status='ready', msg='Image could not be extracted; manual editing remains available',
+                    warn=safe_problem(exc))
+    finally:
+        gc.collect()
 
-def submit_form5(job_id, values, owner_id, tournament_type="League"):
+
+def save_confirmed_job(job_id, workbook, store):
     job = JOBS.get(job_id)
-    if job and job.get("owner_id") == owner_id:
-        JOBS.update(job_id, status="saving", msg="Saving...", form5=list(values), tournament_type=tournament_type)
-        JOBS.pool.submit(save_confirmed_job, job_id, workbook)
+    if not job or job['status'] != 'saving':
+        return
+    try:
+        target, overwritten = save_row_to_sheet(get_ws(workbook), job['row_data'], job['form5'],
+            job['tournament_type'], metadata=job['metadata'], operation_id=job['operation_id'],
+            allow_legacy_pair=job.get('allow_legacy_pair', False), _store=store)
+        JOBS.bump_version()
+        JOBS.update(job_id, status='done', msg='Saved and verified by reading DATA', finished=time.time(),
+                    img=None, result={'home':job['row_data'][0], 'away':job['row_data'][1],
+                                      'row':target, 'overwritten':False})
+    except WriteUncertain as exc:
+        JOBS.bump_version()
+        JOBS.update(job_id, status='error', msg=str(exc), warn='Use Connection > Reconcile; do not upload this fixture again.',
+                    finished=time.time(), img=None)
+    except Exception as exc:
+        JOBS.update(job_id, status='ready', msg='Not saved: ' + safe_problem(exc))
+
+
+def submit_form5(job_id, values, owner_id, tournament_type='Unknown', *, row=None, metadata=None, allow_legacy_pair=False):
+    require_live_write()
+    job = JOBS.get(job_id)
+    if not job or job.get('owner_id') != owner_id or job['status'] != 'ready':
+        raise StoreConflict('This draft is no longer editable.')
+    validate_form5(values)
+    with JOBS.lock:
+        if JOBS.jobs[job_id]['status'] != 'ready':
+            raise StoreConflict('This draft has already been submitted.')
+        JOBS.update(job_id, status='saving', msg='Saving and verifying...', form5=list(values),
+                    row_data=list(row), tournament_type=tournament_type, metadata=dict(metadata),
+                    allow_legacy_pair=allow_legacy_pair)
+    JOBS.pool.submit(save_confirmed_job, job_id, workbook, get_store())
+
  
 # ----------------------------------------
 # UI: Upload & Tasks
@@ -900,12 +758,15 @@ def panel_header(title, sub): st.markdown(f"<p class='panel-title'>{title}</p><p
  
 def _render_job_signal(res):
     ai = get_ai()
-    if ai is None or ai["status"] != "ok": return
-    dfp = ai["df_predict"]
-    if len(dfp) == 0 or 'AI_ฟันธง_HDP' not in dfp.columns: return
-    m = dfp[(dfp['ทีมเหย้า'].astype(str).str.strip() == str(res['home']).strip()) & (dfp['ทีมเยือน'].astype(str).str.strip() == str(res['away']).strip())]
-    if m.empty: return
-    st.markdown(_card_from_row(int(res['row']), m.iloc[-1], solo=True), unsafe_allow_html=True)
+    if not isinstance(ai, dict) or ai.get('status') != 'ok':
+        return
+    dfp = ai['df_predict']
+    if dfp.empty or '_SheetRow' not in dfp:
+        return
+    matches = dfp.loc[dfp['_SheetRow'].eq(int(res['row']))]
+    if len(matches) == 1:
+        st.markdown(_card_from_row(int(res['row']), matches.iloc[0], solo=True), unsafe_allow_html=True)
+
  
 def render_jobs(polling=False):
     jobs = [j for j in JOBS.snapshot() if j.get("owner_id") == st.session_state["form5_owner_id"]]
@@ -938,8 +799,10 @@ def render_jobs(polling=False):
  
 def clear_owner_jobs(owner_id):
     with JOBS.lock:
-        for k in [k for k, j in JOBS.jobs.items() if j.get("owner_id") == owner_id and j["status"] != "saving"]:
-            JOBS.jobs.pop(k)
+        for key in [k for k,j in JOBS.jobs.items() if j.get('owner_id') == owner_id
+                    and j['status'] in ('done','error','ready')]:
+            JOBS.jobs.pop(key)
+
  
 def clear_upload_page():
     clear_owner_jobs(st.session_state["form5_owner_id"])
@@ -952,69 +815,98 @@ def _f5_number(label, key, step, as_int=False):
     return st.number_input(label, step=step, key=key, **bounds, **kwargs)
  
 def render_form5_editor():
-    job_id = st.session_state.get("form5_editing")
+    job_id = st.session_state.get('form5_editing')
     job = JOBS.get(job_id) if job_id else None
-    if not job or job["status"] != "ready": return
-    
-    panel_header("ฟอร์ม 5 นัดล่าสุด & บริบทการแข่งขัน", "อัปโหลดภาพสถิติเพื่อให้ AI กรอกอัตโนมัติ พร้อมเลือกประเภทรายการแข่งขัน")
-    
-    stat_file = st.file_uploader("📸 อัปโหลดภาพสถิติฟอร์ม 5 นัด", type=['png', 'jpg', 'jpeg'], key=f"stat_up_{job_id}")
-    
-    if stat_file and st.session_state.get(f"stat_processed_{job_id}") != stat_file.name:
-        with st.spinner("🤖 AI กำลังอ่านข้อมูลสถิติ..."):
-            try:
-                form_data = extract_form_stats(stat_file.getvalue(), model)
-                st.session_state[f"{job_id}_h_win"] = form_data[0]
-                st.session_state[f"{job_id}_h_for"] = form_data[1]
-                st.session_state[f"{job_id}_h_ag"] = form_data[2]
-                st.session_state[f"{job_id}_a_win"] = form_data[3]
-                st.session_state[f"{job_id}_a_for"] = form_data[4]
-                st.session_state[f"{job_id}_a_ag"] = form_data[5]
-                st.session_state[f"stat_processed_{job_id}"] = stat_file.name
-                st.toast("✅ ดึงข้อมูลสถิติสำเร็จ!")
-                st.rerun()
-            except Exception as e:
-                st.error(f"เกิดข้อผิดพลาด: {e}")
-
-    # 🚨 เพิ่มตัวเลือกประเภทการแข่งขันสำหรับกฎ V5.5
-    tournament_options = ["League (บอลลีกทั่วไป)", "Cup / ACL (บอลถ้วยทวีป / เอเชีย)"]
-    selected_tournament = st.selectbox("🏆 ประเภทรายการแข่งขัน", tournament_options, key=f"tourn_{job_id}")
-
-    with st.form(f"form5_{job_id}"):
-        left, right = st.columns(2, gap="large")
+    if not job or job['status'] != 'ready':
+        return
+    panel_header('\u0e15\u0e23\u0e27\u0e08\u0e41\u0e25\u0e30\u0e41\u0e01\u0e49\u0e44\u0e02\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25 / Review',
+                 'Check all prices, source format, last-five statistics and fixture time before saving.')
+    if job.get('img'):
+        with st.expander('Source image', expanded=False):
+            st.image(job['img'], width=650)
+    stat_file = st.file_uploader('Last-five statistics image (optional)', type=['png','jpg','jpeg'],
+                                 key=f'stat_up_{job_id}', disabled=model is None)
+    if stat_file:
+        file_hash = hashlib.sha256(stat_file.getvalue()).hexdigest()
+        if st.session_state.get(f'stat_processed_{job_id}') != file_hash:
+            with st.spinner('Reading last-five statistics...'):
+                try:
+                    form_data = extract_form_stats(stat_file.getvalue(), model)
+                    for suffix, value in zip(('h_win','h_for','h_ag','a_win','a_for','a_ag'), form_data):
+                        st.session_state[f'{job_id}_{suffix}'] = value
+                    st.session_state[f'stat_processed_{job_id}'] = file_hash
+                except Exception as exc:
+                    st.session_state[f'stat_processed_{job_id}'] = file_hash
+                    st.warning(safe_problem(exc))
+    defaults = job.get('row_data') or ['','']+[None]*10
+    formats = ['Choose...', 'MY', 'HK', 'ID', 'EU']
+    preferred = job.get('user_fmt') or job.get('ai_fmt') or 'UNK'
+    local_tz = ZoneInfo(str(setting(st, 'APP_TIMEZONE', 'Asia/Bangkok')))
+    captured_default = datetime.fromtimestamp(job['created'], local_tz).replace(microsecond=0).isoformat()
+    with st.form(f'form5_{job_id}'):
+        st.markdown('**1. Prices from the source (before conversion)**')
+        left, right = st.columns(2)
+        raw = []
+        for i in range(2):
+            with (left if i == 0 else right):
+                raw.append(st.text_input(FIELD_NAMES[i], value=str(defaults[i] or ''), key=f'{job_id}_price_{i}'))
+        grid = st.columns(3)
+        for i in range(2,12):
+            with grid[(i-2)%3]:
+                value = '' if defaults[i] is None else str(defaults[i])
+                raw.append(st.text_input(FIELD_NAMES[i], value=value, key=f'{job_id}_price_{i}'))
+        fmt = st.selectbox('Confirm the FOUR water-odds format; 1X2 is always Decimal', formats,
+                          index=formats.index(preferred) if preferred in formats else 0, key=f'{job_id}_fmt')
+        st.caption('MY = Malay | HK = Hong Kong | ID = Indonesian | EU = Decimal. No magnitude-based guessing.')
+        st.markdown('**2. Last FIVE matches (missing is not zero)**')
+        left, right = st.columns(2)
         with left:
-            st.markdown(f"<div class='fx-side'><small>HOME</small>{esc(str(job['row_data'][0]))}</div>", unsafe_allow_html=True)
-            h_win = _f5_number('Win Rate เหย้า (%)', f"{job_id}_h_win", 20.)
-            h_for = _f5_number('ประตูได้ (รวม 5 นัด)', f"{job_id}_h_for", 1, as_int=True)
-            h_ag = _f5_number('ประตูเสีย (รวม 5 นัด)', f"{job_id}_h_ag", 1, as_int=True)
+            h_win = _f5_number('Home win rate (%)', f'{job_id}_h_win', 20.)
+            h_for = _f5_number('Home goals for (five-match total)', f'{job_id}_h_for', 1, as_int=True)
+            h_ag = _f5_number('Home goals against (five-match total)', f'{job_id}_h_ag', 1, as_int=True)
         with right:
-            st.markdown(f"<div class='fx-side away'><small>AWAY</small>{esc(str(job['row_data'][1]))}</div>", unsafe_allow_html=True)
-            a_win = _f5_number('Win Rate เยือน (%)', f"{job_id}_a_win", 20.)
-            a_for = _f5_number('ประตูได้ (รวม 5 นัด)', f"{job_id}_a_for", 1, as_int=True)
-            a_ag = _f5_number('ประตูเสีย (รวม 5 นัด)', f"{job_id}_a_ag", 1, as_int=True)
-            
-        if st.form_submit_button('💾 บันทึกทั้งหมด', type="primary"):
-            # แปลงค่าที่เลือกส่งไปบันทึก
-            t_type = "Cup" if "Cup" in selected_tournament else "League"
-            values = [h_win, h_for, h_ag, a_win, a_for, a_ag]
-            try:
-                validate_form5(values)
-            except ValueError as exc:
-                st.warning(str(exc))
-            else:
-                submit_form5(job_id, values, st.session_state["form5_owner_id"], t_type)
-                st.session_state.pop("form5_editing", None)
-                st.rerun()
+            a_win = _f5_number('Away win rate (%)', f'{job_id}_a_win', 20.)
+            a_for = _f5_number('Away goals for (five-match total)', f'{job_id}_a_for', 1, as_int=True)
+            a_ag = _f5_number('Away goals against (five-match total)', f'{job_id}_a_ag', 1, as_int=True)
+        st.markdown('**3. Fixture identity and observation times**')
+        tournament = st.selectbox('Tournament type', ['Unknown','League','Cup','ACL'], key=f'{job_id}_tournament')
+        kickoff = st.text_input('Kickoff: YYYY-MM-DDTHH:MM:SS+07:00', key=f'{job_id}_kickoff',
+                                placeholder='Use the real scheduled kickoff with its timezone')
+        captured = st.text_input('Odds observed at (confirm against source)', value=captured_default, key=f'{job_id}_captured')
+        form_asof = st.text_input('Form known as of (not later than odds observation)', value=captured_default, key=f'{job_id}_asof')
+        st.caption('Upload time is suggested only for review. Correct it if the image was captured earlier. Historic times are never invented.')
+        legacy_confirm = st.checkbox('If this pair exists in undated legacy rows, I confirm this is a DIFFERENT fixture.', key=f'{job_id}_legacy')
+        confirmed = st.checkbox('I verified all fields against the source, the home/away order and the fixture times.', key=f'{job_id}_reviewed')
+        save = st.form_submit_button('Save NEW fixture to DATA / \u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01', type='primary')
+    if save:
+        try:
+            if not confirmed:
+                raise StoreConflict('Confirm the reviewed fields before saving.')
+            if fmt not in FMT_LABELS:
+                raise StoreConflict('Select the source water-odds format explicitly.')
+            cleaned, ai_fmt, warn = clean_raw_data(json.dumps(raw+[fmt], ensure_ascii=False))
+            normalized, note, _ = convert_water_to_malay(cleaned, fmt, ai_fmt)
+            metadata = {'Kickoff_UTC':kickoff, 'Captured_UTC':captured, 'Form_AsOf_UTC':form_asof,
+                        'Reviewer':st.session_state.get('_live_reviewer',''),
+                        'Source_SHA256':job.get('source_sha256',''), 'Source_Model':job.get('actual_model','manual')}
+            submit_form5(job_id, [h_win,h_for,h_ag,a_win,a_for,a_ag], st.session_state['form5_owner_id'],
+                         tournament, row=normalized, metadata=metadata, allow_legacy_pair=legacy_confirm)
+            st.session_state.pop('form5_editing',None)
+        except Exception as exc:
+            st.error(safe_problem(exc))
+        else:
+            st.rerun()
+
  
 # ----------------------------------------
-# AI : V5.3-AI-TRAPS (UI / OCR / sheet writes are not modified)
+# AI: audited legacy engine; the LIVE layer revises UI, extraction and storage.
 # -----------------------------------------------------------------------------
 # This block is the complete prediction engine. It intentionally does not write
 # to Sheets, change widgets, invent missing odds, or train on legacy formulas.
 import copy as _ml_copy
 import hashlib as _ml_hashlib
  
-ML_PATCH_VERSION = "V5.3-AUDIT-RESEARCH-20261031"
+ML_PATCH_VERSION = "LIVE-1.0-AUDITED"
 ML_CONFIG = {
     "seed": 42,
     "min_rows": 100,
@@ -1787,8 +1679,8 @@ def compute_ai(df_in):
  
 # The original DATA loader is retained for compatibility with callers.
 def load_dashboard_data(_workbook, version=0):
-    with JOBS.sheet_lock:
-        return pd.DataFrame(get_ws(_workbook).get_all_records())
+    return _t2_load_data(_workbook, str(_workbook.id), version)
+
  
  
 def get_ai():
@@ -1872,9 +1764,9 @@ def _match_card_html(n, home, away, hdp_line, ou_line, hdp_prob, ou_prob, hdp_ve
             f"<div class='mon-teams'><span class='mon-t'>{esc(home)}</span>{_ecg_svg()}<span class='mon-t r'>{esc(away)}</span></div>"
             "<div class='mon-ch'>"
             + _channel_html("CH1", "HANDICAP", f"เหย้า {_fmt_num(hdp_line, True)}", hdp_prob, hdp_verdict,
-                            _TONE_COLORS["hdp"][t1], "โอกาสคว้ากำไรแฮนดิแคป", "เยือน", "เหย้า")
+                            _TONE_COLORS["hdp"][t1], "Home positive | excluding push", "เยือน", "เหย้า")
             + _channel_html("CH2", "OVER / UNDER", f"ไลน์ {_fmt_num(ou_line)}", ou_prob, ou_verdict,
-                            _TONE_COLORS["ou"][t2], "โอกาสคว้ากำไรสูงต่ำ", "ต่ำ", "สูง")
+                            _TONE_COLORS["ou"][t2], "Over positive | excluding push", "ต่ำ", "สูง")
             + "</div></div>")
  
 def _card_from_row(n, r, solo=False):
@@ -2545,20 +2437,20 @@ def _t2_canonical(value, *, name=False):
  
  
 def _t2_fingerprint(values):
-    """Fingerprint A:L and X:AD, including tournament type; ignore M:W."""
-    import hashlib
-    padded = list(values[:30]) + [''] * max(0, 30 - len(values))
-    inputs = padded[:12] + padded[23:30]
-    normalized = [_t2_canonical(v, name=i < 2) for i, v in enumerate(inputs)]
+    padded = pad(values)
+    inputs = padded[:12] + padded[23:30] + padded[META_START:META_START+10]
+    normalized = [_t2_canonical(v, name=i<2) for i,v in enumerate(inputs)]
     return hashlib.sha256(json.dumps(normalized, ensure_ascii=False).encode('utf-8')).hexdigest()
+
  
  
 def _t2_record_fingerprint(record):
-    values = [record.get(c, '') for c in [_ML_HOME, _ML_AWAY] + ML_ODDS_COLUMNS]
-    values += [''] * 11
-    values += [record.get(c, '') for c in FORM5_HEADERS]
-    values += [record.get('Tournament_Type', '')]
+    values = [record.get(c,'') for c in [_ML_HOME,_ML_AWAY]+ML_ODDS_COLUMNS]
+    values += ['']*11 + [record.get(c,'') for c in FORM5_HEADERS]
+    values += [record.get('Tournament_Type','')] + ['']*3
+    values += [record.get(c,'') for c in META_HEADERS]
     return _t2_fingerprint(values)
+
  
  
 def _t2_values(ws, cell_range):
@@ -2575,39 +2467,42 @@ def _t2_check_headers(values):
  
 def _t2_data_from_grid(grid):
     _t2_check_headers(grid)
-    header = grid[0]
-    if len(header) < 29 or [str(v).strip() for v in header[23:29]] != FORM5_HEADERS:
-        raise ScoreConflictError("Expected form headers at X:AC; refusing a shifted schema")
-    if len(header) >= 30 and str(header[29]).strip() not in ('', 'Tournament_Type'):
-        raise ScoreConflictError("Expected Tournament_Type at AD")
-    core = [_ML_HOME, _ML_AWAY] + ML_ODDS_COLUMNS + [_ML_SCORE]
-    columns = core + FORM5_HEADERS + ['Tournament_Type', '_SheetRow', '_Snapshot', '_ScoreStatus', '_Issue']
-    records = []
-    for sheet_row, values in enumerate(grid[1:], start=2):
-        vals = list(values[:30]) + [''] * max(0, 30 - len(values))
+    header = pad(grid[0])
+    if [str(v).strip() for v in header[23:29]] != FORM5_HEADERS:
+        raise ScoreConflictError('Expected form headers at X:AC; refusing a shifted schema.')
+    if str(header[29]).strip() not in ('','Tournament_Type'):
+        raise ScoreConflictError('Expected Tournament_Type at AD.')
+    actual_meta = [str(v).strip() for v in header[META_START:]]
+    if any(actual_meta) and actual_meta != META_HEADERS:
+        raise ScoreConflictError('Metadata columns AH:AT have an incompatible schema.')
+    core = [_ML_HOME,_ML_AWAY]+ML_ODDS_COLUMNS+[_ML_SCORE]
+    columns = core+FORM5_HEADERS+['Tournament_Type']+META_HEADERS+['_SheetRow','_Snapshot','_ScoreStatus','_Issue']
+    records=[]
+    for sheet_row, values in enumerate(grid[1:],2):
+        vals=pad(values)
         if _t2_blank(vals[0]) and _t2_blank(vals[1]):
             continue
-        record = dict(zip(core, vals[:13]))
-        record.update(dict(zip(FORM5_HEADERS, vals[23:29])))
-        record['Tournament_Type'] = vals[29]
-        names_ok = not _t2_blank(vals[0]) and not _t2_blank(vals[1])
-        score = _t2_parse_score(vals[12])
-        status = 'pending' if _t2_blank(vals[12]) else 'finished' if score is not None else 'invalid'
-        issue = '' if status != 'invalid' else 'Score is not a text score such as 2-1'
-        if not names_ok:
-            status, issue = 'invalid', 'One or both team names are missing'
-        record.update(_SheetRow=sheet_row, _Snapshot=_t2_fingerprint(vals), _ScoreStatus=status, _Issue=issue)
+        record=dict(zip(core,vals[:13]))
+        record.update(dict(zip(FORM5_HEADERS,vals[23:29])))
+        record['Tournament_Type']=vals[29]
+        record.update(meta(vals))
+        score=_t2_parse_score(vals[12])
+        status='pending' if _t2_blank(vals[12]) else 'finished' if score is not None else 'invalid'
+        issue='' if status!='invalid' else 'Score must be text such as 2-1, not a date or number.'
+        if _t2_blank(vals[0]) or _t2_blank(vals[1]):
+            status,issue='invalid','One or both team names are missing.'
+        record.update(_SheetRow=sheet_row,_Snapshot=_t2_fingerprint(vals),_ScoreStatus=status,_Issue=issue)
         records.append(record)
-    return pd.DataFrame(records, columns=columns)
+    return pd.DataFrame(records,columns=columns)
+
  
  
 @st.cache_data(ttl=20, show_spinner=False)
 def _t2_load_data(_workbook, workbook_key, data_version=0):
-    # Use DATA explicitly: a missing DATA tab must not redirect score writes.
     with JOBS.sheet_lock:
-        ws = _workbook.worksheet('DATA')
-        grid = _t2_values(ws, 'A1:AD')
+        grid = safe_grid(_workbook.worksheet('DATA'))
     return _t2_data_from_grid(grid)
+
  
  
 def _t2_workbook_key(wb):
@@ -2621,9 +2516,10 @@ def _t2_refresh():
  
  
 def _t2_read_target(ws, row_number):
-    rows = _t2_values(ws, f'A{row_number}:AD{row_number}')
-    vals = list(rows[0]) if rows else []
-    return vals[:30] + [''] * max(0, 30 - len(vals))
+    end = col_name(min(ws.col_count, WIDTH))
+    rows = _t2_values(ws, f'A{row_number}:{end}{row_number}')
+    return pad(rows[0] if rows else [])
+
  
  
 def _t2_target_matches(values, home, away, expected_snapshot):
@@ -2643,23 +2539,11 @@ def _t2_confirm_pending(ws, entry):
  
  
 def _t2_reconcile(wb):
-    """Read only: never retries an uncertain write."""
-    confirmed, unresolved = 0, 0
     with JOBS.sheet_lock:
-        ws = wb.worksheet('DATA')
-        _t2_check_headers(_t2_values(ws, 'A1:M1'))
-        journal = _t2_score_journal()
-        prefix = (_t2_workbook_key(wb), str(ws.id))
-        for key, entry in list(journal.items()):
-            if key[:2] != prefix:
-                continue
-            if _t2_confirm_pending(ws, entry):
-                del journal[key]
-                confirmed += 1
-            else:
-                unresolved += 1
+        result = get_store().reconcile()
     _t2_load_data.clear()
-    return confirmed, unresolved
+    return result
+
  
  
 def _t2_error(exc, context):
@@ -2719,8 +2603,8 @@ def _t2_render_card(number, record):
     if usable:
         # Only Tab 2's returned HTML is relabelled. Shared renderers stay unchanged.
         html = _card_from_row(number, record)
-        html = html.replace('โอกาสคว้ากำไรแฮนดิแคป', 'โอกาสเหย้าได้ เมื่อไม่นับคืนทุน')
-        html = html.replace('โอกาสคว้ากำไรสูงต่ำ', 'โอกาสสูงได้ เมื่อไม่นับคืนทุน')
+        html = html.replace('Home positive | excluding push', 'โอกาสเหย้าได้ เมื่อไม่นับคืนทุน')
+        html = html.replace('Over positive | excluding push', 'โอกาสสูงได้ เมื่อไม่นับคืนทุน')
         st.markdown(html, unsafe_allow_html=True)
     else:
         home, away = esc(str(record.get('ทีมเหย้า', ''))), esc(str(record.get('ทีมเยือน', '')))
@@ -2841,26 +2725,178 @@ def _t3_quality(wb):
 # ----------------------------------------
 # หัวข้อหลัก (Tabs)
 # ----------------------------------------
+# -----------------------------------------------------------------------------
+# Live deployment controls. Google Sheets stays the primary data store.
+# -----------------------------------------------------------------------------
+def safe_problem(exc):
+    if isinstance(exc, (StoreConflict, WriteUncertain, ValueError)):
+        return str(exc)[:500]
+    return 'Operation failed (' + type(exc).__name__ + '). Check configuration/service status; no credentials are shown.'
+
+
+@st.cache_resource(show_spinner=False)
+def get_operation_journal(path):
+    return OperationJournal(path)
+
+
+def get_store():
+    if workbook is None:
+        raise StoreConflict('Google Sheets is not connected.')
+    root = Path(__file__).resolve().parent
+    journal_path = str(setting(st, 'JOURNAL_PATH', str(root / 'runtime' / 'operations.sqlite3')))
+    return LiveStore(workbook, get_operation_journal(journal_path),
+                     [_ML_HOME, _ML_AWAY] + ML_ODDS_COLUMNS + [_ML_SCORE], FORM5_HEADERS,
+                     _t2_fingerprint, writes_enabled=SHEET_WRITES_ENABLED)
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def connection_status(_store, workbook_id, version):
+    with JOBS.sheet_lock:
+        return _store.inspect()
+
+
+def require_live_write():
+    if workbook is None or not st.session_state.get('_live_ready_for_writes', False):
+        raise ScoreConflictError('Enable live writes in Connection after checking the workbook and single-writer setting.')
+    if not str(st.session_state.get('_live_reviewer', '')).strip():
+        raise ScoreConflictError('Enter the reviewer name in Connection before saving.')
+    if not SHEET_WRITES_ENABLED:
+        raise ScoreConflictError('ENABLE_SHEET_WRITES is false in the server configuration.')
+
+
+def render_connection_panel():
+    st.session_state['_live_ready_for_writes'] = False
+    with st.sidebar:
+        st.subheader('Connection / \u0e10\u0e32\u0e19\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25')
+        if workbook is None:
+            st.error('Google Sheets is not connected.')
+            st.caption(CONNECTION_ERROR or 'Check the existing credentials.')
+            st.info('Keep the original [gspread] secrets or credentials.json. Optional: set SPREADSHEET_ID to select the exact original file.')
+            if st.button('Reconnect', key='live_reconnect'):
+                init_gspread.clear()
+                st.rerun()
+            return
+        store = get_store()
+        try:
+            info = connection_status(store, str(workbook.id), JOBS.data_version)
+        except Exception as exc:
+            st.error(safe_problem(exc))
+            st.caption('No schema changes or data writes were made by this inspection.')
+            if st.button('Inspect again', key='inspect_after_error'):
+                st.cache_data.clear()
+                st.rerun()
+            return
+        notice = st.session_state.pop('_connection_notice', None)
+        if notice:
+            st.success(notice)
+        st.write(workbook.title)
+        st.caption('DATA | ' + str(info['rows']) + ' named rows | Live Google Sheets')
+        st.code(str(workbook.id), language=None)
+        st.link_button('Open the connected spreadsheet', f'https://docs.google.com/spreadsheets/d/{workbook.id}/edit')
+        st.text_input('Reviewer / \u0e1c\u0e39\u0e49\u0e15\u0e23\u0e27\u0e08\u0e22\u0e37\u0e19\u0e22\u0e31\u0e19', key='_live_reviewer')
+        single = st.checkbox('I stopped the old app. Only this app writes DATA; no manual sort/edit while writing.', key='_single_writer_ack')
+        st.caption('A:AG remains in place. New metadata: AH:AT. Legacy rows are not backfilled.')
+        if not info['ready']:
+            approved = st.checkbox('Allow ONE backup copy of DATA and add the metadata headers.', key='_init_approved')
+            if st.button('Initialize live storage / \u0e40\u0e15\u0e23\u0e35\u0e22\u0e21\u0e23\u0e30\u0e1a\u0e1a',
+                         disabled=not (approved and single and SHEET_WRITES_ENABLED), key='initialize_live'):
+                try:
+                    with JOBS.sheet_lock:
+                        backup = store.initialize()
+                    JOBS.bump_version()
+                    st.cache_data.clear()
+                    st.session_state['_connection_notice'] = 'Initialized. Backup: ' + backup
+                except Exception as exc:
+                    st.error(safe_problem(exc))
+                else:
+                    st.rerun()
+        else:
+            st.success('Storage initialized; original DATA is in use.')
+        if info['pending_writes']:
+            st.warning(str(info['pending_writes']) + ' unresolved write(s). Reconcile before enabling more writes.')
+        armed = st.checkbox('Enable live writes / \u0e40\u0e1b\u0e34\u0e14\u0e01\u0e32\u0e23\u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01', key='_enable_live',
+                             disabled=not (info['ready'] and single and SHEET_WRITES_ENABLED and not info['pending_writes']))
+        st.session_state['_live_ready_for_writes'] = bool(armed and single and info['ready'] and SHEET_WRITES_ENABLED
+                                                          and not info['pending_writes'])
+        if not SHEET_WRITES_ENABLED:
+            st.warning('Server is read-only: ENABLE_SHEET_WRITES=false.')
+        st.caption('Gemini model: ' + GEMINI_MODEL + (' | configured' if model is not None else ' | unavailable; manual input works'))
+        if st.button('Reconcile pending writes (read only)', key='live_reconcile'):
+            try:
+                with JOBS.sheet_lock:
+                    ok, unresolved = store.reconcile()
+                JOBS.bump_version()
+                st.cache_data.clear()
+                st.session_state['_connection_notice'] = f'Confirmed: {ok}; unresolved: {unresolved}. No write was resent.'
+            except Exception as exc:
+                st.error(safe_problem(exc))
+            else:
+                st.rerun()
+        if st.button('Refresh connection and data', key='live_refresh'):
+            st.cache_data.clear()
+            st.rerun()
+        with st.expander('Backup and recovery'):
+            st.caption('The initialization backup is a hidden DATA_BACKUP_* tab in the same workbook. Keep an independent backup too.')
+            if st.button('Prepare JSON snapshot (read only)', key='prepare_backup'):
+                try:
+                    ws = store.worksheet()
+                    with JOBS.sheet_lock:
+                        backup = {'spreadsheet_id':str(workbook.id), 'worksheet':'DATA',
+                                  'exported_utc':datetime.now(timezone.utc).isoformat(),
+                                  'values':ws.get_all_values(value_render_option='UNFORMATTED_VALUE'),
+                                  'formulas':ws.get_all_values(value_render_option='FORMULA')}
+                    st.session_state['_live_backup'] = json.dumps(backup,ensure_ascii=False,indent=2)
+                except Exception as exc:
+                    st.error(safe_problem(exc))
+            if st.session_state.get('_live_backup'):
+                st.download_button('Download JSON backup', st.session_state['_live_backup'], 'DATA_backup.json', 'application/json')
+            pending = store.journal.pending(store.scope)
+            if pending:
+                st.download_button('Download pending-operation details', json.dumps(pending,ensure_ascii=False,indent=2),
+                                    'pending_operations.json', 'application/json')
+            st.caption('Keep runtime/operations.sqlite3 on persistent storage. A shared password is not individual identity verification.')
+
 st.markdown(f"<h1 class='page-title'>⚽ ระบบวิเคราะห์ราคาบอล VIP & AI ({ML_PATCH_VERSION})</h1>", unsafe_allow_html=True)
 st.markdown("<p class='page-sub'>วิเคราะห์ HDP และสูง/ต่ำจากภาพราคา · บันทึกสกอร์ · ตรวจคุณภาพโมเดลและข้อมูลในที่เดียว</p>", unsafe_allow_html=True)
  
 if not SHEET_WRITES_ENABLED:
     st.warning("READ-ONLY REVIEW BUILD: Google Sheets writes are disabled. Core tests do not certify production readiness.")
 
+render_connection_panel()
 AI = get_ai()
  
 tab1, tab2, tab3 = st.tabs(["📸 อัปโหลดราคาบอล", "📡 สัญญาณการทำนาย", "📊 Dashboard"])
  
 with tab1:
-    st.info("Research-only build: verify extracted prices and form statistics. No stake sizing or accuracy guarantee.")
-    fmt_choice = st.selectbox("รูปแบบค่าน้ำ", list(FMT_CHOICES.keys()))
-    up_n = st.session_state.get("up_n", 0)
-    uploaded_files = st.file_uploader("เลือกไฟล์รูปภาพตารางราคาบอล", type=['png', 'jpg', 'jpeg'], accept_multiple_files=True, key=f"uploader_{up_n}")
-    if uploaded_files and workbook:
-        for f in uploaded_files: JOBS.pool.submit(process_job, JOBS.create(f.name, f.getvalue(), FMT_CHOICES[fmt_choice], st.session_state["form5_owner_id"]), workbook, model)
-        st.session_state["up_n"] = up_n + 1
-        st.rerun()
- 
+    st.info('Review extracted prices before writing. Model probabilities are estimates, not guaranteed outcomes or staking advice.')
+    if model is None:
+        st.warning('Image extraction is unavailable. Set GEMINI_API_KEY or use manual input; scores and dashboard do not require Gemini.')
+    if st.button('New manual fixture / \u0e01\u0e23\u0e2d\u0e01\u0e40\u0e2d\u0e07', key='manual_fixture'):
+        try:
+            job_id = JOBS.create('Manual fixture', None, None, st.session_state['form5_owner_id'])
+            st.session_state['form5_editing'] = job_id
+        except ValueError as exc:
+            st.warning(str(exc))
+        else:
+            st.rerun()
+    fmt_choice = st.selectbox('Source water-odds format (verify again before saving)', list(FMT_CHOICES.keys()))
+    up_n = st.session_state.get('up_n', 0)
+    uploaded_files = st.file_uploader('Upload price images (maximum 5 per batch, 10 MB each)',
+        type=['png','jpg','jpeg'], accept_multiple_files=True, key=f'uploader_{up_n}', disabled=model is None)
+    if uploaded_files and model is not None:
+        if len(uploaded_files) > 5:
+            st.error('Choose at most five images per batch.')
+        else:
+            for file in uploaded_files:
+                try:
+                    job_id = JOBS.create(file.name, file.getvalue(), FMT_CHOICES[fmt_choice], st.session_state['form5_owner_id'])
+                except ValueError as exc:
+                    st.warning(str(exc))
+                    break
+                JOBS.pool.submit(process_job, job_id, workbook, model)
+            st.session_state['up_n'] = up_n + 1
+            st.rerun()
+
     my_jobs = [j for j in JOBS.snapshot() if j.get("owner_id") == st.session_state["form5_owner_id"]]
     if my_jobs or st.session_state.get("form5_editing"):
         st.button("🧹 เคลียข้อมูลหน้านี้", key="clear_upload", on_click=clear_upload_page, help="ล้างรายการงาน การ์ดสัญญาณ ฟอร์ม 5 นัด และไฟล์ที่เลือกไว้ในหน้านี้")
