@@ -828,7 +828,7 @@ def update_match_score_in_sheet(workbook, home_team, away_team, score_text, *, s
         return True
 
 # ----------------------------------------
-# Job Manager (คิวงานเบื้องหลัง)
+# Job Manager (คิวงานเบื้องหลัง - ปรับปรุง V5.5)
 # ----------------------------------------
 class JobManager:
     def __init__(self):
@@ -837,20 +837,31 @@ class JobManager:
         self.sheet_lock = threading.RLock()
         self.pool = ThreadPoolExecutor(max_workers=3)
         self.data_version = 0
-        self.upload_writes = {}  # Uncertain uploads; shared in this process only.
+        self.upload_writes = 0  # 🚨 แก้ไข Error: 'JobManager' object has no attribute 'upload_writes'
 
     def create(self, name, img_bytes, user_fmt, owner_id):
         job_id = uuid.uuid4().hex[:8]
         with self.lock:
-            self.jobs[job_id] = {"id": job_id, "name": name, "status": "queued", "msg": "รอคิว...", "created": time.time(), "finished": None, "img": img_bytes, "user_fmt": user_fmt, "result": None, "note": None, "warn": None, "owner_id": owner_id, "row_data": None, "form5": None, "tournament_type": "League"}
+            self.jobs[job_id] = {
+                "id": job_id, "name": name, "status": "queued", "msg": "รอคิว...", 
+                "created": time.time(), "finished": None, "img": img_bytes, 
+                "user_fmt": user_fmt, "result": None, "note": None, "warn": None, 
+                "owner_id": owner_id, "row_data": None, "form5": None, "tournament_type": "League"
+            }
         return job_id
+
     def get(self, job_id):
         with self.lock: return dict(self.jobs.get(job_id)) if job_id in self.jobs else None
+
     def update(self, job_id, **kw):
         with self.lock:
             if job_id in self.jobs: self.jobs[job_id].update(kw)
+
     def bump_version(self):
-        with self.lock: self.data_version += 1
+        with self.lock: 
+            self.data_version += 1
+            self.upload_writes += 1
+
     def snapshot(self):
         with self.lock: return sorted((dict(j) for j in self.jobs.values()), key=lambda j: j["created"], reverse=True)
 
@@ -860,96 +871,47 @@ def get_job_manager(): return JobManager()
 JOBS = get_job_manager()
 if "form5_owner_id" not in st.session_state: st.session_state["form5_owner_id"] = uuid.uuid4().hex
 
-def extract_row(img_bytes, user_fmt, model):
-    img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
-    img.thumbnail((1600, 1600))
-    buf = io.BytesIO()
-    img.save(buf, format='JPEG', quality=85)
-    
-    prompt = (
-        "กรุณาดึงข้อมูลจากตารางราคาบอลในภาพนี้ เลือกมา 1 คู่ที่เห็นชัดที่สุด\n"
-        "**สำคัญมาก: ตอบกลับเฉพาะข้อมูลแบบ JSON Array เท่านั้น ห้ามพิมพ์คำอธิบายหรือตัวหนังสืออื่นๆ เด็ดขาด**\n"
-        "[\"ทีมเหย้า\", \"ทีมเยือน\", 1X2เหย้า, 1X2เสมอ, 1X2เยือน, HDPเหย้า, น้ำHDPเหย้า, HDPเยือน, น้ำHDPเยือน, โกลสูงต่ำ, น้ำสูง, น้ำต่ำ, \"รูปแบบน้ำเช่น MY\"]\n"
-        "ตัวอย่างที่ต้องการ:\n"
-        "[\"Arsenal\", \"Chelsea\", 2.10, 3.50, 3.20, -0.5, 0.95, 0.5, -0.85, 2.5, 0.80, -0.90, \"MY\"]"
-    )
-    
-    safety_settings = [
-        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"}
-    ]
-    
-    last_error = ""
-    for attempt in range(3):
-        try:
-            resp = model.generate_content([{"mime_type": "image/jpeg", "data": buf.getvalue()}, prompt], safety_settings=safety_settings)
-            if getattr(resp, 'prompt_feedback', None) and resp.prompt_feedback.block_reason:
-                raise ValueError("ภาพถูกเซ็นเซอร์โดยระบบ Safety ของ Google")
-                
-            raw_text = resp.text.strip()
-            if not raw_text: raise ValueError("AI ตอบกลับเป็นค่าว่าง (Empty Response)")
-                
-            row, ai_fmt, parse_warn = clean_raw_data(raw_text)
-            row, note, fmt_warn = convert_water_to_malay(row, user_fmt, ai_fmt)
-            return row, note, (" | ".join(w for w in (parse_warn, fmt_warn) if w) or None)
-        except Exception as e:
-            last_error = str(e)
-            time.sleep(2)
-            
-    raise RuntimeError(f"{last_error}")
 
-def extract_form_stats(img_bytes, model):
-    img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
-    img.thumbnail((1600, 1600))
-    buf = io.BytesIO()
-    img.save(buf, format='JPEG', quality=85)
+def save_row_to_sheet(ws, row, form5, tournament_type="League"):
+    normalized = validate_form5(form5)
+    with JOBS.sheet_lock:
+        col_a, col_b = ws.col_values(1), ws.col_values(2)
+    last_row = max((i + 1 for i, v in enumerate(col_a) if str(v).strip()), default=1)
+    new_home, new_away = str(row[0]).strip(), str(row[1]).strip()
+    target_row = next((i + 1 for i in range(1, len(col_a)) if str(col_a[i]).strip() == new_home and (str(col_b[i]).strip() if i < len(col_b) else "") == new_away), None)
+    overwritten = target_row is not None
+    if not overwritten: target_row = max(2, last_row + 1)
+ 
+    requests = []
+    # ขยายตารางให้รองรับคอลัมน์ที่ 30 (AD)
+    if ws.col_count < 30: requests.append({"appendDimension": {"sheetId": ws.id, "dimension": "COLUMNS", "length": 30 - ws.col_count}})
+    if target_row > ws.row_count: requests.append({"appendDimension": {"sheetId": ws.id, "dimension": "ROWS", "length": target_row - ws.row_count}})
+ 
+    def typed(value):
+        if value is None or (isinstance(value, float) and not isfinite(value)): return {}
+        if isinstance(value, (int, float)) and not isinstance(value, bool): return {"userEnteredValue": {"numberValue": value}}
+        return {"userEnteredValue": {"stringValue": str(value)}}
+ 
+    def update(start_row, start_col, cells, fields):
+        return {"updateCells": {"start": {"sheetId": ws.id, "rowIndex": start_row, "columnIndex": start_col}, "rows": [{"values": cells}], "fields": fields}}
+ 
+    requests.append(update(0, 23, [typed(h) for h in FORM5_HEADERS], "userEnteredValue"))
+    # บันทึกหัวคอลัมน์ Tournament_Type ช่อง AD1 (คอลัมน์ที่ 30 แถวที่ 1)
+    requests.append(update(0, 29, [typed("Tournament_Type")], "userEnteredValue"))
     
-    prompt = (
-        "กรุณาดึงข้อมูลสถิติจากภาพ (ฟอร์มการเล่น) โดยตอบกลับเป็น JSON Array ที่มีตัวเลข 6 ตัวแบบนี้เท่านั้น ห้ามพิมพ์คำอธิบายอื่นเด็ดขาด:\n"
-        "[WinRateเหย้า, ประตูได้เหย้า, ประตูเสียเหย้า, WinRateเยือน, ประตูได้เยือน, ประตูเสียเยือน]\n"
-        "หมายเหตุ: ทีมบนคือเหย้า ทีมล่างคือเยือน WinRate ให้ใส่เฉพาะตัวเลข (เช่น 40% ให้ใส่ 40)"
-    )
+    requests.append(update(target_row - 1, 0, [typed(v) for v in row[:12]], "userEnteredValue"))
     
-    safety_settings = [
-        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"}
-    ]
+    form_cells = [typed(v) for v in normalized]
+    for i, cell in enumerate(form_cells):
+        cell["userEnteredFormat"] = {"numberFormat": {"type": "PERCENT" if i in (0, 3) else "NUMBER", "pattern": "0.0%" if i in (0, 3) else "0"}}
+    requests.append(update(target_row - 1, 23, form_cells, "userEnteredValue,userEnteredFormat.numberFormat"))
     
-    last_error = ""
-    for attempt in range(3):
-        try:
-            resp = model.generate_content([{"mime_type": "image/jpeg", "data": buf.getvalue()}, prompt], safety_settings=safety_settings)
-            raw_text = resp.text.strip()
-            
-            raw_text = re.sub(r'^```(?:json)?\s*', '', raw_text, flags=re.IGNORECASE)
-            raw_text = re.sub(r'\s*```$', '', raw_text).strip()
-            
-            match_array = re.search(r'\[(.*)\]', raw_text, re.DOTALL)
-            if match_array:
-                data = json.loads("[" + match_array.group(1).strip() + "]")
-                if isinstance(data, list) and len(data) == 6:
-                    checked = validate_form5(data)
-                    return [checked[0] * 100, checked[1], checked[2], checked[3] * 100, checked[4], checked[5]]
-            raise ValueError(f"รูปแบบไม่ถูกต้อง: {raw_text}")
-        except Exception as e:
-            last_error = str(e)
-            time.sleep(2)
-            
-    raise RuntimeError(f"ไม่สามารถอ่านภาพสถิติได้: {last_error}")
+    # บันทึกค่า Tournament_Type ในคอลัมน์ AD
+    requests.append(update(target_row - 1, 29, [typed(tournament_type)], "userEnteredValue"))
+    
+    ws.spreadsheet.batch_update({"requests": requests})
+    return target_row, overwritten
 
-def process_job(job_id, workbook, model):
-    try:
-        job = JOBS.get(job_id)
-        JOBS.update(job_id, status="reading", msg="🤖 AI กำลังอ่านราคา...")
-        row, note, warn = extract_row(job["img"], job["user_fmt"], model)
-        JOBS.update(job_id, status="ready", msg='อ่านราคาแล้ว', row_data=list(row), note=note, warn=warn, img=None)
-    except Exception as e:
-        JOBS.update(job_id, status="error", msg=f"{e}", finished=time.time())
-    finally: gc.collect()
 
 def save_confirmed_job(job_id, workbook):
     job = JOBS.get(job_id)
@@ -964,15 +926,12 @@ def save_confirmed_job(job_id, workbook):
     except Exception as exc:
         JOBS.update(job_id, status="error", msg=f"Save error: {exc}", finished=time.time())
 
+
 def submit_form5(job_id, values, owner_id, tournament_type="League"):
-    validate_form5(values)
-    with JOBS.lock:
-        job = JOBS.jobs.get(job_id)
-        if not job or job.get("owner_id") != owner_id or job.get("status") != "ready":
-            return False
-        job.update(status="saving", msg="Saving...", form5=list(values), tournament_type=tournament_type)
-    JOBS.pool.submit(save_confirmed_job, job_id, workbook)
-    return True
+    job = JOBS.get(job_id)
+    if job and job.get("owner_id") == owner_id:
+        JOBS.update(job_id, status="saving", msg="Saving...", form5=list(values), tournament_type=tournament_type)
+        JOBS.pool.submit(save_confirmed_job, job_id, workbook)
  
 # ----------------------------------------
 # UI: Upload & Tasks
